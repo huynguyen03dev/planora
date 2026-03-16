@@ -34,7 +34,7 @@ Planora is a web-based project management application inspired by Trello. Users 
 | Charts           | Recharts                                      |
 | File uploads     | Cloudinary                                    |
 | Email            | Resend                                        |
-| Deployment       | Docker + Nginx (home server)                  |
+| Deployment       | Docker + Cloudflare Tunnel (home server)       |
 | CI/CD            | GitHub Actions                                |
 
 ### Why this stack
