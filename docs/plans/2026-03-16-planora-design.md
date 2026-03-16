@@ -430,7 +430,7 @@ Server → Client:
 Home Server
 ├── Docker Compose
 │   ├── planora (Next.js + Socket.io custom server)
-│   └── nginx (reverse proxy + SSL via Let's Encrypt)
+│   └── cloudflared (Cloudflare Tunnel)
 ├── External services
 │   ├── Neon (PostgreSQL)
 │   ├── Cloudinary (images — stretch)
@@ -439,10 +439,12 @@ Home Server
     └── Push to main → SSH deploy → docker compose pull → restart
 ```
 
-### Nginx config
-- Proxy `/` → Next.js container (port 3000)
-- Proxy `/socket.io` → same container (WebSocket upgrade)
-- SSL termination with certbot
+### Cloudflare Tunnel
+- `cloudflared` container runs alongside the app in Docker Compose
+- Tunnel points to Next.js container (port 3000)
+- WebSocket (Socket.io) works through the tunnel natively
+- SSL handled by Cloudflare — no certbot needed
+- No ports exposed on home server
 
 ---
 
@@ -478,7 +480,7 @@ Home Server
 - [ ] Dark mode
 - [ ] Dashboard (1-2 charts if time allows)
 - [ ] UI polish, loading states, error handling
-- [ ] Docker + Nginx deployment
+- [ ] Docker + Cloudflare Tunnel deployment
 - [ ] GitHub Actions CI/CD pipeline
 - [ ] Seed data for demo (2 users, workspace, populated board)
 - [ ] Test demo scenario: invite → accept → realtime sync → permissions
