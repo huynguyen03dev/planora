@@ -25,7 +25,7 @@ Planora is a web-based project management application inspired by Trello. Users 
 | ---------------- | --------------------------------------------- |
 | Framework        | Next.js 15 (App Router, Server Actions)       |
 | Runtime          | Custom Node.js server (for Socket.io support) |
-| Database         | PostgreSQL (Neon — free cloud)                |
+| Database         | PostgreSQL (Docker on home server)             |
 | ORM              | Prisma                                        |
 | Auth             | Better Auth + Organization plugin             |
 | Realtime         | Socket.io                                     |
@@ -41,7 +41,7 @@ Planora is a web-based project management application inspired by Trello. Users 
 - **Next.js fullstack** — no separate backend needed, simpler for solo dev
 - **Custom server** — required for Socket.io since Vercel doesn't support persistent WebSocket
 - **Better Auth** — self-hosted, free, includes organization/membership/roles out of the box
-- **Neon** — free PostgreSQL with connection pooling, no need to run DB on home server
+- **PostgreSQL in Docker** — runs on your home server alongside the app, zero latency, no free tier limits
 - **Shadcn/UI** — copy-paste components, full control over code, professional look
 
 ---
@@ -71,7 +71,7 @@ Planora is a web-based project management application inspired by Trello. Users 
                     ▼
           ┌──────────────────┐
           │  PostgreSQL      │
-          │  (Neon Cloud)    │
+          │  (Docker)        │
           └──────────────────┘
 ```
 
@@ -89,173 +89,289 @@ Client action (drag card)
 
 ## 4. Database Schema
 
-### Core entities
+The schema is split into two groups:
+- **Better Auth–managed** (7 tables) — created and owned by Better Auth. Extended via `additionalFields` config, not by editing the table directly.
+- **App-managed** (11 tables) — our Kanban domain tables, fully owned by Prisma migrations.
+
+### 4.1 Better Auth–managed tables
+
+These tables are created by Better Auth's core + organization plugin. The Prisma schema must match BA's expected fields exactly. Custom columns (marked with `// app field`) are added via `additionalFields` in the BA config.
 
 ```
-User
-├── id (uuid)
-├── name
-├── email (unique)
-├── password (hashed)
-├── image
-├── createdAt
-└── updatedAt
+user (BA core)
+├── id            String @id
+├── name          String
+├── email         String @unique
+├── emailVerified Boolean @default(false)
+├── image         String?
+├── createdAt     DateTime
+└── updatedAt     DateTime
 
-Workspace (maps to Better Auth Organization)
-├── id (uuid)
-├── name
-├── slug (unique)
-├── createdAt
-└── updatedAt
+session (BA core + org plugin)
+├── id                   String @id
+├── expiresAt             DateTime
+├── token                String @unique
+├── createdAt            DateTime
+├── updatedAt            DateTime
+├── ipAddress            String?
+├── userAgent            String?
+├── userId               → user (cascade delete)
+└── activeOrganizationId String?        // injected by org plugin
 
-WorkspaceMember (maps to Better Auth Member)
-├── id
-├── workspaceId → Workspace
-├── userId → User
-├── role: ADMIN | EDITOR | VIEWER
-├── createdAt
-└── updatedAt
+account (BA core)
+├── id                    String @id
+├── accountId             String         // OAuth ID or userId for credentials
+├── providerId            String         // "google", "github", "credential"
+├── userId                → user (cascade delete)
+├── accessToken           String?
+├── refreshToken          String?
+├── idToken               String?
+├── accessTokenExpiresAt  DateTime?
+├── refreshTokenExpiresAt DateTime?
+├── scope                 String?
+├── password              String?        // bcrypt hash (credential provider)
+├── createdAt             DateTime
+└── updatedAt             DateTime
 
-Invitation
-├── id
-├── workspaceId → Workspace
-├── email
-├── role: ADMIN | EDITOR | VIEWER
-├── status: PENDING | ACCEPTED | DECLINED
-├── invitedById → User
-├── expiresAt
-├── createdAt
-└── updatedAt
+verification (BA core)
+├── id         String @id
+├── identifier String          // email address
+├── value      String          // token/code
+├── expiresAt  DateTime
+├── createdAt  DateTime
+└── updatedAt  DateTime
 
+organization (BA org plugin — renamed to "workspace" via modelName)
+├── id        String @id
+├── name      String
+├── slug      String @unique
+├── logo      String?
+├── createdAt DateTime
+└── metadata  String?          // JSON string, parsed at app layer
+
+member (BA org plugin — renamed to "workspaceMember" via modelName)
+├── id             String @id
+├── organizationId → organization (cascade delete)
+├── userId         → user (cascade delete)
+├── role           String @default("member")   // plain string, NOT enum
+└── createdAt      DateTime
+
+invitation (BA org plugin)
+├── id             String @id
+├── organizationId → organization (cascade delete)
+├── email          String
+├── role           String?                     // plain string
+├── status         String @default("pending")  // "pending" | "accepted" | "rejected" | "canceled"
+├── expiresAt      DateTime
+├── inviterId      → user
+└── createdAt      DateTime
+```
+
+**Better Auth config for table renaming + custom roles:**
+```ts
+organization({
+  schema: {
+    organization: { modelName: "workspace" },
+    member: { modelName: "workspaceMember" },
+  },
+  roles: {
+    admin:  createRole({ /* full access */ }),
+    editor: createRole({ /* create/edit cards, lists, comments */ }),
+    viewer: createRole({ /* read-only, can comment */ }),
+  },
+  creatorRole: "admin",
+})
+```
+
+### 4.2 App-managed tables
+
+```
 Board
 ├── id (uuid)
-├── workspaceId → Workspace
+├── workspaceId → workspace (cascade delete)
 ├── title
 ├── backgroundColor
-├── createdById → User
+├── position (double precision — for ordering within workspace)
+├── createdById → user
 ├── archivedAt (nullable — soft delete)
 ├── createdAt
 └── updatedAt
 
 BoardStar
 ├── id
-├── boardId → Board
-├── userId → User
+├── boardId → Board (cascade delete)
+├── userId → user (cascade delete)
 ├── createdAt
-└── unique(boardId, userId)
+└── @@unique(boardId, userId)
 
 List
 ├── id (uuid)
-├── boardId → Board
+├── boardId → Board (cascade delete)
 ├── title
-├── position (float — for ordering)
+├── position (double precision — for ordering)
 ├── createdAt
 └── updatedAt
 
 Card
 ├── id (uuid)
-├── listId → List
+├── listId → List (cascade delete)
 ├── title
 ├── description (text, markdown)
-├── position (float — for ordering)
-├── priority: URGENT | HIGH | MEDIUM | LOW | null
+├── position (double precision — for ordering)
+├── priority: URGENT | HIGH | MEDIUM | LOW | null (enum)
 ├── dueDate (nullable)
 ├── coverImage (nullable)
 ├── archivedAt (nullable — soft delete)
-├── createdById → User
+├── createdById → user
 ├── createdAt
 └── updatedAt
 
-CardMember (many-to-many: Card ↔ User)
-├── cardId → Card
-├── userId → User
-└── assignedAt
+CardMember (many-to-many: Card ↔ user)
+├── cardId → Card (cascade delete)
+├── userId → user (cascade delete)
+├── assignedAt
+└── @@unique(cardId, userId)
 
 Label
 ├── id
-├── boardId → Board
+├── boardId → Board (cascade delete)
 ├── name
 ├── color
 └── createdAt
 
 CardLabel (many-to-many: Card ↔ Label)
-├── cardId → Card
-└── labelId → Label
+├── cardId → Card (cascade delete)
+├── labelId → Label (cascade delete)
+└── @@unique(cardId, labelId)
 
 Checklist
 ├── id
-├── cardId → Card
+├── cardId → Card (cascade delete)
 ├── title
-├── position (float)
+├── position (double precision)
 └── createdAt
 
 ChecklistItem
 ├── id
-├── checklistId → Checklist
+├── checklistId → Checklist (cascade delete)
 ├── title
-├── isCompleted (boolean)
-├── position (float)
+├── isCompleted (boolean, default false)
+├── position (double precision)
 └── createdAt
 
 Comment
 ├── id
-├── cardId → Card
-├── userId → User
+├── cardId → Card (cascade delete)
+├── userId → user
 ├── content (text)
 ├── createdAt
 └── updatedAt
 
 Attachment
 ├── id
-├── cardId → Card
-├── userId → User
+├── cardId → Card (cascade delete)
+├── userId → user
 ├── fileName
 ├── fileUrl (Cloudinary URL)
 ├── fileType
-├── fileSize
+├── fileSize (Int, bytes)
 └── createdAt
 
 Activity
 ├── id
-├── workspaceId → Workspace
+├── workspaceId → workspace
 ├── boardId → Board (nullable)
 ├── cardId → Card (nullable)
-├── userId → User
+├── userId → user
 ├── action (enum: CREATED, UPDATED, MOVED, ARCHIVED, COMMENTED, etc.)
 ├── entityType (enum: BOARD, LIST, CARD, COMMENT, etc.)
-├── metadata (JSON — stores old/new values, details)
+├── metadata (Json — Prisma Json type, stores old/new values)
 └── createdAt
 
 Notification
 ├── id
-├── userId → User (recipient)
+├── userId → user (recipient, cascade delete)
 ├── type (enum: ASSIGNED, MENTIONED, DUE_DATE, COMMENT, INVITE)
 ├── title
 ├── message
 ├── linkUrl
-├── isRead (boolean)
+├── isRead (boolean, default false)
 ├── createdAt
 └── readAt (nullable)
 ```
 
-### Ordering strategy
-Lists and cards use **float position** values:
-- Initial items: 1.0, 2.0, 3.0...
-- Insert between 1.0 and 2.0 → 1.5
-- If precision gets too small after many reorders → renormalize all positions (1.0, 2.0, 3.0...)
+### 4.3 Cascade delete rules
 
-This avoids rewriting every item's position on each move.
+| When deleted...     | Cascades to                                                  |
+| ------------------- | ------------------------------------------------------------ |
+| user                | session, account, workspaceMember, BoardStar, CardMember     |
+| workspace           | workspaceMember, invitation, Board, Activity, Notification   |
+| Board               | List, BoardStar, Label, Activity (where boardId = id)        |
+| List                | Card                                                         |
+| Card                | CardMember, CardLabel, Checklist, Comment, Attachment         |
+| Checklist           | ChecklistItem                                                |
+| Label               | CardLabel                                                    |
 
-### Key indexes
-- `Card(listId, position)` — fast card ordering queries
-- `List(boardId, position)` — fast list ordering queries
+### 4.4 Ordering strategy (float with gap — Planka pattern)
+
+Lists, cards, checklists, and checklist items use **double precision float** position values with a large gap:
+
+```
+Constants:
+  GAP         = 16384    (2^14 — initial spacing between items)
+  MIN_GAP     = 0.125    (minimum allowed gap before cascade shift)
+  MAX_POSITION = 2^50    (upper bound before full renormalization)
+
+Initial items:  16384, 32768, 49152, 65536, ...
+Insert between 16384 and 32768 → (16384 + 32768) / 2 = 24576
+
+Edge cases:
+  - Prepend (before first): firstItem.position - GAP
+  - Append (after last): lastItem.position + GAP
+  - Gap < MIN_GAP: cascade-shift neighbors outward
+  - Position > MAX_POSITION: full renormalize → GAP * (index + 1)
+```
+
+With GAP=16384 and MIN_GAP=0.125, you get **131,072 inserts** between the same two items before a cascade shift is needed. More than enough for any Kanban board.
+
+**Position update flow:**
+1. Client drag-ends → sends `{ cardId, newListId?, prevCardPosition?, nextCardPosition? }`
+2. Server computes midpoint: `(prev + next) / 2`
+3. If gap < MIN_GAP → shift neighbors, broadcast shifted positions via Socket.io
+4. If position > MAX_POSITION → full renormalize all siblings
+5. Save to DB → emit Socket.io event → return updated card
+
+### 4.5 Key indexes
+
+- `Card(listId, position)` — card ordering queries
+- `List(boardId, position)` — list ordering queries
+- `Board(workspaceId, position)` — board ordering in sidebar
 - `Activity(boardId, createdAt)` — activity feed
+- `Activity(workspaceId, createdAt)` — workspace activity
 - `Notification(userId, isRead, createdAt)` — notification dropdown
-- `Card(listId, archivedAt)` — filter out archived cards
+- `Card(listId, archivedAt)` — filter archived cards
+- `member(organizationId)` — BA org plugin index
+- `member(userId)` — BA org plugin index
+- `invitation(organizationId)` — BA org plugin index
+- `invitation(email)` — BA org plugin index
 
 ---
 
 ## 5. Features — Core (Must Ship)
+
+### 5.0 Hard MVP boundary
+
+The **hard MVP** is the minimum scope that must be completed for the graduation demo and report:
+- Authentication: register, login, logout, protected routes
+- Workspace flow: create workspace, invite member, accept invitation, role-based access
+- Board/list/card CRUD with drag & drop ordering
+- Comments on cards
+- Realtime sync for card moves and comments
+- Activity log for key board/card actions
+- Deployment on home server with seeded demo data
+
+**Anything outside this list is not required for project success.**
+If the hard MVP is not stable by the end of **Week 3**, all remaining time must go to bug fixing, deployment, seed data, and demo rehearsal — **no stretch features are allowed**.
 
 ### 5.1 Authentication (Better Auth)
 - Register with email + password
@@ -265,15 +381,19 @@ This avoids rewriting every item's position on each move.
 - Protected routes via Next.js middleware
 
 ### 5.2 Workspace Management
-- Create workspace (user becomes Admin)
+- Create workspace (creator gets `admin` role via BA `creatorRole` config)
 - Edit workspace name
-- Delete workspace (Admin only)
-- Invite members via email link
+- Delete workspace (admin only)
+- Invite members via email link (BA invitation flow)
 - Accept / decline invitation
-- Remove members (Admin only)
+- Remove members (admin only)
+- Roles stored as plain strings in BA's `member.role` column:
+  - `admin` — full workspace control
+  - `editor` — create/edit content
+  - `viewer` — read-only + comment
 - Role-based permissions:
 
-| Action                          | Admin | Editor | Viewer |
+| Action                          | admin | editor | viewer |
 | ------------------------------- | ----- | ------ | ------ |
 | Manage workspace settings       | ✅     | ❌      | ❌      |
 | Manage members (invite/remove)  | ✅     | ❌      | ❌      |
@@ -327,6 +447,7 @@ This avoids rewriting every item's position on each move.
 
 ## 6. Features — Stretch (Add If Time Allows)
 
+These features are only allowed after the hard MVP is complete, deployed, and stable in a full end-to-end demo run.
 Priority order (highest impact for least effort first):
 
 ### 6.1 Dark Mode
@@ -430,9 +551,9 @@ Server → Client:
 Home Server
 ├── Docker Compose
 │   ├── planora (Next.js + Socket.io custom server)
+│   ├── postgres (PostgreSQL)
 │   └── cloudflared (Cloudflare Tunnel)
 ├── External services
-│   ├── Neon (PostgreSQL)
 │   ├── Cloudinary (images — stretch)
 │   └── Resend (email — stretch)
 └── GitHub Actions
@@ -446,13 +567,18 @@ Home Server
 - SSL handled by Cloudflare — no certbot needed
 - No ports exposed on home server
 
+### Database deployment
+- PostgreSQL runs as an existing Docker container on the home server
+- The Planora app connects to it over the Docker network or the server's internal network
+- Regular backups should be scheduled because the database is self-hosted
+
 ---
 
 ## 10. Timeline
 
 ### Week 1: Foundation
 - [ ] Initialize Next.js 15 project + Tailwind + Shadcn/UI
-- [ ] Set up Prisma + Neon PostgreSQL + schema
+- [ ] Set up Prisma + PostgreSQL (Docker on home server) + schema
 - [ ] Set up custom Node.js server + Socket.io
 - [ ] Integrate Better Auth (register, login, logout, sessions)
 - [ ] Set up Better Auth Organization plugin (workspace, members, roles)
@@ -477,14 +603,14 @@ Home Server
 - [ ] Permission enforcement (Editor can't delete boards, Viewer can only comment)
 
 ### Week 4: Polish + Deploy + Documentation
-- [ ] Dark mode
-- [ ] Dashboard (1-2 charts if time allows)
 - [ ] UI polish, loading states, error handling
 - [ ] Docker + Cloudflare Tunnel deployment
 - [ ] GitHub Actions CI/CD pipeline
 - [ ] Seed data for demo (2 users, workspace, populated board)
 - [ ] Test demo scenario: invite → accept → realtime sync → permissions
 - [ ] Write graduation report deployment chapter
+- [ ] Only if MVP is fully stable: add Dark mode
+- [ ] Only if MVP is fully stable: add Dashboard (1-2 charts max)
 
 ---
 
@@ -514,5 +640,5 @@ Prepare this exact flow for the committee presentation:
 | Drag & drop ordering bugs                     | Use float positions + renormalization. Test edge cases early           |
 | Socket.io + custom server deployment issues   | Set up Docker + deploy in week 1, not week 4                          |
 | Scope creep in week 3                         | If core flow isn't stable by end of week 3, STOP adding features      |
-| Neon free tier limits                         | Monitor usage. 0.5 GB storage is plenty for a demo project            |
+| Self-hosted PostgreSQL failure or data loss   | Set up automated backups and test restore before the final demo        |
 | Demo failure                                  | Pre-seed data, rehearse demo 3+ times, have backup screenshots/video  |
