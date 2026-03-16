@@ -191,7 +191,6 @@ Board
 ├── workspaceId → workspace (cascade delete)
 ├── title
 ├── backgroundColor
-├── position (double precision — for ordering within workspace)
 ├── createdById → user
 ├── archivedAt (nullable — soft delete)
 ├── createdAt
@@ -345,7 +344,6 @@ With GAP=16384 and MIN_GAP=0.125, you get **131,072 inserts** between the same t
 
 - `Card(listId, position)` — card ordering queries
 - `List(boardId, position)` — list ordering queries
-- `Board(workspaceId, position)` — board ordering in sidebar
 - `Activity(boardId, createdAt)` — activity feed
 - `Activity(workspaceId, createdAt)` — workspace activity
 - `Notification(userId, isRead, createdAt)` — notification dropdown
@@ -576,16 +574,21 @@ Home Server
 
 ## 10. Timeline
 
-### Week 1: Foundation
+The timeline is organized around **weekly milestones**. Each week should end with a working build that can be shown and tested, not just partially finished features.
+
+### Week 1: Foundation + deployment smoke test
 - [ ] Initialize Next.js 15 project + Tailwind + Shadcn/UI
 - [ ] Set up Prisma + PostgreSQL (Docker on home server) + schema
 - [ ] Set up custom Node.js server + Socket.io
 - [ ] Integrate Better Auth (register, login, logout, sessions)
 - [ ] Set up Better Auth Organization plugin (workspace, members, roles)
-- [ ] Build layout: sidebar, header, workspace selector
+- [ ] Build base layout: sidebar, header, workspace selector
 - [ ] Protected route middleware
+- [ ] Run first home-server deployment smoke test
 
-### Week 2: Board & Card CRUD + Drag & Drop
+**Week 1 exit criteria:** a user can register/login, access protected routes, create/select a workspace, and the app can run successfully on the home server.
+
+### Week 2: Core board workflow
 - [ ] Board CRUD + archive + background color
 - [ ] Board list page (grid layout)
 - [ ] List CRUD + position ordering
@@ -593,24 +596,33 @@ Home Server
 - [ ] Drag & drop for lists and cards (@dnd-kit)
 - [ ] Workspace member invitation flow (invite, accept, decline)
 
-### Week 3: Card Detail + Realtime
-- [ ] Card detail modal (title, description, labels, due date, priority)
-- [ ] Assign members to cards
-- [ ] Checklist (sub-tasks + progress bar)
+**Week 2 exit criteria:** one workspace can contain boards, lists, and cards, and the board is fully usable for normal task management without realtime features yet.
+
+### Week 3: Demo-critical collaboration flow
 - [ ] Comments (CRUD)
 - [ ] Activity log (append-only, display timeline)
 - [ ] Socket.io board sync (card move, card create, comment)
 - [ ] Permission enforcement (Editor can't delete boards, Viewer can only comment)
-
-### Week 4: Polish + Deploy + Documentation
-- [ ] UI polish, loading states, error handling
-- [ ] Docker + Cloudflare Tunnel deployment
-- [ ] GitHub Actions CI/CD pipeline
+- [ ] Card detail modal (title, description)
+- [ ] Assign members to cards
 - [ ] Seed data for demo (2 users, workspace, populated board)
-- [ ] Test demo scenario: invite → accept → realtime sync → permissions
+- [ ] Test the full demo scenario end-to-end
+- [ ] Only if time remains: labels, due date, priority, checklist
+
+**Week 3 exit criteria:** the full committee demo flow works end-to-end with two accounts, realtime sync, comments, activity log, and role restrictions.
+
+### Week 4: Stabilization, documentation, and final deploy
+- [ ] UI polish, loading states, error handling
+- [ ] Finalize Docker + Cloudflare Tunnel deployment
+- [ ] Set up GitHub Actions CI/CD pipeline
+- [ ] Rehearse demo scenario multiple times
+- [ ] Prepare backup screenshots / screen recording for demo safety
 - [ ] Write graduation report deployment chapter
+- [ ] Fix bugs only — no new non-essential features
 - [ ] Only if MVP is fully stable: add Dark mode
 - [ ] Only if MVP is fully stable: add Dashboard (1-2 charts max)
+
+**Week 4 exit criteria:** the deployed app is stable, the demo has been rehearsed, backups are ready, and the report/deployment documentation is complete.
 
 ---
 
