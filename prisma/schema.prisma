@@ -1,8 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../app/generated/prisma"
@@ -10,4 +8,375 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+// ─── Enums ─────────────────────────────────────────────────────────
+
+enum Priority {
+  URGENT
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum ActivityAction {
+  CREATED
+  UPDATED
+  MOVED
+  ARCHIVED
+  RESTORED
+  DELETED
+  COMMENTED
+}
+
+enum ActivityEntityType {
+  BOARD
+  LIST
+  CARD
+  COMMENT
+  MEMBER
+  LABEL
+  CHECKLIST
+  ATTACHMENT
+}
+
+enum NotificationType {
+  ASSIGNED
+  MENTIONED
+  DUE_DATE
+  COMMENT
+  INVITE
+}
+
+// ─── Better Auth–managed tables ────────────────────────────────────
+
+model User {
+  id            String   @id
+  name          String
+  email         String
+  emailVerified Boolean  @default(false)
+  image         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // BA relations
+  sessions        Session[]
+  accounts        Account[]
+  workspacemembers WorkspaceMember[]
+  invitations     Invitation[]
+
+  // App relations
+  boards        Board[]        @relation("BoardCreator")
+  boardStars    BoardStar[]    @relation("UserBoardStars")
+  cards         Card[]         @relation("CardCreator")
+  cardMembers   CardMember[]   @relation("CardMembers")
+  comments      Comment[]      @relation("UserComments")
+  attachments   Attachment[]   @relation("UserAttachments")
+  activities    Activity[]     @relation("UserActivities")
+  notifications Notification[] @relation("UserNotifications")
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id                   String   @id
+  expiresAt            DateTime
+  token                String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  ipAddress            String?
+  userAgent            String?
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeOrganizationId String?
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model Workspace {
+  id        String   @id
+  name      String
+  slug      String
+  logo      String?
+  createdAt DateTime
+  metadata  String?
+
+  // BA relations
+  workspacemembers WorkspaceMember[]
+  invitations     Invitation[]
+
+  // App relations
+  boards     Board[]
+  activities Activity[]
+
+  @@unique([slug])
+  @@map("workspace")
+}
+
+model WorkspaceMember {
+  id             String    @id
+  organizationId String
+  workspace      Workspace @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           String    @default("viewer")
+  createdAt      DateTime
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+  @@map("workspaceMember")
+}
+
+model Invitation {
+  id             String    @id
+  organizationId String
+  workspace      Workspace @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String
+  role           String
+  status         String    @default("pending")
+  expiresAt      DateTime
+  createdAt      DateTime  @default(now())
+  inviterId      String
+  user           User      @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([email])
+  @@map("invitation")
+}
+
+// ─── App-managed tables ────────────────────────────────────────────
+
+model Board {
+  id              String    @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  title           String
+  backgroundColor String?
+  createdById     String
+  createdBy       User      @relation("BoardCreator", fields: [createdById], references: [id])
+  archivedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  lists      List[]
+  stars      BoardStar[]
+  labels     Label[]
+  activities Activity[] @relation("BoardActivity")
+
+  @@index([workspaceId])
+  @@map("board")
+}
+
+model BoardStar {
+  id        String   @id @default(uuid())
+  boardId   String
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation("UserBoardStars", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([boardId, userId])
+  @@map("boardStar")
+}
+
+model List {
+  id        String   @id @default(uuid())
+  boardId   String
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  title     String
+  position  Float
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cards Card[]
+
+  @@index([boardId, position])
+  @@map("list")
+}
+
+model Card {
+  id          String    @id @default(uuid())
+  listId      String
+  list        List      @relation(fields: [listId], references: [id], onDelete: Cascade)
+  title       String
+  description String?   @db.Text
+  position    Float
+  priority    Priority?
+  dueDate     DateTime?
+  coverImage  String?
+  archivedAt  DateTime?
+  createdById String
+  createdBy   User      @relation("CardCreator", fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  members     CardMember[]
+  labels      CardLabel[]
+  checklists  Checklist[]
+  comments    Comment[]
+  attachments Attachment[]
+  activities  Activity[]   @relation("CardActivity")
+
+  @@index([listId, position])
+  @@index([listId, archivedAt])
+  @@map("card")
+}
+
+model CardMember {
+  cardId     String
+  card       Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation("CardMembers", fields: [userId], references: [id], onDelete: Cascade)
+  assignedAt DateTime @default(now())
+
+  @@id([cardId, userId])
+  @@map("cardMember")
+}
+
+model Label {
+  id        String   @id @default(uuid())
+  boardId   String
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  name      String
+  color     String
+  createdAt DateTime @default(now())
+
+  cards CardLabel[]
+
+  @@map("label")
+}
+
+model CardLabel {
+  cardId  String
+  card    Card  @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  labelId String
+  label   Label @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([cardId, labelId])
+  @@map("cardLabel")
+}
+
+model Checklist {
+  id        String   @id @default(uuid())
+  cardId    String
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  title     String
+  position  Float
+  createdAt DateTime @default(now())
+
+  items ChecklistItem[]
+
+  @@map("checklist")
+}
+
+model ChecklistItem {
+  id          String    @id @default(uuid())
+  checklistId String
+  checklist   Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  title       String
+  isCompleted Boolean   @default(false)
+  position    Float
+  createdAt   DateTime  @default(now())
+
+  @@map("checklistItem")
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  cardId    String
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation("UserComments", fields: [userId], references: [id])
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("comment")
+}
+
+model Attachment {
+  id        String   @id @default(uuid())
+  cardId    String
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation("UserAttachments", fields: [userId], references: [id])
+  fileName  String
+  fileUrl   String
+  fileType  String
+  fileSize  Int
+  createdAt DateTime @default(now())
+
+  @@map("attachment")
+}
+
+model Activity {
+  id          String             @id @default(uuid())
+  workspaceId String
+  workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  boardId     String?
+  board       Board?             @relation("BoardActivity", fields: [boardId], references: [id], onDelete: SetNull)
+  cardId      String?
+  card        Card?              @relation("CardActivity", fields: [cardId], references: [id], onDelete: SetNull)
+  userId      String
+  user        User               @relation("UserActivities", fields: [userId], references: [id])
+  action      ActivityAction
+  entityType  ActivityEntityType
+  metadata    Json?
+  createdAt   DateTime           @default(now())
+
+  @@index([boardId, createdAt])
+  @@index([workspaceId, createdAt])
+  @@map("activity")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  message   String
+  linkUrl   String?
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  readAt    DateTime?
+
+  @@index([userId, isRead, createdAt])
+  @@map("notification")
 }

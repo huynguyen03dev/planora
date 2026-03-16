@@ -95,7 +95,15 @@ The schema is split into two groups:
 
 ### 4.1 Better Auth–managed tables
 
-These tables are created by Better Auth's core + organization plugin. The Prisma schema must match BA's expected fields exactly. Custom columns (marked with `// app field`) are added via `additionalFields` in the BA config.
+> **Workflow:** Do NOT write these tables manually. Install and configure Better Auth
+> first, then run `npx @better-auth/cli generate` to generate the Prisma models.
+> The generated schema is the source of truth for BA tables. Only add app-managed
+> tables (section 4.2) on top of what BA generates.
+>
+> The `modelName` config (workspace, workspaceMember) controls both the Prisma model
+> name and the DB table name. Do NOT add `@@map` directives — BA handles naming.
+
+These tables are created by Better Auth's core + organization plugin. The Prisma schema must match BA's expected fields exactly. Custom columns (marked with `// app field`) are added via `additionalFields` in the BA config. The field definitions below are **reference only** — always defer to BA CLI output.
 
 ```
 user (BA core)
@@ -301,13 +309,19 @@ Notification
 
 ### 4.3 Cascade delete rules
 
+> **Note:** Activity uses `SET NULL` (not cascade) on `boardId` and `cardId` to avoid
+> PostgreSQL "multiple cascade paths" errors. The cascade path to Activity is
+> only through `workspaceId`. This means when a board or card is deleted,
+> related Activity rows survive with a null reference — which is correct
+> behavior for an audit log.
+
 | When deleted...     | Cascades to                                                  |
 | ------------------- | ------------------------------------------------------------ |
 | user                | session, account, workspaceMember, BoardStar, CardMember     |
-| workspace           | workspaceMember, invitation, Board, Activity, Notification   |
-| Board               | List, BoardStar, Label, Activity (where boardId = id)        |
+| workspace           | workspaceMember, invitation, Board, Activity                 |
+| Board               | List, BoardStar, Label. Activity.boardId → SET NULL          |
 | List                | Card                                                         |
-| Card                | CardMember, CardLabel, Checklist, Comment, Attachment         |
+| Card                | CardMember, CardLabel, Checklist, Comment, Attachment. Activity.cardId → SET NULL |
 | Checklist           | ChecklistItem                                                |
 | Label               | CardLabel                                                    |
 
