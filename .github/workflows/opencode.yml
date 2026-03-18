@@ -1,0 +1,66 @@
+name: OpenCode PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - "*.md"
+      - "LICENSE"
+      - ".github/workflows/opencode.yml"
+      - ".github/workflows/opencode-agent.yml"
+      - ".vscode/**"
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  opencode_review:
+    if: ${{ github.event.sender.type != 'Bot' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: Run OpenCode Review
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: anomalyco/opencode/github@latest
+        env:
+          OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
+          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: openai/gpt-5.3-codex
+          use_github_token: true
+          share: false
+          prompt: |
+            Review this pull request as a senior engineer reviewing a teammate's code.
+
+            Focus on real, actionable issues in:
+            - Security vulnerabilities (XSS, injection, auth/authorization issues, secret exposure)
+            - Performance problems that are likely to matter in this diff
+            - Next.js/React correctness and best practices, especially hooks and server/client boundaries
+            - Prisma query efficiency, data integrity, and server action correctness
+            - TypeScript type safety and runtime edge cases
+
+            Review style:
+            - Write like a thoughtful human reviewer: professional, clear, and natural.
+            - Only comment on issues that are worth fixing before merge. Skip speculative concerns and low-value nits.
+            - Do not use headings, issue counts, severity sections, or rigid templates.
+            - Do not repeat file names or line numbers in the comment text unless it adds useful clarity; GitHub already shows the location.
+            - For each finding, briefly say what is wrong, why it matters here, and the smallest reasonable fix.
+            - Lead with the issue or impact rather than restating the changed line.
+            - Mention only the smallest relevant symbol or function name; avoid pasting full code snippets from the diff unless needed for clarity.
+            - Keep each finding concise, usually 1 short paragraph (2-4 sentences).
+            - If there are multiple findings in one review comment, keep them as separate short paragraphs.
+            - Be specific to the diff. Avoid generic advice, filler, and canned praise.
+            - If a point is minor or optional, say that plainly instead of overstating it.
+            - Prefer a few high-signal comments over many shallow ones.
+            - If no material issues are found, say so briefly and do not invent suggestions.
