@@ -18,7 +18,11 @@ concurrency:
 
 jobs:
   opencode_agent:
-    if: ${{ github.event.sender.type != 'Bot' }}
+    if: |
+      github.event.sender.type != 'Bot' &&
+      github.event.comment.author_association != 'NONE' &&
+      github.event.comment.author_association != 'FIRST_TIMER' &&
+      github.event.comment.author_association != 'FIRST_TIME_CONTRIBUTOR'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     name: Run OpenCode Agent
