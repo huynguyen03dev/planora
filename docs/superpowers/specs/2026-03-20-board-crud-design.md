@@ -76,11 +76,27 @@ Authorization is checked by calling `hasWorkspacePermission()` with the board's 
 
 ## 3. UI Components
 
+### 3.0 Board Page Data Flow
+
+The board page follows Next.js Server Component patterns:
+
+```
+page.tsx (Server Component)
+├── Fetch board data via getBoardById()
+├── Check user permissions via hasWorkspacePermission()
+├── If not found or no access → notFound()
+└── Render client components with props:
+    ├── <BoardHeader board={board} canEdit={canEdit} />
+    └── <BoardContent ... /> (future: lists/cards)
+```
+
+**Key principle:** Server Component fetches data and computes permissions, then passes down to client components as props. Client components handle interactivity only.
+
 ### 3.1 Create Board Flow
 
 **Trigger:** "Create board" button in `WorkspaceBoardsView`
 
-**Component:** `CreateBoardModal`
+**Component:** `CreateBoardModal` (`"use client"`)
 - Location: `components/boards/create-board-modal.tsx`
 - Props: `{ workspaceId: string, open: boolean, onClose: () => void }`
 
@@ -99,10 +115,12 @@ Authorization is checked by calling `hasWorkspacePermission()` with the board's 
 
 **Location:** `app/(authenticated)/(dashboard)/boards/[boardId]/page.tsx`
 
-**Component:** `BoardHeader`
+**Component:** `BoardHeader` (`"use client"`)
 - Location: `components/boards/board-header.tsx`
+- Props: `{ board: Board, canEdit: boolean }`
 - Shows board title (inline editable for admin/editor, read-only for viewer)
 - Shows 3-dot menu button on the right (hidden for viewer)
+- Needs client for inline edit state management
 
 **Inline title edit:**
 - Click title → becomes input field
@@ -111,8 +129,9 @@ Authorization is checked by calling `hasWorkspacePermission()` with the board's 
 
 ### 3.3 Board Menu (Dropdown)
 
-**Component:** `BoardMenu`
+**Component:** `BoardMenu` (`"use client"`)
 - Location: `components/boards/board-menu.tsx`
+- Props: `{ boardId: string, boardTitle: string, canEdit: boolean, canDelete: boolean }`
 - Triggered by 3-dot button in header
 - **Only visible to admin and editor roles** (viewers see no menu)
 
@@ -122,11 +141,12 @@ Authorization is checked by calling `hasWorkspacePermission()` with the board's 
 
 ### 3.4 Board Settings Sidebar
 
-**Component:** `BoardSettingsSidebar`
+**Component:** `BoardSettingsSidebar` (`"use client"`)
 - Location: `components/boards/board-settings-sidebar.tsx`
 - Slide-out panel from the right (like Trello)
 - Props: `{ board: Board, open: boolean, onClose: () => void }`
 - **Only accessible by admin and editor** (button hidden for viewers)
+- Uses shadcn Sheet component
 
 **Contents:**
 - Header: "Settings" with close button
@@ -135,8 +155,9 @@ Authorization is checked by calling `hasWorkspacePermission()` with the board's 
 
 ### 3.5 Delete Board Dialog
 
-**Component:** `DeleteBoardDialog`
+**Component:** `DeleteBoardDialog` (`"use client"`)
 - Location: `components/boards/delete-board-dialog.tsx`
+- Props: `{ boardId: string, boardTitle: string, open: boolean, onClose: () => void }`
 - Confirmation dialog using shadcn AlertDialog
 
 **Copy:**
@@ -219,15 +240,17 @@ export const DEFAULT_BOARD_COLOR = BOARD_COLORS[0].value; // Blue
 app/(authenticated)/(dashboard)/boards/
 ├── actions.ts              # Add createBoardAction, updateBoardAction, deleteBoardAction
 ├── [boardId]/
-│   └── page.tsx            # Board view page (kanban)
+│   ├── page.tsx            # Board view page (Server Component)
+│   ├── loading.tsx         # Loading skeleton for board
+│   └── error.tsx           # Error boundary for board page
 
 components/boards/
-├── create-board-modal.tsx    # New
-├── board-header.tsx          # New
-├── board-menu.tsx            # New
-├── board-settings-sidebar.tsx # New
-├── delete-board-dialog.tsx   # New
-├── color-palette.tsx         # New: reusable color picker
+├── create-board-modal.tsx    # New (client)
+├── board-header.tsx          # New (client)
+├── board-menu.tsx            # New (client)
+├── board-settings-sidebar.tsx # New (client)
+├── delete-board-dialog.tsx   # New (client)
+├── color-palette.tsx         # New (client): reusable color picker
 └── ... (existing)
 
 lib/
