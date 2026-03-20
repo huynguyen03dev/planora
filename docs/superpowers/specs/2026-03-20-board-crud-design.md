@@ -30,9 +30,11 @@ Location: `app/(authenticated)/(dashboard)/boards/actions.ts`
 
 All actions:
 1. Call `verifySession()` to get userId
-2. Check authorization via `hasWorkspacePermission()`
-3. Perform Prisma operation
-4. Call `revalidatePath()` for cache invalidation
+2. Fetch board to get `workspaceId`
+3. Check authorization via `hasWorkspacePermission()`
+4. If unauthorized: return `{ success: false, error: "Board not found" }` (do not reveal existence)
+5. Perform Prisma operation
+6. Call `revalidatePath("/boards")` for cache invalidation
 
 ### 2.2 Lib Functions
 
@@ -134,7 +136,7 @@ Authorization is checked by calling `hasWorkspacePermission()` with the board's 
 ### 3.5 Delete Board Dialog
 
 **Component:** `DeleteBoardDialog`
-- Location: `components/board/delete-board-dialog.tsx`
+- Location: `components/boards/delete-board-dialog.tsx`
 - Confirmation dialog using shadcn AlertDialog
 
 **Copy:**
