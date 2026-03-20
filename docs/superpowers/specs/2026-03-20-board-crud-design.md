@@ -98,9 +98,9 @@ Authorization is checked by calling `hasWorkspacePermission()` with the board's 
 **Location:** `app/(authenticated)/(dashboard)/boards/[boardId]/page.tsx`
 
 **Component:** `BoardHeader`
-- Location: `components/board/board-header.tsx`
-- Shows board title (inline editable for admin/editor)
-- Shows 3-dot menu button on the right
+- Location: `components/boards/board-header.tsx`
+- Shows board title (inline editable for admin/editor, read-only for viewer)
+- Shows 3-dot menu button on the right (hidden for viewer)
 
 **Inline title edit:**
 - Click title → becomes input field
@@ -110,19 +110,21 @@ Authorization is checked by calling `hasWorkspacePermission()` with the board's 
 ### 3.3 Board Menu (Dropdown)
 
 **Component:** `BoardMenu`
-- Location: `components/board/board-menu.tsx`
+- Location: `components/boards/board-menu.tsx`
 - Triggered by 3-dot button in header
+- **Only visible to admin and editor roles** (viewers see no menu)
 
 **Menu items:**
-- "Change background" → opens `BoardSettingsSidebar`
-- "Delete board" → opens `DeleteBoardDialog` (admin only, hidden for others)
+- "Change background" → opens `BoardSettingsSidebar` (admin and editor)
+- "Delete board" → opens `DeleteBoardDialog` (admin only)
 
 ### 3.4 Board Settings Sidebar
 
 **Component:** `BoardSettingsSidebar`
-- Location: `components/board/board-settings-sidebar.tsx`
+- Location: `components/boards/board-settings-sidebar.tsx`
 - Slide-out panel from the right (like Trello)
 - Props: `{ board: Board, open: boolean, onClose: () => void }`
+- **Only accessible by admin and editor** (button hidden for viewers)
 
 **Contents:**
 - Header: "Settings" with close button
@@ -190,8 +192,8 @@ export const DEFAULT_BOARD_COLOR = BOARD_COLORS[0].value; // Blue
 
 ### Background Color
 - Required on create
-- Must be a valid hex color (or one of BOARD_COLORS values)
-- Defaults to blue if not provided
+- Must be one of the predefined `BOARD_COLORS` values (no custom hex input)
+- Defaults to blue (`#0079BF`) if not provided
 
 ---
 
@@ -200,7 +202,7 @@ export const DEFAULT_BOARD_COLOR = BOARD_COLORS[0].value; // Blue
 | Scenario                    | Handling                                      |
 | --------------------------- | --------------------------------------------- |
 | Board not found             | 404 page via `notFound()`                     |
-| No permission to view       | Redirect to `/boards` with toast              |
+| No permission to view       | 404 page via `notFound()` (same as not found) |
 | No permission to edit       | Hide edit controls, show read-only view       |
 | No permission to delete     | Hide delete option in menu                    |
 | Create/update fails         | Inline error in modal/form                    |
@@ -217,20 +219,18 @@ app/(authenticated)/(dashboard)/boards/
 ├── [boardId]/
 │   └── page.tsx            # Board view page (kanban)
 
-components/
-├── boards/
-│   ├── create-board-modal.tsx    # New
-│   └── ... (existing)
-├── board/                        # New directory for board-view components
-│   ├── board-header.tsx
-│   ├── board-menu.tsx
-│   ├── board-settings-sidebar.tsx
-│   ├── delete-board-dialog.tsx
-│   └── color-palette.tsx         # Reusable color picker
+components/boards/
+├── create-board-modal.tsx    # New
+├── board-header.tsx          # New
+├── board-menu.tsx            # New
+├── board-settings-sidebar.tsx # New
+├── delete-board-dialog.tsx   # New
+├── color-palette.tsx         # New: reusable color picker
+└── ... (existing)
 
 lib/
-├── board.ts                      # New: board data functions
-└── constants.ts                  # New: BOARD_COLORS, etc.
+├── board.ts                  # New: board data functions
+└── constants.ts              # New: BOARD_COLORS, etc.
 ```
 
 ---
