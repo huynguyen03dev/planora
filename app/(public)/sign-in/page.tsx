@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signIn } from "@/lib/auth-client";
@@ -16,14 +16,14 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-export default function SignInPage() {
+function SignInForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirect = searchParams.get("redirect");
   const redirectTo =
     redirect && redirect.startsWith("/") && !redirect.startsWith("//")
       ? redirect
-      : "/boards";
+      : "/workspace";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -89,12 +89,12 @@ export default function SignInPage() {
               />
             </div>
           </CardContent>
-          <CardFooter className="flex flex-col gap-4">
+      <CardFooter className="flex flex-col gap-4 pt-6">
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Signing in..." : "Sign In"}
             </Button>
             <p className="text-sm text-muted-foreground">
-              Don't have an account?{" "}
+              Don&apos;t have an account?{" "}
               <Link
                 href="/sign-up"
                 className="text-primary underline-offset-4 hover:underline"
@@ -106,5 +106,24 @@ export default function SignInPage() {
         </form>
       </Card>
     </div>
+  );
+}
+
+export default function SignInPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex flex-1 items-center justify-center px-4">
+          <Card className="w-full max-w-sm">
+            <CardHeader>
+              <CardTitle className="text-2xl">Welcome back</CardTitle>
+              <CardDescription>Loading sign in form...</CardDescription>
+            </CardHeader>
+          </Card>
+        </div>
+      }
+    >
+      <SignInForm />
+    </Suspense>
   );
 }
