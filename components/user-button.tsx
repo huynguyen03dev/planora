@@ -11,7 +11,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-export function UserButton() {
+type UserButtonProps = {
+  onCreateWorkspace?: () => void;
+  createWorkspaceHref?: string;
+};
+
+export function UserButton({
+  onCreateWorkspace,
+  createWorkspaceHref,
+}: UserButtonProps) {
   const router = useRouter();
   const { data: session } = useSession();
   const user = session?.user;
@@ -35,6 +43,17 @@ export function UserButton() {
     });
   }
 
+  function handleCreateWorkspace() {
+    if (onCreateWorkspace) {
+      onCreateWorkspace();
+      return;
+    }
+
+    if (createWorkspaceHref) {
+      router.push(createWorkspaceHref);
+    }
+  }
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="flex size-8 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground outline-none ring-offset-background transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
@@ -52,6 +71,15 @@ export function UserButton() {
             <DropdownMenuSeparator />
           </>
         )}
+        <DropdownMenuItem onClick={() => router.push("/profile")}>
+          Profile
+        </DropdownMenuItem>
+        {onCreateWorkspace || createWorkspaceHref ? (
+          <DropdownMenuItem onClick={handleCreateWorkspace}>
+            Create workspace
+          </DropdownMenuItem>
+        ) : null}
+        <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleSignOut}>
           Sign out
         </DropdownMenuItem>

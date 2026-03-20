@@ -1,7 +1,7 @@
 import Link from "next/link";
 
-import { verifySession } from "@/lib/dal";
 import { UserButton } from "@/components/user-button";
+import { verifySession } from "@/lib/dal";
 
 export default async function AuthenticatedLayout({
   children,
@@ -14,7 +14,7 @@ export default async function AuthenticatedLayout({
         <Link href="/boards" className="text-lg font-semibold">
           Planora
         </Link>
-        <UserButton />
+        <UserButton createWorkspaceHref="/boards?createWorkspace=1" />
       </header>
       {children}
     </div>
