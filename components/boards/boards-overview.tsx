@@ -5,6 +5,7 @@ type BoardsOverviewProps = {
     id: string;
     name: string;
     slug: string;
+    canCreateBoard: boolean;
   }[];
   boards: {
     id: string;

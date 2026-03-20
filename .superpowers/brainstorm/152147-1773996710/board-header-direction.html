@@ -1,0 +1,76 @@
+<h2>Trello-Style BoardHeader Direction</h2>
+<p class="subtitle">Pick the direction for the new header + right slide-over menu</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Close Trello Match (Recommended)</h3>
+      <p>Dense top bar, translucent background, title left, avatars + Share + star + ellipsis right. Slide-over menu uses grouped sections with implemented actions active and future items disabled.</p>
+      <div class="mockup" style="margin-top:12px">
+        <div class="mockup-header" style="background:rgba(18,23,36,.55)">BoardHeader</div>
+        <div class="mockup-body" style="background:linear-gradient(135deg,#5b3a88,#8a4f8b); padding:10px; border-radius:10px; color:#fff;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px; background:rgba(18,23,36,.42); border:1px solid rgba(255,255,255,.16); border-radius:10px; padding:10px 12px;">
+            <div style="font-weight:700; font-size:18px;">My Trello board</div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="background:#5e63ff;padding:6px 8px;border-radius:999px;font-size:12px">HN</span>
+              <span style="background:#2d3345;padding:6px 8px;border-radius:999px;font-size:12px">+2</span>
+              <button class="mock-button" style="padding:6px 10px">Share</button>
+              <button class="mock-button" style="padding:6px 10px">★</button>
+              <button class="mock-button" style="padding:6px 10px">⋯</button>
+            </div>
+          </div>
+          <div style="margin-top:10px; border:1px solid rgba(255,255,255,.12); border-radius:10px; background:rgba(18,23,36,.68); padding:10px; color:#d5dae8; font-size:13px;">
+            <div style="margin-bottom:8px; font-weight:600; color:#f3f5fc;">Slide-over Menu</div>
+            <div style="opacity:.95; margin-bottom:6px;">Share · About this board · Visibility · Star</div>
+            <div style="opacity:.95; margin-bottom:6px;">Settings · Change background</div>
+            <div style="opacity:.55;">Automation · Power-Ups · Labels · Stickers (disabled placeholders)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Balanced Match</h3>
+      <p>Same composition as Trello, but a bit more breathing room and larger controls. Better for readability and touch targets on smaller screens.</p>
+      <div class="mockup" style="margin-top:12px">
+        <div class="mockup-header" style="background:rgba(18,23,36,.55)">BoardHeader</div>
+        <div class="mockup-body" style="background:linear-gradient(135deg,#5b3a88,#8a4f8b); padding:12px; border-radius:10px; color:#fff;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px; background:rgba(18,23,36,.36); border:1px solid rgba(255,255,255,.18); border-radius:12px; padding:12px 14px;">
+            <div style="font-weight:700; font-size:20px;">My Trello board</div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <button class="mock-button" style="padding:8px 12px">Members</button>
+              <button class="mock-button" style="padding:8px 12px">Share</button>
+              <button class="mock-button" style="padding:8px 12px">★</button>
+              <button class="mock-button" style="padding:8px 12px">⋯</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Brand-Forward Variant</h3>
+      <p>Keeps Trello-like structure but stronger Planora personality via softer glass effect, larger title, and elevated Share CTA.</p>
+      <div class="mockup" style="margin-top:12px">
+        <div class="mockup-header" style="background:rgba(18,23,36,.55)">BoardHeader</div>
+        <div class="mockup-body" style="background:linear-gradient(135deg,#5b3a88,#8a4f8b); padding:12px; border-radius:10px; color:#fff;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px; background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.22); border-radius:14px; padding:12px 16px; backdrop-filter: blur(4px);">
+            <div style="font-weight:800; font-size:21px;">My Trello board</div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <button class="mock-button" style="padding:8px 14px; background:#dce5ff; color:#1d2a52">Share</button>
+              <button class="mock-button" style="padding:8px 10px">★</button>
+              <button class="mock-button" style="padding:8px 10px">⋯</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

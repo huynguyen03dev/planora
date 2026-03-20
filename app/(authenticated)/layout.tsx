@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { UserButton } from "@/components/user-button";
+import { AuthenticatedHeaderActions } from "@/components/authenticated-header-actions";
 import { verifySession } from "@/lib/dal";
 
 export default async function AuthenticatedLayout({
@@ -14,7 +14,7 @@ export default async function AuthenticatedLayout({
         <Link href="/boards" className="text-lg font-semibold">
           Planora
         </Link>
-        <UserButton createWorkspaceHref="/boards?createWorkspace=1" />
+        <AuthenticatedHeaderActions />
       </header>
       {children}
     </div>

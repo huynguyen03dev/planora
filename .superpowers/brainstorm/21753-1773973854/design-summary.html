@@ -1,0 +1,98 @@
+<h2>Complete Design Summary</h2>
+<p class="subtitle">Trello-style /boards page for Planora</p>
+
+<div class="section">
+  <h3>Page Structure</h3>
+  <div style="display: flex; gap: 24px; margin-top: 16px;">
+    <div style="flex: 1; background: #1a1a2e; border-radius: 8px; padding: 16px;">
+      <div class="label">Top Navbar</div>
+      <ul style="color: #ccc; font-size: 13px; line-height: 1.8; margin: 8px 0 0 0; padding-left: 20px;">
+        <li>Planora logo (left)</li>
+        <li>User avatar dropdown (right)</li>
+        <li>Dropdown contains: Profile, Create Workspace, Sign out</li>
+      </ul>
+    </div>
+    <div style="flex: 1; background: #1a1a2e; border-radius: 8px; padding: 16px;">
+      <div class="label">Sidebar</div>
+      <ul style="color: #ccc; font-size: 13px; line-height: 1.8; margin: 8px 0 0 0; padding-left: 20px;">
+        <li><strong>Boards</strong> button (top) → overview</li>
+        <li><strong>Workspaces</strong> section (collapsible)</li>
+        <li>Each workspace has <strong>Boards</strong> link</li>
+      </ul>
+    </div>
+    <div style="flex: 1; background: #1a1a2e; border-radius: 8px; padding: 16px;">
+      <div class="label">Main Content</div>
+      <ul style="color: #ccc; font-size: 13px; line-height: 1.8; margin: 8px 0 0 0; padding-left: 20px;">
+        <li>Overview: all workspaces + boards</li>
+        <li>Workspace view: single workspace boards</li>
+        <li>Board cards link to /boards/[id]</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Views & States</h3>
+  <table style="width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px;">
+    <tr style="border-bottom: 1px solid #333;">
+      <th style="text-align: left; padding: 10px; color: #888;">Trigger</th>
+      <th style="text-align: left; padding: 10px; color: #888;">Main Content Shows</th>
+    </tr>
+    <tr style="border-bottom: 1px solid #333;">
+      <td style="padding: 10px; color: #ccc;">Top "Boards" clicked</td>
+      <td style="padding: 10px; color: #ccc;">All workspaces with their boards (overview)</td>
+    </tr>
+    <tr style="border-bottom: 1px solid #333;">
+      <td style="padding: 10px; color: #ccc;">Workspace → Boards clicked</td>
+      <td style="padding: 10px; color: #ccc;">Only that workspace's boards</td>
+    </tr>
+    <tr style="border-bottom: 1px solid #333;">
+      <td style="padding: 10px; color: #ccc;">No workspaces exist</td>
+      <td style="padding: 10px; color: #ccc;">Centered CTA: "Create your first workspace"</td>
+    </tr>
+    <tr>
+      <td style="padding: 10px; color: #ccc;">Board card clicked</td>
+      <td style="padding: 10px; color: #ccc;">Navigate to /boards/[boardId] (kanban)</td>
+    </tr>
+  </table>
+</div>
+
+<div class="section">
+  <h3>Create Workspace Flow</h3>
+  <ul style="color: #ccc; font-size: 13px; line-height: 1.8; padding-left: 20px;">
+    <li>Modal dialog triggered from user dropdown OR empty state CTA</li>
+    <li>Same modal component for both entry points</li>
+    <li>After creation: new workspace appears in sidebar, auto-selected</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h3>Scope for First Iteration</h3>
+  <div style="display: flex; gap: 16px; margin-top: 12px;">
+    <div style="flex: 1; background: #143314; border: 1px solid #2d5a2d; border-radius: 8px; padding: 16px;">
+      <div style="color: #4ade80; font-weight: 600; margin-bottom: 8px;">✓ Included</div>
+      <ul style="color: #ccc; font-size: 12px; line-height: 1.8; margin: 0; padding-left: 16px;">
+        <li>Sidebar with workspaces</li>
+        <li>Boards link per workspace</li>
+        <li>Overview vs workspace view</li>
+        <li>Create workspace modal</li>
+        <li>Empty state CTA</li>
+        <li>User dropdown menu</li>
+      </ul>
+    </div>
+    <div style="flex: 1; background: #331414; border: 1px solid #5a2d2d; border-radius: 8px; padding: 16px;">
+      <div style="color: #f87171; font-weight: 600; margin-bottom: 8px;">✗ Deferred</div>
+      <ul style="color: #ccc; font-size: 12px; line-height: 1.8; margin: 0; padding-left: 16px;">
+        <li>Members page</li>
+        <li>Settings page</li>
+        <li>Billing page</li>
+        <li>Recently viewed boards</li>
+        <li>Board templates</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top: 24px; text-align: center;">
+  <p style="color: #888;">Does this design look correct? I'll write the spec doc next.</p>
+</div>

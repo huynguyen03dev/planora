@@ -1,4 +1,7 @@
+import { useState } from "react";
+
 import { BoardCard } from "./board-card";
+import { CreateBoardModal } from "./create-board-modal";
 import { workspaceBadgeGradient } from "./styles";
 
 type WorkspaceBoardsViewProps = {
@@ -12,12 +15,15 @@ type WorkspaceBoardsViewProps = {
     title: string;
     backgroundColor?: string | null;
   }[];
+  canCreateBoard: boolean;
 };
 
 export function WorkspaceBoardsView({
   workspace,
   boards,
+  canCreateBoard,
 }: WorkspaceBoardsViewProps) {
+  const [isCreateBoardOpen, setCreateBoardOpen] = useState(false);
   const initial = workspace.name.charAt(0).toUpperCase();
 
   return (
@@ -37,26 +43,33 @@ export function WorkspaceBoardsView({
       </div>
 
       <div className="flex flex-wrap gap-4">
-        {boards.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No boards yet</p>
-        ) : (
-          boards.map((board) => (
-            <BoardCard
-              key={board.id}
-              id={board.id}
-              title={board.title}
-              backgroundColor={board.backgroundColor}
-            />
-          ))
-        )}
+        {boards.map((board) => (
+          <BoardCard
+            key={board.id}
+            id={board.id}
+            title={board.title}
+            backgroundColor={board.backgroundColor}
+          />
+        ))}
 
-        <div
-          className="flex h-24 w-44 cursor-not-allowed items-center justify-center rounded-lg border-2 border-dashed border-muted text-sm text-muted-foreground opacity-60"
-          title="Coming soon"
-        >
-          + Create board
-        </div>
+        {canCreateBoard ? (
+          <button
+            type="button"
+            className="flex h-24 w-44 items-center justify-center rounded-lg border-2 border-dashed border-muted text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+            onClick={() => setCreateBoardOpen(true)}
+          >
+            + Create board
+          </button>
+        ) : null}
       </div>
+
+      {canCreateBoard ? (
+        <CreateBoardModal
+          workspaceId={workspace.id}
+          open={isCreateBoardOpen}
+          onClose={() => setCreateBoardOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

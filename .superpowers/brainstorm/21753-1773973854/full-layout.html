@@ -1,0 +1,120 @@
+<h2>Complete /boards Layout</h2>
+<p class="subtitle">Sidebar-driven navigation with user dropdown</p>
+
+<div class="mockup" style="margin-bottom: 24px;">
+  <div class="mockup-header">Normal State: User has workspaces</div>
+  <div class="mockup-body" style="padding: 0;">
+    <div style="display: flex; flex-direction: column; height: 340px; font-size: 11px; background: #0f0f1a;">
+      <!-- Top navbar -->
+      <div style="height: 48px; background: #1a1a2e; border-bottom: 1px solid #333; display: flex; align-items: center; padding: 0 16px; justify-content: space-between;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="color: #fff; font-weight: bold; font-size: 14px;">Planora</div>
+        </div>
+        <div style="position: relative;">
+          <div style="width: 32px; height: 32px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: bold; font-size: 12px; cursor: pointer;">NH</div>
+          <!-- Dropdown shown -->
+          <div style="position: absolute; top: 40px; right: 0; width: 200px; background: #1a1a2e; border: 1px solid #333; border-radius: 8px; padding: 8px 0; z-index: 10;">
+            <div style="padding: 8px 12px; color: #fff; font-size: 11px; border-bottom: 1px solid #333;">
+              <div style="font-weight: 500;">Nguyen Huy</div>
+              <div style="color: #888; font-size: 10px;">huy@example.com</div>
+            </div>
+            <div style="padding: 8px 12px; color: #aaa; cursor: pointer;">Profile</div>
+            <div style="padding: 8px 12px; color: #aaa; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+              <span style="color: #667eea;">+</span> Create Workspace
+            </div>
+            <div style="border-top: 1px solid #333; margin-top: 4px; padding-top: 4px;">
+              <div style="padding: 8px 12px; color: #f87171; cursor: pointer;">Sign out</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div style="display: flex; flex: 1;">
+        <!-- Sidebar -->
+        <div style="width: 220px; background: #1a1a2e; padding: 16px; border-right: 1px solid #333; overflow-y: auto;">
+          <div style="color: #888; font-size: 10px; text-transform: uppercase; margin-bottom: 12px; letter-spacing: 0.5px;">Workspaces</div>
+          
+          <!-- Active workspace (expanded) -->
+          <div style="margin-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px; padding: 8px; background: #2a2a4e; border-radius: 6px; color: #fff; cursor: pointer;">
+              <div style="width: 24px; height: 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11px;">P</div>
+              <span style="flex: 1;">Product Team</span>
+              <span style="color: #888;">▼</span>
+            </div>
+            <div style="margin-left: 32px; margin-top: 6px;">
+              <div style="padding: 6px 8px; color: #ccc; font-size: 11px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+                <span style="opacity: 0.6;">📋</span> Sprint Board
+              </div>
+              <div style="padding: 6px 8px; color: #ccc; font-size: 11px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+                <span style="opacity: 0.6;">📋</span> Roadmap
+              </div>
+            </div>
+          </div>
+          
+          <!-- Collapsed workspace -->
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px; padding: 8px; color: #888; cursor: pointer; border-radius: 6px;">
+              <div style="width: 24px; height: 24px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11px; color: #fff;">M</div>
+              <span style="flex: 1;">Marketing</span>
+              <span>▶</span>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Main content -->
+        <div style="flex: 1; padding: 24px; overflow-y: auto;">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
+            <div style="width: 36px; height: 36px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: bold; font-size: 14px;">P</div>
+            <div>
+              <div style="color: #fff; font-size: 16px; font-weight: 600;">Product Team</div>
+              <div style="color: #888; font-size: 11px;">2 boards</div>
+            </div>
+          </div>
+          
+          <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+            <div style="width: 180px; height: 100px; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); border-radius: 8px; padding: 12px; cursor: pointer;">
+              <div style="color: #fff; font-weight: 600; font-size: 13px;">Sprint Board</div>
+            </div>
+            <div style="width: 180px; height: 100px; background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); border-radius: 8px; padding: 12px; cursor: pointer;">
+              <div style="color: #fff; font-weight: 600; font-size: 13px;">Roadmap</div>
+            </div>
+            <div style="width: 180px; height: 100px; background: #1a1a2e; border-radius: 8px; border: 2px dashed #333; display: flex; align-items: center; justify-content: center; color: #666; cursor: pointer;">
+              + Create board
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mockup">
+  <div class="mockup-header">Empty State: No workspaces yet</div>
+  <div class="mockup-body" style="padding: 0;">
+    <div style="display: flex; flex-direction: column; height: 280px; font-size: 11px; background: #0f0f1a;">
+      <!-- Top navbar -->
+      <div style="height: 48px; background: #1a1a2e; border-bottom: 1px solid #333; display: flex; align-items: center; padding: 0 16px; justify-content: space-between;">
+        <div style="color: #fff; font-weight: bold; font-size: 14px;">Planora</div>
+        <div style="width: 32px; height: 32px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: bold; font-size: 12px;">NH</div>
+      </div>
+      
+      <!-- Centered CTA -->
+      <div style="flex: 1; display: flex; align-items: center; justify-content: center;">
+        <div style="text-align: center; max-width: 320px;">
+          <div style="width: 64px; height: 64px; background: #1a1a2e; border-radius: 12px; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center;">
+            <span style="font-size: 28px;">📋</span>
+          </div>
+          <div style="color: #fff; font-size: 18px; font-weight: 600; margin-bottom: 8px;">Create your first workspace</div>
+          <div style="color: #888; font-size: 12px; margin-bottom: 20px; line-height: 1.5;">
+            Workspaces help you organize boards for different teams or projects.
+          </div>
+          <div style="display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; padding: 10px 20px; border-radius: 6px; font-weight: 500; cursor: pointer;">
+            Create workspace
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p style="margin-top: 20px; color: #888; text-align: center;">Both "Create workspace" buttons open the same modal dialog</p>
