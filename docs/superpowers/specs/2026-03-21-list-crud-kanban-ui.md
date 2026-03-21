@@ -353,15 +353,16 @@ Reuse pattern from `BoardHeader`:
 
 Error messages by scenario:
 
-| Scenario | Error Message |
-| --- | --- |
-| Validation failed (empty title) | "Title is required" |
-| Validation failed (too long) | "Title must be 100 characters or less" |
-| Board not found | "Board not found" |
-| Board archived | "Board not found" |
-| List not found | "List not found" |
-| Permission denied | "List not found" (generic for security) |
-| Server error | "Failed to [create/update/delete] list. Please try again." |
+| Scenario | Action | Error Message |
+| --- | --- | --- |
+| Validation failed (empty title) | all | "Title is required" |
+| Validation failed (too long) | all | "Title must be 100 characters or less" |
+| Board not found | create | "Board not found" |
+| Board archived | create | "Board not found" |
+| List not found | update/delete | "List not found" |
+| Permission denied (create) | create | "Board not found" (generic for security) |
+| Permission denied (update/delete) | update/delete | "List not found" (generic for security) |
+| Server error | all | "Failed to [create/update/delete] list. Please try again." |
 
 **Display:**
 - Inline feedback only — no modals for errors
