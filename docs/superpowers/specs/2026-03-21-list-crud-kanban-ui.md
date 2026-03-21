@@ -26,7 +26,7 @@ Implement List CRUD operations and initial Kanban board UI with simple card plac
 
 ## Architecture
 
-Follows existing Board CRUD patterns exactly.
+Adapts existing Board CRUD patterns (Server Actions + Zod + auth checks) for list operations.
 
 ### File Structure
 
@@ -37,9 +37,9 @@ lib/
     └── list.ts          # Zod validation schemas
 
 app/(authenticated)/(dashboard)/boards/[boardId]/
-├── page.tsx             # Server Component (fetch board + lists)
-├── actions.ts           # Server Actions (list CRUD) — add to existing or create
-└── board-content.tsx    # Client Component (layout orchestration)
+├── page.tsx             # Server Component (existing — add list fetching)
+├── actions.ts           # Server Actions (NEW — list CRUD actions)
+└── board-content.tsx    # Client Component (NEW — kanban layout)
 
 components/boards/
 ├── list-column.tsx      # Client Component (single list with inline edit + menu)
@@ -47,15 +47,22 @@ components/boards/
 └── card-placeholder.tsx # Simple card for layout visualization
 ```
 
-### Component Tree
+**Action location decision:** Create `app/(authenticated)/(dashboard)/boards/[boardId]/actions.ts` for list-specific actions. This keeps list actions colocated with the board route that uses them, separate from workspace-level board actions in `boards/actions.ts`.
+
+### Page Integration
+
+The existing `boards/[boardId]/page.tsx` renders `BoardHeader` inside a themed shell. **BoardHeader stays unchanged.** The new `BoardContent` component replaces only the lower placeholder panel (currently showing "Kanban view").
 
 ```
-BoardPage (Server Component)
-│ ├── fetch board, verify membership
-│ ├── fetch lists ordered by position
-│ └── derive permission flags (canCreateList, canUpdateList, canDeleteList)
+BoardPage (Server Component) — EXISTING, MODIFIED
+│ ├── fetch board (existing)
+│ ├── verify membership (existing)
+│ ├── fetch lists ordered by position (NEW)
+│ └── derive permission flags (NEW)
 │
-└── BoardContent (Client Component)
+├── BoardHeader (existing — unchanged)
+│
+└── BoardContent (Client Component — NEW, replaces placeholder)
     │ props: { board, lists, canCreateList, canUpdateList, canDeleteList }
     │
     └── ScrollArea (orientation="horizontal", className="flex-1")
@@ -68,6 +75,15 @@ BoardPage (Server Component)
             │
             └── AddListButton (w-72, inline form)
 ```
+
+### Route-Level States
+
+The existing route already has:
+- `loading.tsx` — shows while board loads (now also covers list loading)
+- `error.tsx` — error boundary for fetch failures
+- `notFound()` — called when board doesn't exist or is archived
+
+These continue to work. List fetching happens in the same server component as board fetching, so existing loading/error states apply.
 
 ## Data Model
 
@@ -126,10 +142,18 @@ Inline form for creating new lists.
 - `w-72 shrink-0` to match ListColumn width
 
 **Expanded state:**
-- Input for title
+- Input for title (auto-focused)
 - Save + Cancel buttons
-- Auto-focus on expand
 - Enter submits, Escape cancels
+
+**Pending state:**
+- Input and buttons disabled during submission
+- Show loading indicator on Save button
+
+**Error state:**
+- Form stays open on validation/server error
+- Error message shown below input (inline, red text)
+- Input remains focused for correction
 
 ### CardPlaceholder
 
@@ -137,55 +161,69 @@ Static cards for layout visualization.
 
 **Content:** Title text only  
 **Style:** shadcn Card, subtle styling  
-**Data:** Hardcoded array per list (3-5 sample cards)
+**Data:** Deterministic hardcoded array per list (not random — avoids hydration mismatch)
 
 ## Server Actions
 
-### createList
+All actions are in `app/(authenticated)/(dashboard)/boards/[boardId]/actions.ts`.
+
+### createListAction
 
 ```typescript
-Input: { boardId: string, title: string }
+"use server"
+
+Input: FormData { boardId: string, title: string }
 
 Flow:
 1. Parse with Zod (title: 1-100 chars, trimmed)
 2. verifySession() → get userId
 3. Load board from DB by boardId
-4. hasWorkspacePermission(board.workspaceId, { list: ["create"] })
-5. Calculate position via lib/list.ts (append logic)
-6. Insert list
-7. revalidatePath(`/boards/${boardId}`)
+4. If board not found or archived → return { success: false, error: "Board not found" }
+5. hasWorkspacePermission(board.workspaceId, { list: ["create"] })
+6. If no permission → return { success: false, error: "Board not found" }
+7. Calculate position via lib/list.ts (append logic)
+8. Insert list
+9. revalidatePath(`/boards/${boardId}`)
 
 Return: { success: true, listId: string } | { success: false, error: string }
 ```
 
-### updateList
+### updateListAction
 
 ```typescript
-Input: { listId: string, title: string }
+"use server"
+
+Input: FormData { listId: string, title: string }
 
 Flow:
 1. Parse with Zod
 2. verifySession()
 3. Load list → board from DB
-4. hasWorkspacePermission(board.workspaceId, { list: ["update"] })
-5. Update list title
-6. revalidatePath(`/boards/${list.boardId}`)
+4. If list/board not found → return { success: false, error: "List not found" }
+5. hasWorkspacePermission(board.workspaceId, { list: ["update"] })
+6. If no permission → return { success: false, error: "List not found" }
+7. Update list title
+8. revalidatePath(`/boards/${list.boardId}`)
 
 Return: { success: true } | { success: false, error: string }
 ```
 
-### deleteList
+### deleteListAction
 
 ```typescript
-Input: { listId: string }
+"use server"
+
+Input: FormData { listId: string }
 
 Flow:
 1. Parse with Zod (listId: uuid)
 2. verifySession()
 3. Load list → board from DB
-4. hasWorkspacePermission(board.workspaceId, { list: ["delete"] })
-5. Delete list (cards cascade via Prisma onDelete)
-6. revalidatePath(`/boards/${list.boardId}`)
+4. If list/board not found → return { success: false, error: "List not found" }
+5. hasWorkspacePermission(board.workspaceId, { list: ["delete"] })
+6. If no permission → return { success: false, error: "List not found" }
+7. Delete list (cards cascade via Prisma onDelete)
+8. revalidatePath(`/boards/${list.boardId}`)
 
 Return: { success: true } | { success: false, error: string }
 ```
@@ -225,7 +263,7 @@ export async function deleteList(listId: string): Promise<void>
 // Get list with board (for auth checks in actions)
 export async function getListWithBoard(listId: string): Promise<{
   list: ListRecord;
-  board: { id: string; workspaceId: string };
+  board: { id: string; workspaceId: string; archivedAt: Date | null };
 } | null>
 ```
 
@@ -313,10 +351,22 @@ Reuse pattern from `BoardHeader`:
 
 ## Error Handling
 
-- **Validation errors**: Show first field error inline
-- **Permission denied**: Generic "List not found" message
-- **Server errors**: "Failed to [action]. Please try again."
-- **No modals for errors** — inline feedback only
+Error messages by scenario:
+
+| Scenario | Error Message |
+| --- | --- |
+| Validation failed (empty title) | "Title is required" |
+| Validation failed (too long) | "Title must be 100 characters or less" |
+| Board not found | "Board not found" |
+| Board archived | "Board not found" |
+| List not found | "List not found" |
+| Permission denied | "List not found" (generic for security) |
+| Server error | "Failed to [create/update/delete] list. Please try again." |
+
+**Display:**
+- Inline feedback only — no modals for errors
+- Error text below input in AddListButton
+- Toast/inline message for ListColumn rename errors
 
 ## Delete Behavior
 
@@ -331,8 +381,9 @@ Reuse pattern from `BoardHeader`:
 - Rename list → inline edit, saves on enter/blur
 - Delete list → confirmation, removes list and cards
 - Empty board → only "Add list" button visible
-- Permission denied → actions fail gracefully
+- Permission denied → actions fail gracefully with generic error
 - Concurrent creates → stable sort prevents jitter
+- Board archived → page shows notFound()
 
 ## Future Extensions
 
@@ -340,7 +391,7 @@ When adding these features, modify:
 
 | Feature              | Changes Needed                                                            |
 | -------------------- | ------------------------------------------------------------------------- |
-| Drag-and-drop reorder | Add @dnd-kit, reorderList action, midpoint position calc in lib/list.ts |
+| Drag-and-drop reorder | Add @dnd-kit, reorderListAction, midpoint position calc in lib/list.ts |
 | Card CRUD            | Add card components inside ListColumn, card actions                       |
 | Vertical scroll      | Add `overflow-y-auto` to CardContent when cards overflow                  |
 | Realtime sync        | Emit Socket.io events after successful mutations                          |
