@@ -40,13 +40,13 @@ export type CreateBoardInput = z.infer<typeof createBoardSchema>;
 export const updateBoardSchema = z.object({
   boardId: z.string({ message: "Board not found" }).uuid(),
   title: z
-    .string()
+    .string({ message: "Board title is required" })
     .trim()
     .min(MIN_BOARD_TITLE_LENGTH, "Board title is required")
     .max(MAX_BOARD_TITLE_LENGTH, `Board title must be ${MAX_BOARD_TITLE_LENGTH} characters or less`)
     .optional(),
   backgroundColor: z
-    .string()
+    .string({ message: "Invalid board color" })
     .refine(
       (color) => boardColorSet.has(color),
       "Invalid board color"
