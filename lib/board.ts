@@ -1,6 +1,6 @@
 import "server-only";
 
-import prisma from "@/lib/prisma";
+import db from "@/lib/prisma";
 
 export type BoardRecord = {
   id: string;
@@ -14,7 +14,7 @@ export type BoardRecord = {
 };
 
 export async function getBoardById(boardId: string): Promise<BoardRecord | null> {
-  return prisma.board.findUnique({
+  return db.board.findUnique({
     where: {
       id: boardId,
       archivedAt: null,
@@ -38,7 +38,7 @@ export async function createBoard(data: {
   backgroundColor: string;
   createdById: string;
 }): Promise<BoardRecord> {
-  return prisma.board.create({
+  return db.board.create({
     data,
     select: {
       id: true,
@@ -57,7 +57,7 @@ export async function updateBoard(
   boardId: string,
   data: { title?: string; backgroundColor?: string },
 ): Promise<BoardRecord> {
-  return prisma.board.update({
+  return db.board.update({
     where: {
       id: boardId,
       archivedAt: null,
@@ -77,7 +77,7 @@ export async function updateBoard(
 }
 
 export async function deleteBoard(boardId: string): Promise<void> {
-  await prisma.board.update({
+  await db.board.update({
     where: {
       id: boardId,
       archivedAt: null,

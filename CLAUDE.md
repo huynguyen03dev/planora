@@ -34,7 +34,7 @@ Planora uses a **server-first architecture** with no separate backend:
 
 #### Prisma Setup
 - **Client location**: Generated to `app/generated/prisma/client.ts` (auto-generated, never edit)
-- **Singleton pattern**: `lib/prisma.ts` uses global singleton to avoid connection pool exhaustion
+- **Singleton pattern**: `lib/prisma.ts` exports `db` (global singleton to avoid connection pool exhaustion)
 - **Adapter**: Using `@prisma/adapter-pg` for better PostgreSQL support (required for `nodePostgres` connection string parsing)
 - **Database URL**: Must use `postgresql://` connection string with `?schema=public`
 
@@ -96,13 +96,14 @@ BETTER_AUTH_URL="http://localhost:3000"
 
 ## Common Gotchas & Patterns
 
-### 1. Prisma Client Import Path
-Always import from `app/generated/prisma/client`, not `@prisma/client`:
+### 1. Database Client (`db`) Import Path
+Always import `db` from `lib/prisma.ts`, never import PrismaClient directly:
 ```typescript
-import { PrismaClient } from "@/app/generated/prisma/client";
+import { db } from "@/lib/prisma";
+const board = await db.board.findUnique({ where: { id } });
 ```
 
-This prevents conflicts with the PrismaPg adapter and ensures you're using the generated client.
+This uses the singleton pattern to avoid connection pool exhaustion and ensures you're reusing the same connection instance.
 
 ### 2. Server Actions Must Return Serializable Data
 Server Actions serialize results (JSON). Avoid returning:
@@ -126,10 +127,10 @@ All IDs are `String`, generated as `@default(uuid())`. Use UUID validation when 
 Always use `select` or `include` to avoid fetching unnecessary relations:
 ```typescript
 // ❌ Fetches everything
-const board = await prisma.board.findUnique({ where: { id } });
+const board = await db.board.findUnique({ where: { id } });
 
 // ✅ Only needed fields
-const board = await prisma.board.findUnique({
+const board = await db.board.findUnique({
   where: { id },
   include: { lists: { select: { id: true, title: true } } },
 });
@@ -213,7 +214,7 @@ No test framework is configured yet. When adding tests, use Vitest + React Testi
 | `app/api/auth/[...all]/route.ts` | Better Auth catch-all handler |
 | `lib/auth.ts` | Better Auth server config (database, roles, plugins) |
 | `lib/auth-client.ts` | Better Auth React client (useSession, signIn, etc.) |
-| `lib/prisma.ts` | Prisma singleton (never import PrismaClient directly) |
+| `lib/prisma.ts` | Exports `db` singleton (use in place of direct PrismaClient import) |
 | `lib/permissions.ts` | RBAC role definitions (admin, editor, viewer) |
 | `prisma/schema.prisma` | Database schema (all models, enums, relations) |
 | `app/generated/prisma/` | Auto-generated Prisma client (never edit) |
@@ -226,13 +227,13 @@ No test framework is configured yet. When adding tests, use Vitest + React Testi
 ### Avoid N+1 Queries
 ```typescript
 // ❌ N+1: fetches board, then N queries for lists
-const boards = await prisma.board.findMany();
+const boards = await db.board.findMany();
 const listsPerBoard = await Promise.all(
-  boards.map(b => prisma.list.findMany({ where: { boardId: b.id } }))
+  boards.map(b => db.list.findMany({ where: { boardId: b.id } }))
 );
 
 // ✅ Single query with include
-const boards = await prisma.board.findMany({
+const boards = await db.board.findMany({
   include: { lists: true }
 });
 ```

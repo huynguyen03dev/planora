@@ -3,7 +3,7 @@ import "server-only";
 import { headers } from "next/headers";
 
 import { auth } from "@/lib/auth";
-import prisma from "@/lib/prisma";
+import db from "@/lib/prisma";
 
 type WorkspaceMembership = {
   workspaceId: string;
@@ -41,7 +41,7 @@ function toSlugSegment(value: string): string {
 export async function listWorkspaceMembershipsByUserId(
   userId: string,
 ): Promise<WorkspaceMembership[]> {
-  const memberships = await prisma.workspaceMember.findMany({
+  const memberships = await db.workspaceMember.findMany({
     where: { userId },
     include: {
       workspace: {
@@ -113,7 +113,7 @@ export async function listBoardsByWorkspaceIds(
     return [];
   }
 
-  const boards = await prisma.board.findMany({
+  const boards = await db.board.findMany({
     where: {
       workspaceId: {
         in: workspaceIds,

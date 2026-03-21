@@ -3,7 +3,7 @@ import "server-only";
 import { headers } from "next/headers";
 
 import { auth } from "@/lib/auth";
-import prisma from "@/lib/prisma";
+import db from "@/lib/prisma";
 
 type PermissionRequest = {
   board?: Array<"create" | "update" | "delete">;
@@ -16,7 +16,7 @@ export async function isWorkspaceMember(
   userId: string,
   workspaceId: string,
 ): Promise<boolean> {
-  const membership = await prisma.workspaceMember.findFirst({
+  const membership = await db.workspaceMember.findFirst({
     where: {
       organizationId: workspaceId,
       userId,

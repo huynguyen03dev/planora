@@ -64,7 +64,7 @@ lib/
   auth.ts               # Better Auth server config (prismaAdapter, organization plugin)
   auth-client.ts        # Better Auth React client (signIn, signUp, useSession, etc.)
   permissions.ts        # RBAC: admin/editor/viewer roles via better-auth access control
-  prisma.ts             # Singleton PrismaClient with PrismaPg adapter
+  prisma.ts             # Exports `db` singleton with PrismaPg adapter
   utils.ts              # cn() helper (clsx + tailwind-merge)
 prisma/
   schema.prisma         # Database schema (all models)
@@ -95,7 +95,7 @@ Order imports in this sequence (with blank line separators):
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 
-import prisma from "./prisma";
+import db from "./prisma";
 import { ac, admin, editor, viewer } from "./permissions";
 ```
 
