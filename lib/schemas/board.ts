@@ -18,7 +18,7 @@ export type CreateWorkspaceInput = z.infer<typeof createWorkspaceSchema>;
 
 // Schema for creating a board
 export const createBoardSchema = z.object({
-  workspaceId: z.string({ message: "Workspace is required" }).uuid("Invalid workspace ID"),
+  workspaceId: z.string({ message: "Workspace is required" }).uuid(),
   title: z
     .string({ message: "Board title is required" })
     .trim()
@@ -38,7 +38,7 @@ export type CreateBoardInput = z.infer<typeof createBoardSchema>;
 
 // Schema for updating a board
 export const updateBoardSchema = z.object({
-  boardId: z.string({ message: "Board not found" }).uuid("Invalid board ID"),
+  boardId: z.string({ message: "Board not found" }).uuid(),
   title: z
     .string()
     .trim()
@@ -61,7 +61,7 @@ export type UpdateBoardInput = z.infer<typeof updateBoardSchema>;
 
 // Schema for deleting a board (only needs ID)
 export const deleteBoardSchema = z.object({
-  boardId: z.string({ message: "Board not found" }).uuid("Invalid board ID"),
+  boardId: z.string({ message: "Board not found" }).uuid(),
 });
 
 export type DeleteBoardInput = z.infer<typeof deleteBoardSchema>;
