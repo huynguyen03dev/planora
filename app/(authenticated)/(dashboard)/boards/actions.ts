@@ -3,15 +3,15 @@
 import { refresh, revalidatePath } from "next/cache";
 
 import { getBoardById, createBoard, updateBoard, deleteBoard } from "@/lib/board";
-import {
-  normalizeBoardColor,
-  normalizeBoardTitle,
-  validateBoardColor,
-  validateBoardTitle,
-} from "@/lib/board-validation";
 import { hasWorkspacePermission } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
 import { createWorkspaceForCurrentUser } from "@/lib/workspace";
+import {
+  createWorkspaceSchema,
+  createBoardSchema,
+  updateBoardSchema,
+  deleteBoardSchema,
+} from "@/lib/schemas";
 
 type CreateWorkspaceResult =
   | { success: true; workspaceId: string }
@@ -34,29 +34,17 @@ export async function createWorkspaceAction(
 ): Promise<CreateWorkspaceResult> {
   await verifySession();
 
-  const nameValue = formData.get("workspaceName");
-  const name = typeof nameValue === "string" ? nameValue.trim() : "";
+  // Parse and validate using Zod schema
+  const rawData = Object.fromEntries(formData);
+  const parsed = createWorkspaceSchema.safeParse(rawData);
 
-  if (!name) {
-    return { success: false, error: "Workspace name is required" };
-  }
-
-  if (name.length < 2) {
-    return {
-      success: false,
-      error: "Workspace name must be at least 2 characters",
-    };
-  }
-
-  if (name.length > 64) {
-    return {
-      success: false,
-      error: "Workspace name must be 64 characters or less",
-    };
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Workspace name is required" };
   }
 
   try {
-    const workspace = await createWorkspaceForCurrentUser(name);
+    const workspace = await createWorkspaceForCurrentUser(parsed.data.workspaceName);
     revalidatePath("/boards");
 
     return { success: true, workspaceId: workspace.id };
@@ -73,27 +61,16 @@ export async function createBoardAction(
 ): Promise<CreateBoardResult> {
   const { userId } = await verifySession();
 
-  const workspaceIdValue = formData.get("workspaceId");
-  const titleValue = formData.get("title");
-  const backgroundColorValue = formData.get("backgroundColor");
+  // Parse and validate using Zod schema
+  const rawData = Object.fromEntries(formData);
+  const parsed = createBoardSchema.safeParse(rawData);
 
-  const workspaceId = typeof workspaceIdValue === "string" ? workspaceIdValue : "";
-  const rawTitle = typeof titleValue === "string" ? titleValue : "";
-  const rawColor = typeof backgroundColorValue === "string" ? backgroundColorValue : null;
-
-  if (!workspaceId) {
-    return { success: false, error: "Workspace is required" };
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
   }
 
-  const titleError = validateBoardTitle(rawTitle);
-  if (titleError) {
-    return { success: false, error: titleError };
-  }
-
-  const colorError = validateBoardColor(rawColor);
-  if (colorError) {
-    return { success: false, error: colorError };
-  }
+  const { workspaceId, title, backgroundColor } = parsed.data;
 
   const canCreateBoard = await hasWorkspacePermission(workspaceId, {
     board: ["create"],
@@ -106,8 +83,8 @@ export async function createBoardAction(
   try {
     const board = await createBoard({
       workspaceId,
-      title: normalizeBoardTitle(rawTitle),
-      backgroundColor: normalizeBoardColor(rawColor),
+      title,
+      backgroundColor,
       createdById: userId,
     });
 
@@ -130,17 +107,16 @@ export async function updateBoardAction(
 ): Promise<UpdateBoardResult> {
   await verifySession();
 
-  const boardIdValue = formData.get("boardId");
-  const titleValue = formData.get("title");
-  const backgroundColorValue = formData.get("backgroundColor");
+  // Parse and validate using Zod schema
+  const rawData = Object.fromEntries(formData);
+  const parsed = updateBoardSchema.safeParse(rawData);
 
-  const boardId = typeof boardIdValue === "string" ? boardIdValue : "";
-  const rawTitle = typeof titleValue === "string" ? titleValue : null;
-  const rawColor = typeof backgroundColorValue === "string" ? backgroundColorValue : null;
-
-  if (!boardId) {
-    return { success: false, error: "Board not found" };
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
   }
+
+  const { boardId, title, backgroundColor } = parsed.data;
 
   const board = await getBoardById(boardId);
   if (!board) {
@@ -155,31 +131,12 @@ export async function updateBoardAction(
     return { success: false, error: "Board not found" };
   }
 
-  if (rawTitle === null && rawColor === null) {
-    return { success: false, error: "No board updates provided" };
-  }
-
-  if (rawTitle !== null) {
-    const titleError = validateBoardTitle(rawTitle);
-    if (titleError) {
-      return { success: false, error: titleError };
-    }
-  }
-
-  if (rawColor !== null) {
-    const colorError = validateBoardColor(rawColor);
-    if (colorError) {
-      return { success: false, error: colorError };
-    }
-  }
-
   const data: { title?: string; backgroundColor?: string } = {};
-  if (rawTitle !== null) {
-    data.title = normalizeBoardTitle(rawTitle);
+  if (title !== undefined) {
+    data.title = title;
   }
-
-  if (rawColor !== null) {
-    data.backgroundColor = normalizeBoardColor(rawColor);
+  if (backgroundColor !== undefined) {
+    data.backgroundColor = backgroundColor;
   }
 
   try {
@@ -199,7 +156,10 @@ export async function updateBoardAction(
 export async function deleteBoardAction(boardId: string): Promise<DeleteBoardResult> {
   await verifySession();
 
-  if (!boardId) {
+  // Validate using Zod schema
+  const parsed = deleteBoardSchema.safeParse({ boardId });
+
+  if (!parsed.success) {
     return { success: false, error: "Board not found" };
   }
 
