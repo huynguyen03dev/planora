@@ -53,7 +53,6 @@ export function CreateWorkspaceModal({
     startTransition(async () => {
       const result = await createWorkspaceAction(formData);
       if (result.success) {
-        onClose();
         router.push(`/boards?workspace=${result.workspaceId}`);
         return;
       }
