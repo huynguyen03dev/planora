@@ -18,7 +18,10 @@ export type CreateWorkspaceInput = z.infer<typeof createWorkspaceSchema>;
 
 // Schema for creating a board
 export const createBoardSchema = z.object({
-  workspaceId: z.string({ message: "Workspace is required" }).uuid(),
+  // Better Auth generates 32-char alphanumeric IDs (nanoid-style), not UUIDs
+  workspaceId: z
+    .string({ message: "Workspace is required" })
+    .regex(/^[A-Za-z0-9]{32}$/, "Invalid workspace ID"),
   title: z
     .string({ message: "Board title is required" })
     .trim()
