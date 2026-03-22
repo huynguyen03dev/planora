@@ -226,7 +226,7 @@ model List {
 
   cards Card[]
 
-  @@index([boardId, position])
+  @@unique([boardId, position])
   @@map("list")
 }
 

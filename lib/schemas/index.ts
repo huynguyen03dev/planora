@@ -1,4 +1,3 @@
-// lib/schemas/index.ts
 export {
   createWorkspaceSchema,
   createBoardSchema,
@@ -9,3 +8,12 @@ export {
   type UpdateBoardInput,
   type DeleteBoardInput,
 } from "./board";
+
+export {
+  createListSchema,
+  updateListSchema,
+  deleteListSchema,
+  type CreateListInput,
+  type UpdateListInput,
+  type DeleteListInput,
+} from "./list";
