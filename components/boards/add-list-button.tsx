@@ -57,7 +57,7 @@ export function AddListButton({ boardId, canCreate }: AddListButtonProps) {
         type="button"
         onClick={() => setExpanded(true)}
         variant="ghost"
-        className="w-80 shrink-0 justify-start rounded-lg bg-white/50 hover:bg-white/70"
+        className="w-80 shrink-0 justify-start rounded-lg bg-muted hover:bg-muted/90"
       >
         + Add a list
       </Button>
@@ -65,7 +65,7 @@ export function AddListButton({ boardId, canCreate }: AddListButtonProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex w-80 shrink-0 flex-col gap-2 rounded-lg bg-muted/50 p-3">
+    <form onSubmit={handleSubmit} className="flex w-80 shrink-0 flex-col gap-2 rounded-lg bg-muted p-3">
       <Input
         value={title}
         onChange={(event) => {

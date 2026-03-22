@@ -124,7 +124,7 @@ export function ListColumn({ list, canEdit, canDelete }: ListColumnProps) {
 
   return (
     <>
-      <div className="flex w-80 shrink-0 flex-col gap-2 rounded-lg bg-muted/50 p-3">
+      <div className="flex w-80 shrink-0 flex-col gap-2 rounded-lg bg-muted p-3">
         <div className="flex items-center justify-between gap-2">
           {canEdit && editing ? (
             <Input
