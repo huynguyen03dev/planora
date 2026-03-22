@@ -3,7 +3,10 @@ import { notFound } from "next/navigation";
 import { BoardContent } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-content";
 import { BoardHeader } from "@/components/boards/board-header";
 import { getBoardById } from "@/lib/board";
-import { hasWorkspacePermission, isWorkspaceMember } from "@/lib/authorization";
+import {
+  getBoardPagePermissionsForRole,
+  getWorkspaceRole,
+} from "@/lib/authorization";
 import { getBoardTheme } from "@/lib/constants";
 import { verifySession } from "@/lib/dal";
 import { getListsByBoardId } from "@/lib/list";
@@ -22,18 +25,18 @@ export default async function BoardPage({ params }: BoardPageProps) {
     notFound();
   }
 
-  const canViewBoard = await isWorkspaceMember(userId, board.workspaceId);
-  if (!canViewBoard) {
+  const role = await getWorkspaceRole(userId, board.workspaceId);
+  if (!role) {
     notFound();
   }
 
-  const [canEditBoard, canDeleteBoard, canCreateList, canEditList, canDeleteList] = await Promise.all([
-    hasWorkspacePermission(board.workspaceId, { board: ["update"] }),
-    hasWorkspacePermission(board.workspaceId, { board: ["delete"] }),
-    hasWorkspacePermission(board.workspaceId, { list: ["create"] }),
-    hasWorkspacePermission(board.workspaceId, { list: ["update"] }),
-    hasWorkspacePermission(board.workspaceId, { list: ["delete"] }),
-  ]);
+  const {
+    canEditBoard,
+    canDeleteBoard,
+    canCreateList,
+    canEditList,
+    canDeleteList,
+  } = getBoardPagePermissionsForRole(role);
 
   const lists = await getListsByBoardId(boardId);
 

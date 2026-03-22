@@ -6,7 +6,6 @@ import {
   updateListAction,
   deleteListAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
-import { CardPlaceholder } from "@/components/boards/card-placeholder";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -204,10 +203,9 @@ export function ListColumn({ list, canEdit, canDelete }: ListColumnProps) {
 
         {error ? <p className="text-xs text-destructive">{error}</p> : null}
 
-        <div className="flex flex-col gap-2">
-          <CardPlaceholder title="Sample card 1" />
-          <CardPlaceholder title="Sample card 2" />
-        </div>
+        <p className="rounded-md border border-dashed border-border/60 px-3 py-2 text-xs text-muted-foreground">
+          No cards yet
+        </p>
 
         <Button type="button" variant="ghost" size="sm" className="justify-start">
           + Add a card
