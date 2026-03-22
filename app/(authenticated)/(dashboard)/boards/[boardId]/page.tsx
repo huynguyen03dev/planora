@@ -1,10 +1,12 @@
 import { notFound } from "next/navigation";
 
+import { BoardContent } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-content";
 import { BoardHeader } from "@/components/boards/board-header";
 import { getBoardById } from "@/lib/board";
 import { hasWorkspacePermission, isWorkspaceMember } from "@/lib/authorization";
 import { getBoardTheme } from "@/lib/constants";
 import { verifySession } from "@/lib/dal";
+import { getListsByBoardId } from "@/lib/list";
 
 type BoardPageProps = {
   params: Promise<{ boardId: string }>;
@@ -25,10 +27,16 @@ export default async function BoardPage({ params }: BoardPageProps) {
     notFound();
   }
 
-  const [canEditBoard, canDeleteBoard] = await Promise.all([
+  const [canEditBoard, canDeleteBoard, canCreateList, canEditList, canDeleteList] = await Promise.all([
     hasWorkspacePermission(board.workspaceId, { board: ["update"] }),
     hasWorkspacePermission(board.workspaceId, { board: ["delete"] }),
+    hasWorkspacePermission(board.workspaceId, { list: ["create"] }),
+    hasWorkspacePermission(board.workspaceId, { list: ["update"] }),
+    hasWorkspacePermission(board.workspaceId, { list: ["delete"] }),
   ]);
+
+  const lists = await getListsByBoardId(boardId);
+
   const boardTheme = getBoardTheme(board.backgroundColor);
 
   return (
@@ -44,11 +52,16 @@ export default async function BoardPage({ params }: BoardPageProps) {
       />
 
       <div
-        className="-mt-px flex-1 rounded-b-xl border border-t-0 border-white/20 p-6 text-white"
+        className="-mt-px flex flex-1 flex-col rounded-b-xl border border-t-0 border-white/20"
         style={{ background: boardTheme.surface }}
       >
-        <h2 className="text-base font-medium">Kanban view</h2>
-        <p className="mt-1 text-sm text-white/85">Lists and cards are coming soon.</p>
+        <BoardContent
+          boardId={board.id}
+          lists={lists}
+          canEdit={canEditList}
+          canDelete={canDeleteList}
+          canCreateList={canCreateList}
+        />
       </div>
     </div>
   );
