@@ -113,6 +113,149 @@ export async function archiveCard(cardId: string): Promise<void> {
   });
 }
 
+async function resolveCardPosition(data: {
+  targetListId: string;
+  prevCardId?: string | null;
+  nextCardId?: string | null;
+}): Promise<number> {
+  const [prevCard, nextCard] = await Promise.all([
+    data.prevCardId
+      ? db.card.findUnique({
+          where: { id: data.prevCardId, archivedAt: null },
+          select: { id: true, listId: true, position: true },
+        })
+      : null,
+    data.nextCardId
+      ? db.card.findUnique({
+          where: { id: data.nextCardId, archivedAt: null },
+          select: { id: true, listId: true, position: true },
+        })
+      : null,
+  ]);
+
+  if (data.prevCardId && (!prevCard || prevCard.listId !== data.targetListId)) {
+    throw new Error("Invalid prevCardId");
+  }
+
+  if (data.nextCardId && (!nextCard || nextCard.listId !== data.targetListId)) {
+    throw new Error("Invalid nextCardId");
+  }
+
+  if (prevCard && nextCard) {
+    const lower = Math.min(prevCard.position, nextCard.position);
+    const upper = Math.max(prevCard.position, nextCard.position);
+    return (lower + upper) / 2;
+  }
+
+  if (prevCard) {
+    return prevCard.position + CARD_POSITION_GAP;
+  }
+
+  if (nextCard) {
+    return nextCard.position - CARD_POSITION_GAP;
+  }
+
+  const lastCard = await db.card.findFirst({
+    where: {
+      listId: data.targetListId,
+      archivedAt: null,
+    },
+    orderBy: [{ position: "desc" }, { createdAt: "desc" }],
+    select: { position: true },
+  });
+
+  return lastCard ? lastCard.position + CARD_POSITION_GAP : CARD_POSITION_GAP;
+}
+
+export async function reorderCardWithinListByNeighbors(data: {
+  cardId: string;
+  prevCardId?: string | null;
+  nextCardId?: string | null;
+}): Promise<CardRecord> {
+  const existingCard = await db.card.findUnique({
+    where: {
+      id: data.cardId,
+      archivedAt: null,
+    },
+    select: {
+      id: true,
+      listId: true,
+    },
+  });
+
+  if (!existingCard) {
+    throw new Error("Card not found");
+  }
+
+  const nextPosition = await resolveCardPosition({
+    targetListId: existingCard.listId,
+    prevCardId: data.prevCardId,
+    nextCardId: data.nextCardId,
+  });
+
+  return db.card.update({
+    where: {
+      id: data.cardId,
+      archivedAt: null,
+    },
+    data: {
+      position: nextPosition,
+    },
+    select: {
+      id: true,
+      listId: true,
+      title: true,
+      description: true,
+      position: true,
+      priority: true,
+      dueDate: true,
+      coverImage: true,
+      archivedAt: true,
+      createdById: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+export async function moveCardToListByNeighbors(data: {
+  cardId: string;
+  targetListId: string;
+  prevCardId?: string | null;
+  nextCardId?: string | null;
+}): Promise<CardRecord> {
+  const nextPosition = await resolveCardPosition({
+    targetListId: data.targetListId,
+    prevCardId: data.prevCardId,
+    nextCardId: data.nextCardId,
+  });
+
+  return db.card.update({
+    where: {
+      id: data.cardId,
+      archivedAt: null,
+    },
+    data: {
+      listId: data.targetListId,
+      position: nextPosition,
+    },
+    select: {
+      id: true,
+      listId: true,
+      title: true,
+      description: true,
+      position: true,
+      priority: true,
+      dueDate: true,
+      coverImage: true,
+      archivedAt: true,
+      createdById: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
 export async function getCardWithListAndBoard(
   cardId: string,
 ): Promise<CardWithListBoardRecord | null> {

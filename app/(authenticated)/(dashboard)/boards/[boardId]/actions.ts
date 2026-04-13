@@ -3,17 +3,33 @@
 import { revalidatePath } from "next/cache";
 
 import { getBoardById } from "@/lib/board";
-import { createCard, updateCardTitle, archiveCard, getCardWithListAndBoard } from "@/lib/card";
-import { createList, updateListTitle, deleteList, getListWithBoard } from "@/lib/list";
+import {
+  createCard,
+  updateCardTitle,
+  archiveCard,
+  getCardWithListAndBoard,
+  reorderCardWithinListByNeighbors,
+  moveCardToListByNeighbors,
+} from "@/lib/card";
+import {
+  createList,
+  updateListTitle,
+  deleteList,
+  getListWithBoard,
+  reorderListByNeighbors,
+} from "@/lib/list";
 import { hasWorkspacePermission } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
 import {
   createListSchema,
   updateListSchema,
   deleteListSchema,
+  reorderListSchema,
   createCardSchema,
   updateCardSchema,
   archiveCardSchema,
+  reorderCardSchema,
+  moveCardSchema,
 } from "@/lib/schemas";
 
 type CreateListResult =
@@ -37,6 +53,18 @@ type UpdateCardResult =
   | { success: false; error: string };
 
 type ArchiveCardResult =
+  | { success: true }
+  | { success: false; error: string };
+
+type ReorderListResult =
+  | { success: true }
+  | { success: false; error: string };
+
+type ReorderCardResult =
+  | { success: true }
+  | { success: false; error: string };
+
+type MoveCardResult =
   | { success: true }
   | { success: false; error: string };
 
@@ -257,5 +285,135 @@ export async function archiveCardAction(
     return { success: true };
   } catch {
     return { success: false, error: "Failed to archive card. Please try again." };
+  }
+}
+
+export async function reorderListAction(
+  formData: FormData,
+): Promise<ReorderListResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = reorderListSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    return { success: false, error: "List not found" };
+  }
+
+  await verifySession();
+
+  const { listId, prevListId, nextListId } = parsed.data;
+
+  const result = await getListWithBoard(listId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "List not found" };
+  }
+
+  const canUpdateList = await hasWorkspacePermission(result.board.workspaceId, {
+    list: ["update"],
+  });
+
+  if (!canUpdateList) {
+    return { success: false, error: "List not found" };
+  }
+
+  try {
+    await reorderListByNeighbors({
+      listId,
+      prevListId: prevListId ?? null,
+      nextListId: nextListId ?? null,
+    });
+    revalidatePath(`/boards/${result.list.boardId}`);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to reorder list. Please try again." };
+  }
+}
+
+export async function reorderCardAction(
+  formData: FormData,
+): Promise<ReorderCardResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = reorderCardSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    return { success: false, error: "Card not found" };
+  }
+
+  await verifySession();
+
+  const { cardId, prevCardId, nextCardId } = parsed.data;
+
+  const result = await getCardWithListAndBoard(cardId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(result.board.workspaceId, {
+    card: ["update"],
+  });
+
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  try {
+    await reorderCardWithinListByNeighbors({
+      cardId,
+      prevCardId: prevCardId ?? null,
+      nextCardId: nextCardId ?? null,
+    });
+    revalidatePath(`/boards/${result.list.boardId}`);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to reorder card. Please try again." };
+  }
+}
+
+export async function moveCardAction(
+  formData: FormData,
+): Promise<MoveCardResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = moveCardSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    return { success: false, error: "Card not found" };
+  }
+
+  await verifySession();
+
+  const { cardId, targetListId, prevCardId, nextCardId } = parsed.data;
+
+  const cardResult = await getCardWithListAndBoard(cardId);
+  if (!cardResult || cardResult.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const targetListResult = await getListWithBoard(targetListId);
+  if (
+    !targetListResult ||
+    targetListResult.board.archivedAt ||
+    targetListResult.list.boardId !== cardResult.list.boardId
+  ) {
+    return { success: false, error: "List not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(cardResult.board.workspaceId, {
+    card: ["update"],
+  });
+
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  try {
+    await moveCardToListByNeighbors({
+      cardId,
+      targetListId,
+      prevCardId: prevCardId ?? null,
+      nextCardId: nextCardId ?? null,
+    });
+    revalidatePath(`/boards/${cardResult.list.boardId}`);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to move card. Please try again." };
   }
 }

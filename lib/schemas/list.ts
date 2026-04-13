@@ -30,3 +30,25 @@ export const deleteListSchema = z.object({
 });
 
 export type DeleteListInput = z.infer<typeof deleteListSchema>;
+
+const maybeListIdSchema = z
+  .string({ message: "Invalid list ID" })
+  .uuid({ message: "Invalid list ID" })
+  .nullable()
+  .optional();
+
+export const reorderListSchema = z
+  .object({
+    listId: z.string().uuid({ message: "Invalid list ID" }),
+    prevListId: maybeListIdSchema,
+    nextListId: maybeListIdSchema,
+  })
+  .refine(
+    (data) => !(data.prevListId && data.nextListId && data.prevListId === data.nextListId),
+    {
+      message: "Invalid reorder payload",
+      path: ["nextListId"],
+    },
+  );
+
+export type ReorderListInput = z.infer<typeof reorderListSchema>;

@@ -30,3 +30,56 @@ export const archiveCardSchema = z.object({
 });
 
 export type ArchiveCardInput = z.infer<typeof archiveCardSchema>;
+
+const maybeCardIdSchema = z
+  .string({ message: "Invalid card ID" })
+  .uuid({ message: "Invalid card ID" })
+  .nullable()
+  .optional();
+
+export const reorderCardSchema = z
+  .object({
+    cardId: z.string().uuid({ message: "Invalid card ID" }),
+    prevCardId: maybeCardIdSchema,
+    nextCardId: maybeCardIdSchema,
+  })
+  .refine(
+    (data) => !(data.prevCardId && data.nextCardId && data.prevCardId === data.nextCardId),
+    {
+      message: "Invalid reorder payload",
+      path: ["nextCardId"],
+    },
+  )
+  .refine(
+    (data) => data.cardId !== data.prevCardId && data.cardId !== data.nextCardId,
+    {
+      message: "Invalid reorder payload",
+      path: ["cardId"],
+    },
+  );
+
+export type ReorderCardInput = z.infer<typeof reorderCardSchema>;
+
+export const moveCardSchema = z
+  .object({
+    cardId: z.string().uuid({ message: "Invalid card ID" }),
+    targetListId: z.string().uuid({ message: "Invalid list ID" }),
+    prevCardId: maybeCardIdSchema,
+    nextCardId: maybeCardIdSchema,
+  })
+  .refine(
+    (data) => !(data.prevCardId && data.nextCardId && data.prevCardId === data.nextCardId),
+    {
+      message: "Invalid move payload",
+      path: ["nextCardId"],
+    },
+  )
+  .refine(
+    (data) => data.cardId !== data.prevCardId && data.cardId !== data.nextCardId,
+    {
+      message: "Invalid move payload",
+      path: ["cardId"],
+    },
+  );
+
+export type MoveCardInput = z.infer<typeof moveCardSchema>;

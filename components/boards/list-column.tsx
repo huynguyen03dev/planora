@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 import {
   createCardAction,
@@ -8,6 +10,7 @@ import {
   deleteListAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
 import { ListCardItem } from "@/components/boards/list-card-item";
+import { toCardSortableId } from "@/components/boards/board-dnd-types";
 import { useInlineTitleEditor } from "@/components/boards/use-inline-title-editor";
 import {
   AlertDialog,
@@ -46,6 +49,9 @@ type ListColumnProps = {
   canCreateCard: boolean;
   canEditCard: boolean;
   canArchiveCard: boolean;
+  sortableId: string;
+  canSortList: boolean;
+  canSortCards: boolean;
 };
 
 export function ListColumn({
@@ -55,6 +61,9 @@ export function ListColumn({
   canCreateCard,
   canEditCard,
   canArchiveCard,
+  sortableId,
+  canSortList,
+  canSortCards,
 }: ListColumnProps) {
   const [newCardTitle, setNewCardTitle] = useState("");
   const [addCardExpanded, setAddCardExpanded] = useState(false);
@@ -88,6 +97,26 @@ export function ListColumn({
     handleInputKeyDown,
     handleActionsMenuPointerDown,
   } = titleEditor;
+  const {
+    attributes: dragAttributes,
+    listeners: dragListeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+    isOver,
+  } = useSortable({
+    id: sortableId,
+    data: {
+      type: "list",
+      listId: list.id,
+    },
+    disabled: !canSortList || editing,
+  });
+  const listStyle = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
 
   function handleDelete() {
     const formData = new FormData();
@@ -97,6 +126,7 @@ export function ListColumn({
       const result = await deleteListAction(formData);
       if (!result.success) {
         setError(result.error);
+        return;
       }
       setDeleteDialogOpen(false);
     });
@@ -140,7 +170,11 @@ export function ListColumn({
 
   return (
     <>
-      <div className="flex w-80 shrink-0 flex-col gap-2 rounded-lg bg-muted p-3">
+      <div
+        ref={setNodeRef}
+        style={listStyle}
+        className="flex w-80 shrink-0 flex-col gap-2 rounded-lg bg-muted p-3"
+      >
         <div className="flex items-center justify-between gap-2">
           {canEdit && editing ? (
             <Input
@@ -171,61 +205,89 @@ export function ListColumn({
 
           {(canEdit || canDelete) && (
             <div ref={actionsMenuRef}>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
+              <div className="flex items-center gap-1">
+                {canSortList ? (
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    aria-label="List actions"
+                    aria-label="Drag list"
+                    className="cursor-grab active:cursor-grabbing"
                     onPointerDown={handleActionsMenuPointerDown}
+                    {...dragAttributes}
+                    {...dragListeners}
                   >
-                    <span className="text-base">⋯</span>
+                    <span className="text-base leading-none">⋮⋮</span>
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {canEdit && (
-                    <DropdownMenuItem onSelect={startEditing}>
-                      Rename
-                    </DropdownMenuItem>
-                  )}
-                  {canDelete && (
-                    <DropdownMenuItem
-                      onSelect={() => setDeleteDialogOpen(true)}
-                      className="text-destructive focus:text-destructive"
+                ) : null}
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="List actions"
+                      onPointerDown={handleActionsMenuPointerDown}
                     >
-                      Delete
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                      <span className="text-base">⋯</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {canEdit && (
+                      <DropdownMenuItem onSelect={startEditing}>
+                        Rename
+                      </DropdownMenuItem>
+                    )}
+                    {canDelete && (
+                      <DropdownMenuItem
+                        onSelect={() => setDeleteDialogOpen(true)}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        Delete
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
           )}
         </div>
 
         {error ? <p className="text-xs text-destructive">{error}</p> : null}
 
-        <div className="space-y-2">
-          {list.cards.length === 0 ? (
-            <Card size="sm" className="gap-2 border-dashed border-border/60 py-3 shadow-none">
-              <CardContent className="px-3 py-0">
-                <p className="text-xs text-muted-foreground">No cards yet</p>
-              </CardContent>
-            </Card>
-          ) : (
-            list.cards.map((card) => (
-              <ListCardItem
-                key={card.id}
-                card={{
-                  id: card.id,
-                  title: card.title,
-                }}
-                canEdit={canEditCard}
-                canArchive={canArchiveCard}
-              />
-            ))
-          )}
-        </div>
+        <SortableContext
+          items={list.cards.map((card) => toCardSortableId(card.id))}
+          strategy={verticalListSortingStrategy}
+        >
+          <div
+            className={`space-y-2 rounded-md ${
+              isOver && !isDragging ? "ring-1 ring-white/50" : ""
+            }`}
+          >
+            {list.cards.length === 0 ? (
+              <Card size="sm" className="gap-2 border-dashed border-border/60 py-3 shadow-none">
+                <CardContent className="px-3 py-0">
+                  <p className="text-xs text-muted-foreground">No cards yet</p>
+                </CardContent>
+              </Card>
+            ) : (
+              list.cards.map((card) => (
+                <ListCardItem
+                  key={card.id}
+                  card={{
+                    id: card.id,
+                    title: card.title,
+                    listId: card.listId,
+                  }}
+                  canEdit={canEditCard}
+                  canArchive={canArchiveCard}
+                  canDrag={canSortCards}
+                />
+              ))
+            )}
+          </div>
+        </SortableContext>
 
         {canCreateCard ? (
           addCardExpanded ? (

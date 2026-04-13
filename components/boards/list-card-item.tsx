@@ -1,11 +1,14 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 import {
   archiveCardAction,
   updateCardAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
+import { toCardSortableId } from "@/components/boards/board-dnd-types";
 import { useInlineTitleEditor } from "@/components/boards/use-inline-title-editor";
 import {
   AlertDialog,
@@ -31,12 +34,19 @@ type ListCardItemProps = {
   card: {
     id: string;
     title: string;
+    listId: string;
   };
   canEdit: boolean;
   canArchive: boolean;
+  canDrag: boolean;
 };
 
-export function ListCardItem({ card, canEdit, canArchive }: ListCardItemProps) {
+export function ListCardItem({
+  card,
+  canEdit,
+  canArchive,
+  canDrag,
+}: ListCardItemProps) {
   const [error, setError] = useState("");
 
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
@@ -65,6 +75,27 @@ export function ListCardItem({ card, canEdit, canArchive }: ListCardItemProps) {
     handleInputKeyDown,
     handleActionsMenuPointerDown,
   } = titleEditor;
+  const {
+    attributes: dragAttributes,
+    listeners: dragListeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: toCardSortableId(card.id),
+    data: {
+      type: "card",
+      cardId: card.id,
+      listId: card.listId,
+    },
+    disabled: !canDrag || editing,
+  });
+  const cardStyle = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.7 : 1,
+  };
 
   function handleArchive() {
     const formData = new FormData();
@@ -82,8 +113,9 @@ export function ListCardItem({ card, canEdit, canArchive }: ListCardItemProps) {
 
   return (
     <>
-      <Card size="sm" className="gap-2 py-3 shadow-sm">
-        <CardContent className="space-y-2 px-3">
+      <div ref={setNodeRef} style={cardStyle}>
+        <Card size="sm" className="gap-2 py-3 shadow-sm">
+          <CardContent className="space-y-2 px-3">
           <div className="flex items-start justify-between gap-2">
             {canEdit && editing ? (
               <Input
@@ -115,42 +147,60 @@ export function ListCardItem({ card, canEdit, canArchive }: ListCardItemProps) {
 
             {(canEdit || canArchive) && (
               <div ref={actionsMenuRef}>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
+                <div className="flex items-center gap-1">
+                  {canDrag ? (
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon-sm"
-                      aria-label="Card actions"
+                      aria-label="Drag card"
+                      className="cursor-grab active:cursor-grabbing"
                       onPointerDown={handleActionsMenuPointerDown}
+                      {...dragAttributes}
+                      {...dragListeners}
                     >
-                      <span className="text-base">⋯</span>
+                      <span className="text-base leading-none">⋮⋮</span>
                     </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {canEdit && (
-                      <DropdownMenuItem onSelect={startEditing}>
-                        Rename
-                      </DropdownMenuItem>
-                    )}
-                    {canArchive && (
-                      <DropdownMenuItem
-                        onSelect={() => setArchiveDialogOpen(true)}
-                        className="text-destructive focus:text-destructive"
+                  ) : null}
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Card actions"
+                        onPointerDown={handleActionsMenuPointerDown}
                       >
-                        Archive
-                      </DropdownMenuItem>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                        <span className="text-base">⋯</span>
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {canEdit && (
+                        <DropdownMenuItem onSelect={startEditing}>
+                          Rename
+                        </DropdownMenuItem>
+                      )}
+                      {canArchive && (
+                        <DropdownMenuItem
+                          onSelect={() => setArchiveDialogOpen(true)}
+                          className="text-destructive focus:text-destructive"
+                        >
+                          Archive
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
             )}
           </div>
 
           {editError ? <p className="text-xs text-destructive">{editError}</p> : null}
           {error ? <p className="text-xs text-destructive">{error}</p> : null}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
 
       <AlertDialog
         open={archiveDialogOpen}
