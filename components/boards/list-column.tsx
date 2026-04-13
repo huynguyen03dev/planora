@@ -1,11 +1,14 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 
 import {
+  createCardAction,
   updateListAction,
   deleteListAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
+import { ListCardItem } from "@/components/boards/list-card-item";
+import { useInlineTitleEditor } from "@/components/boards/use-inline-title-editor";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,90 +27,67 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
 
 type ListColumnProps = {
   list: {
     id: string;
     title: string;
     boardId: string;
+    cards: Array<{
+      id: string;
+      listId: string;
+      title: string;
+      position: number;
+    }>;
   };
   canEdit: boolean;
   canDelete: boolean;
+  canCreateCard: boolean;
+  canEditCard: boolean;
+  canArchiveCard: boolean;
 };
 
-export function ListColumn({ list, canEdit, canDelete }: ListColumnProps) {
-  const [draftTitle, setDraftTitle] = useState(list.title);
-  const [editing, setEditing] = useState(false);
-  const [error, setError] = useState("");
-  const [isPending, startTransition] = useTransition();
-  const skipBlurSaveRef = useRef(false);
-  const actionsMenuRef = useRef<HTMLDivElement | null>(null);
+export function ListColumn({
+  list,
+  canEdit,
+  canDelete,
+  canCreateCard,
+  canEditCard,
+  canArchiveCard,
+}: ListColumnProps) {
+  const [newCardTitle, setNewCardTitle] = useState("");
+  const [addCardExpanded, setAddCardExpanded] = useState(false);
+  const [addCardError, setAddCardError] = useState("");
+  const [isCreatingCard, startCreateCardTransition] = useTransition();
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isDeleting, startDeleteTransition] = useTransition();
 
-  function startEditing() {
-    skipBlurSaveRef.current = false;
-    setDraftTitle(list.title);
-    setError("");
-    setEditing(true);
-  }
-
-  function handleSave() {
-    if (!canEdit) {
-      setEditing(false);
-      return;
-    }
-
-    if (isPending) {
-      return;
-    }
-
-    const nextTitle = draftTitle.trim();
-
-    if (nextTitle === "") {
-      setError("Title is required");
-      setEditing(true);
-      return;
-    }
-
-    if (nextTitle === list.title.trim()) {
-      setError("");
-      setEditing(false);
-      setDraftTitle(list.title);
-      return;
-    }
-
-    const formData = new FormData();
-    formData.set("listId", list.id);
-    formData.set("title", nextTitle);
-
-    startTransition(async () => {
-      const result = await updateListAction(formData);
-      if (!result.success) {
-        setError(result.error);
-        setEditing(true);
-        return;
-      } else {
-        setError("");
-        setEditing(false);
-      }
-    });
-  }
-
-  function handleBlur(event: React.FocusEvent<HTMLInputElement>) {
-    if (skipBlurSaveRef.current) {
-      skipBlurSaveRef.current = false;
-      return;
-    }
-
-    const nextFocused = event.relatedTarget;
-    if (nextFocused instanceof Node && actionsMenuRef.current?.contains(nextFocused)) {
-      return;
-    }
-
-    handleSave();
-  }
+  const titleEditor = useInlineTitleEditor({
+    initialTitle: list.title,
+    canEdit,
+    onSave: async (nextTitle) => {
+      const formData = new FormData();
+      formData.set("listId", list.id);
+      formData.set("title", nextTitle);
+      return updateListAction(formData);
+    },
+  });
+  const {
+    actionsMenuRef,
+    draftTitle,
+    editing,
+    error,
+    isPending,
+    clearError,
+    setError,
+    setDraftTitle,
+    startEditing,
+    handleBlur,
+    handleInputKeyDown,
+    handleActionsMenuPointerDown,
+  } = titleEditor;
 
   function handleDelete() {
     const formData = new FormData();
@@ -122,6 +102,42 @@ export function ListColumn({ list, canEdit, canDelete }: ListColumnProps) {
     });
   }
 
+  function handleCreateCard(event: React.FormEvent) {
+    event.preventDefault();
+
+    if (!canCreateCard || isCreatingCard) {
+      return;
+    }
+
+    const title = newCardTitle.trim();
+    if (!title) {
+      setAddCardError("Title is required");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.set("listId", list.id);
+    formData.set("title", title);
+
+    startCreateCardTransition(async () => {
+      const result = await createCardAction(formData);
+      if (!result.success) {
+        setAddCardError(result.error);
+        return;
+      }
+
+      setNewCardTitle("");
+      setAddCardError("");
+      setAddCardExpanded(false);
+    });
+  }
+
+  function handleCancelCreateCard() {
+    setNewCardTitle("");
+    setAddCardError("");
+    setAddCardExpanded(false);
+  }
+
   return (
     <>
       <div className="flex w-80 shrink-0 flex-col gap-2 rounded-lg bg-muted p-3">
@@ -131,34 +147,24 @@ export function ListColumn({ list, canEdit, canDelete }: ListColumnProps) {
               value={draftTitle}
               onChange={(event) => {
                 setDraftTitle(event.target.value);
-                setError("");
+                clearError();
               }}
               onBlur={handleBlur}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  handleSave();
-                }
-
-                if (event.key === "Escape") {
-                  skipBlurSaveRef.current = true;
-                  setDraftTitle(list.title);
-                  setError("");
-                  setEditing(false);
-                }
-              }}
+              onKeyDown={handleInputKeyDown}
               autoFocus
               disabled={isPending}
               className="h-8 text-sm font-semibold"
             />
           ) : canEdit ? (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={startEditing}
-              className="flex-1 truncate text-left text-sm font-semibold"
+              className="h-auto flex-1 justify-start truncate p-0 text-left text-sm font-semibold hover:bg-transparent"
             >
               {list.title}
-            </button>
+            </Button>
           ) : (
             <h3 className="flex-1 truncate text-sm font-semibold">{list.title}</h3>
           )}
@@ -172,11 +178,7 @@ export function ListColumn({ list, canEdit, canDelete }: ListColumnProps) {
                     variant="ghost"
                     size="icon-sm"
                     aria-label="List actions"
-                    onPointerDown={() => {
-                      if (editing) {
-                        skipBlurSaveRef.current = true;
-                      }
-                    }}
+                    onPointerDown={handleActionsMenuPointerDown}
                   >
                     <span className="text-base">⋯</span>
                   </Button>
@@ -203,16 +205,94 @@ export function ListColumn({ list, canEdit, canDelete }: ListColumnProps) {
 
         {error ? <p className="text-xs text-destructive">{error}</p> : null}
 
-        <p className="rounded-md border border-dashed border-border/60 px-3 py-2 text-xs text-muted-foreground">
-          No cards yet
-        </p>
+        <div className="space-y-2">
+          {list.cards.length === 0 ? (
+            <Card size="sm" className="gap-2 border-dashed border-border/60 py-3 shadow-none">
+              <CardContent className="px-3 py-0">
+                <p className="text-xs text-muted-foreground">No cards yet</p>
+              </CardContent>
+            </Card>
+          ) : (
+            list.cards.map((card) => (
+              <ListCardItem
+                key={card.id}
+                card={{
+                  id: card.id,
+                  title: card.title,
+                }}
+                canEdit={canEditCard}
+                canArchive={canArchiveCard}
+              />
+            ))
+          )}
+        </div>
 
-        <Button type="button" variant="ghost" size="sm" className="justify-start">
-          + Add a card
-        </Button>
+        {canCreateCard ? (
+          addCardExpanded ? (
+            <form onSubmit={handleCreateCard} className="space-y-2">
+              <Input
+                value={newCardTitle}
+                onChange={(event) => {
+                  setNewCardTitle(event.target.value);
+                  setAddCardError("");
+                }}
+                placeholder="Enter card title..."
+                autoFocus
+                disabled={isCreatingCard}
+                className="h-8 text-sm"
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    handleCancelCreateCard();
+                  }
+                }}
+              />
+
+              {addCardError ? (
+                <p className="text-xs text-destructive">{addCardError}</p>
+              ) : null}
+
+              <div className="flex gap-2">
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={isCreatingCard || !newCardTitle.trim()}
+                >
+                  {isCreatingCard ? "Adding..." : "Add card"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleCancelCreateCard}
+                  disabled={isCreatingCard}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          ) : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="justify-start"
+              onClick={() => setAddCardExpanded(true)}
+            >
+              + Add a card
+            </Button>
+          )
+        ) : null}
       </div>
 
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+      <AlertDialog
+        open={deleteDialogOpen}
+        onOpenChange={(open) => {
+          if (isDeleting) {
+            return;
+          }
+          setDeleteDialogOpen(open);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete list?</AlertDialogTitle>
@@ -222,7 +302,14 @@ export function ListColumn({ list, canEdit, canDelete }: ListColumnProps) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} disabled={isDeleting} className="bg-destructive hover:bg-destructive/90">
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                handleDelete();
+              }}
+              disabled={isDeleting}
+              className="bg-destructive hover:bg-destructive/90"
+            >
               {isDeleting ? "Deleting..." : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>

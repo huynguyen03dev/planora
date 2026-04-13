@@ -3,10 +3,18 @@
 import { revalidatePath } from "next/cache";
 
 import { getBoardById } from "@/lib/board";
+import { createCard, updateCardTitle, archiveCard, getCardWithListAndBoard } from "@/lib/card";
 import { createList, updateListTitle, deleteList, getListWithBoard } from "@/lib/list";
 import { hasWorkspacePermission } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
-import { createListSchema, updateListSchema, deleteListSchema } from "@/lib/schemas";
+import {
+  createListSchema,
+  updateListSchema,
+  deleteListSchema,
+  createCardSchema,
+  updateCardSchema,
+  archiveCardSchema,
+} from "@/lib/schemas";
 
 type CreateListResult =
   | { success: true; listId: string }
@@ -17,6 +25,18 @@ type UpdateListResult =
   | { success: false; error: string };
 
 type DeleteListResult =
+  | { success: true }
+  | { success: false; error: string };
+
+type CreateCardResult =
+  | { success: true; cardId: string }
+  | { success: false; error: string };
+
+type UpdateCardResult =
+  | { success: true }
+  | { success: false; error: string };
+
+type ArchiveCardResult =
   | { success: true }
   | { success: false; error: string };
 
@@ -127,5 +147,115 @@ export async function deleteListAction(
     return { success: true };
   } catch {
     return { success: false, error: "Failed to delete list. Please try again." };
+  }
+}
+
+export async function createCardAction(
+  formData: FormData,
+): Promise<CreateCardResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = createCardSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  const { userId } = await verifySession();
+
+  const { listId, title } = parsed.data;
+
+  const result = await getListWithBoard(listId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "List not found" };
+  }
+
+  const canCreateCard = await hasWorkspacePermission(result.board.workspaceId, {
+    card: ["create"],
+  });
+
+  if (!canCreateCard) {
+    return { success: false, error: "List not found" };
+  }
+
+  try {
+    const card = await createCard({ listId, title, createdById: userId });
+    revalidatePath(`/boards/${result.list.boardId}`);
+    return { success: true, cardId: card.id };
+  } catch {
+    return { success: false, error: "Failed to create card. Please try again." };
+  }
+}
+
+export async function updateCardAction(
+  formData: FormData,
+): Promise<UpdateCardResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = updateCardSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  await verifySession();
+
+  const { cardId, title } = parsed.data;
+
+  const result = await getCardWithListAndBoard(cardId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(result.board.workspaceId, {
+    card: ["update"],
+  });
+
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  try {
+    await updateCardTitle(cardId, title);
+    revalidatePath(`/boards/${result.list.boardId}`);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to update card. Please try again." };
+  }
+}
+
+export async function archiveCardAction(
+  formData: FormData,
+): Promise<ArchiveCardResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = archiveCardSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    return { success: false, error: "Card not found" };
+  }
+
+  await verifySession();
+
+  const { cardId } = parsed.data;
+
+  const result = await getCardWithListAndBoard(cardId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canArchiveCard = await hasWorkspacePermission(result.board.workspaceId, {
+    card: ["delete"],
+  });
+
+  if (!canArchiveCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  try {
+    await archiveCard(cardId);
+    revalidatePath(`/boards/${result.list.boardId}`);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to archive card. Please try again." };
   }
 }

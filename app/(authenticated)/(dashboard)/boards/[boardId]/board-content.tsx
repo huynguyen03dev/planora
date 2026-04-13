@@ -10,10 +10,19 @@ type BoardContentProps = {
     id: string;
     title: string;
     boardId: string;
+    cards: Array<{
+      id: string;
+      listId: string;
+      title: string;
+      position: number;
+    }>;
   }>;
   canEdit: boolean;
   canDelete: boolean;
   canCreateList: boolean;
+  canCreateCard: boolean;
+  canEditCard: boolean;
+  canArchiveCard: boolean;
 };
 
 export function BoardContent({
@@ -22,12 +31,23 @@ export function BoardContent({
   canEdit,
   canDelete,
   canCreateList,
+  canCreateCard,
+  canEditCard,
+  canArchiveCard,
 }: BoardContentProps) {
   return (
     <ScrollArea className="flex-1" showHorizontalScrollbar>
       <div className="flex w-max min-w-full gap-4 p-4">
         {lists.map((list) => (
-          <ListColumn key={list.id} list={list} canEdit={canEdit} canDelete={canDelete} />
+          <ListColumn
+            key={list.id}
+            list={list}
+            canEdit={canEdit}
+            canDelete={canDelete}
+            canCreateCard={canCreateCard}
+            canEditCard={canEditCard}
+            canArchiveCard={canArchiveCard}
+          />
         ))}
         <AddListButton boardId={boardId} canCreate={canCreateList} />
       </div>

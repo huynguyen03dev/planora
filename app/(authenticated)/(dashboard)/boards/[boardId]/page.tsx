@@ -36,6 +36,9 @@ export default async function BoardPage({ params }: BoardPageProps) {
     canCreateList,
     canEditList,
     canDeleteList,
+    canCreateCard,
+    canEditCard,
+    canArchiveCard,
   } = getBoardPagePermissionsForRole(role);
 
   const lists = await getListsByBoardId(boardId);
@@ -64,6 +67,9 @@ export default async function BoardPage({ params }: BoardPageProps) {
           canEdit={canEditList}
           canDelete={canDeleteList}
           canCreateList={canCreateList}
+          canCreateCard={canCreateCard}
+          canEditCard={canEditCard}
+          canArchiveCard={canArchiveCard}
         />
       </div>
     </div>

@@ -23,7 +23,20 @@ export type ListRecord = {
   updatedAt: Date;
 };
 
-export async function getListsByBoardId(boardId: string): Promise<ListRecord[]> {
+export type ListCardRecord = {
+  id: string;
+  listId: string;
+  title: string;
+  position: number;
+};
+
+export type ListWithCardsRecord = ListRecord & {
+  cards: ListCardRecord[];
+};
+
+export async function getListsByBoardId(
+  boardId: string,
+): Promise<ListWithCardsRecord[]> {
   return db.list.findMany({
     where: { boardId },
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
@@ -34,6 +47,18 @@ export async function getListsByBoardId(boardId: string): Promise<ListRecord[]> 
       position: true,
       createdAt: true,
       updatedAt: true,
+      cards: {
+        where: {
+          archivedAt: null,
+        },
+        orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+        select: {
+          id: true,
+          listId: true,
+          title: true,
+          position: true,
+        },
+      },
     },
   });
 }
