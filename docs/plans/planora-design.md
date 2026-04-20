@@ -11,11 +11,22 @@ Planora is a web-based project management application inspired by Trello. Users 
 
 **Target users:** Small teams (2–10 people) managing projects.
 
+### 1.1 Thesis framing (aligned)
+
+- **Tên đề tài:** *Phát triển nền tảng quản lý dự án trực tuyến hỗ trợ cộng tác thời gian thực theo mô hình Kanban*
+- **Mục tiêu đề tài cần bám sát trong thiết kế này:**
+  1. Xây dựng hệ thống theo cấu trúc **Workspace → Board → List → Card**
+  2. Triển khai **WebSocket** cho cộng tác thời gian thực
+  3. Thiết lập **RBAC** + thông báo đa kênh (**In-app + Email**)
+  4. Trực quan tiến độ bằng **Burndown Chart** và **Lead Time**
+- **Nguyên tắc ưu tiên:** các hạng mục trên là **core bắt buộc**, không để ở stretch.
+
 **Key differentiators from a basic Trello clone:**
 - Workspace-level role-based access control (Admin / Editor / Viewer)
 - Realtime board synchronization via WebSocket
+- Multi-channel notifications (In-app + Email)
+- Progress analytics (Burndown + Lead Time)
 - Activity logging and audit trail
-- Analytics dashboard
 
 ---
 
@@ -378,8 +389,12 @@ The **hard MVP** is the minimum scope that must be completed for the graduation 
 - Workspace flow: create workspace, invite member, accept invitation, role-based access
 - Board/list/card CRUD with drag & drop ordering
 - Comments on cards
+- Basic file attachments on cards
 - Realtime sync for card moves and comments
 - Activity log for key board/card actions
+- Notification system: In-app + Email (at least invite + key status changes)
+- Dashboard analytics: Burndown chart + Lead Time
+- Graduation artifacts: Use Case, ERD, Sequence Diagram, WebSocket deployment guide
 - Deployment on home server with seeded demo data
 
 **Anything outside this list is not required for project success.**
@@ -455,6 +470,29 @@ If the hard MVP is not stable by the end of **Week 3**, all remaining time must 
 - Displayed in card detail modal and board sidebar
 - Stored as structured data (action enum + JSON metadata)
 
+### 5.9 Notification System (Core)
+- In-app notification center (badge + dropdown/list)
+- Email notifications via Resend for:
+  - Workspace invitation
+  - Card status/assignee changes (minimum event set for demo)
+- Notification records persisted in DB (`Notification` table)
+
+### 5.10 File Attachments (Core)
+- Upload attachment to Cloudinary from card detail
+- Show attachment list and download URL
+- Basic file metadata tracking (name/type/size/uploader/time)
+
+### 5.11 Analytics Dashboard (Core)
+- **Burndown Chart:** remaining open work by day/sprint window
+- **Lead Time:** average/median time from card creation to done state
+- Supporting counters: total boards, total cards, overdue cards
+
+### 5.12 Required Graduation Documentation (Core)
+- Use Case Diagram
+- ERD
+- Sequence Diagram (e.g., card move + realtime broadcast)
+- WebSocket deployment guide (topology, auth middleware, reconnect strategy)
+
 ---
 
 ## 6. Features — Stretch (Add If Time Allows)
@@ -467,35 +505,24 @@ Priority order (highest impact for least effort first):
 - ~1-2 hours of work
 - High visual impact for demo
 
-### 6.2 Dashboard Analytics (simplified)
-- 1-2 charts max: cards by status (pie), cards by member (bar)
-- Total counts: boards, cards, members
-- Overdue cards count
-- Recent activity feed
-- Using Recharts
+### 6.2 Advanced Analytics (optional)
+- Additional charts (cards by member, throughput by week)
+- Filtered analytics by workspace/member/time range
 
-### 6.3 In-App Notifications
-- Bell icon in header with unread count badge
-- Dropdown with notification list
-- Mark as read
-- Triggered by: assigned to card, new comment on your card
-- Delivered via Socket.io
+### 6.3 Advanced Notifications (optional)
+- Notification preferences per user (event/channel opt-in)
+- Scheduled digest emails
 
-### 6.4 File Attachments
-- Upload to Cloudinary from card detail
-- Display file list with download link
-- Image preview for image files
-
-### 6.5 Board Favorites (Star/Unstar)
+### 6.4 Board Favorites (Star/Unstar)
 - Star icon on board card
 - Starred boards section on workspace page
 
-### 6.6 Table View
+### 6.5 Table View
 - Alternative card view: spreadsheet-style table
 - Columns: title, status (list), priority, due date, assignees, labels
 - Sortable and filterable
 
-### 6.7 Card Extras
+### 6.6 Card Extras
 - Copy / duplicate card
 - Filter cards by label, member, due date, priority
 - Search cards by title
@@ -516,10 +543,10 @@ Priority order (highest impact for least effort first):
 /workspace/[slug]/members   → Member management (Admin)
 /workspace/[slug]/board/[id]         → Board view (Kanban)
 /workspace/[slug]/board/[id]/table   → Board view (Table — stretch)
-/workspace/[slug]/dashboard          → Analytics (stretch)
+/workspace/[slug]/dashboard          → Analytics (Burndown + Lead Time)
 
 /invite/[token]             → Accept invitation page
-/notifications              → All notifications (stretch)
+/notifications              → All notifications
 ```
 
 ---
@@ -566,8 +593,8 @@ Home Server
 │   ├── postgres (PostgreSQL)
 │   └── cloudflared (Cloudflare Tunnel)
 ├── External services
-│   ├── Cloudinary (images — stretch)
-│   └── Resend (email — stretch)
+│   ├── Cloudinary (attachments/images — core)
+│   └── Resend (email notifications — core)
 └── GitHub Actions
     └── Push to main → SSH deploy → docker compose pull → restart
 ```
@@ -619,24 +646,29 @@ The timeline is organized around **weekly milestones**. Each week should end wit
 - [ ] Permission enforcement (Editor can't delete boards, Viewer can only comment)
 - [ ] Card detail modal (title, description)
 - [ ] Assign members to cards
+- [ ] In-app notifications (badge, list, mark-as-read)
+- [ ] Email notifications via Resend (invite + key card status events)
+- [ ] File attachments (upload + list + download)
 - [ ] Seed data for demo (2 users, workspace, populated board)
 - [ ] Test the full demo scenario end-to-end
 - [ ] Only if time remains: labels, due date, priority, checklist
 
-**Week 3 exit criteria:** the full committee demo flow works end-to-end with two accounts, realtime sync, comments, activity log, and role restrictions.
+**Week 3 exit criteria:** the full committee demo flow works end-to-end with two accounts, realtime sync, comments, activity log, notifications (in-app + email baseline), attachments, and role restrictions.
 
 ### Week 4: Stabilization, documentation, and final deploy
 - [ ] UI polish, loading states, error handling
+- [ ] Implement analytics dashboard: Burndown + Lead Time
 - [ ] Finalize Docker + Cloudflare Tunnel deployment
 - [ ] Set up GitHub Actions CI/CD pipeline
 - [ ] Rehearse demo scenario multiple times
 - [ ] Prepare backup screenshots / screen recording for demo safety
+- [ ] Finalize graduation artifacts: Use Case, ERD, Sequence Diagram, WebSocket deployment guide
 - [ ] Write graduation report deployment chapter
 - [ ] Fix bugs only — no new non-essential features
 - [ ] Only if MVP is fully stable: add Dark mode
-- [ ] Only if MVP is fully stable: add Dashboard (1-2 charts max)
+- [ ] Only if MVP is fully stable: add advanced analytics charts
 
-**Week 4 exit criteria:** the deployed app is stable, the demo has been rehearsed, backups are ready, and the report/deployment documentation is complete.
+**Week 4 exit criteria:** the deployed app is stable, the demo has been rehearsed, Burndown + Lead Time are working, backups are ready, and documentation artifacts are complete.
 
 ---
 
@@ -650,9 +682,11 @@ Prepare this exact flow for the committee presentation:
 4. **Split screen**: both accounts viewing the same board
 5. **Account A** drags a card from "Đang làm" to "Hoàn thành" → **Account B** sees it move in realtime
 6. **Account B** adds a comment on a card → **Account A** sees it appear
-7. Show activity log — all actions recorded
-8. Change **Account B** role to Viewer → demonstrate they can no longer edit, only comment
-9. Show the database schema (ER diagram) and explain architectural decisions
+7. Trigger a card status/assignment change → show **in-app notification** and **email notification**
+8. Show activity log — all actions recorded
+9. Change **Account B** role to Viewer → demonstrate they can no longer edit, only comment
+10. Open dashboard and show **Burndown** + **Lead Time**
+11. Show the database schema (ERD) and explain architectural decisions
 
 **Pre-seed the demo board** with realistic data (8-10 cards across 3-4 lists with labels, due dates, members assigned) so the demo looks like a real project, not an empty app.
 
@@ -665,6 +699,20 @@ Prepare this exact flow for the committee presentation:
 | Better Auth org plugin doesn't map to my roles | Test role mapping in week 1. Fallback: implement roles manually       |
 | Drag & drop ordering bugs                     | Use float positions + renormalization. Test edge cases early           |
 | Socket.io + custom server deployment issues   | Set up Docker + deploy in week 1, not week 4                          |
+| Email delivery issues (Resend quota/DNS)      | Prepare fallback: in-app only for demo + capture SMTP logs/screenshots |
+| Burndown/Lead Time data quality mismatch       | Freeze metric definitions early; validate with seeded scenarios         |
 | Scope creep in week 3                         | If core flow isn't stable by end of week 3, STOP adding features      |
 | Self-hosted PostgreSQL failure or data loss   | Set up automated backups and test restore before the final demo        |
 | Demo failure                                  | Pre-seed data, rehearse demo 3+ times, have backup screenshots/video  |
+
+---
+
+## 13. Objective → Deliverable Mapping (for thesis alignment)
+
+| Objective | Concrete deliverable in Planora |
+|---|---|
+| Workspace → Board → List → Card management | CRUD + hierarchy pages and schema relations |
+| Realtime collaboration | Socket.io rooms/events for board collaboration |
+| RBAC + multi-channel notifications | Admin/Editor/Viewer permissions + In-app + Email notifications |
+| Progress visualization | Dashboard with Burndown and Lead Time |
+| Required final report outputs | Use Case, ERD, Sequence Diagram, WebSocket deployment guide |

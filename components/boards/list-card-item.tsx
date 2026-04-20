@@ -1,7 +1,13 @@
 "use client";
 
+import { DragDropVerticalIcon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useState, useTransition } from "react";
-import { useSortable } from "@dnd-kit/sortable";
+import {
+  defaultAnimateLayoutChanges,
+  useSortable,
+  type AnimateLayoutChanges,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
 import {
@@ -29,6 +35,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 type ListCardItemProps = {
   card: {
@@ -40,6 +47,12 @@ type ListCardItemProps = {
   canArchive: boolean;
   canDrag: boolean;
 };
+
+const animateCardLayoutChanges: AnimateLayoutChanges = (args) =>
+  defaultAnimateLayoutChanges({
+    ...args,
+    wasDragging: true,
+  });
 
 export function ListCardItem({
   card,
@@ -89,12 +102,16 @@ export function ListCardItem({
       cardId: card.id,
       listId: card.listId,
     },
+    animateLayoutChanges: animateCardLayoutChanges,
     disabled: !canDrag || editing,
   });
+  const cardTransform = transform
+    ? CSS.Transform.toString({ ...transform, x: 0 })
+    : undefined;
   const cardStyle = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.7 : 1,
+    transform: cardTransform,
+    transition: cardTransform ? transition : undefined,
+    opacity: isDragging ? 0.65 : 1,
   };
 
   function handleArchive() {
@@ -114,90 +131,108 @@ export function ListCardItem({
   return (
     <>
       <div ref={setNodeRef} style={cardStyle}>
-        <Card size="sm" className="gap-2 py-3 shadow-sm">
+        <Card
+          size="sm"
+          className={cn(
+            "gap-2 py-3 shadow-sm transition",
+            isDragging && "ring-2 ring-primary/25",
+          )}
+        >
           <CardContent className="space-y-2 px-3">
-          <div className="flex items-start justify-between gap-2">
-            {canEdit && editing ? (
-              <Input
-                value={draftTitle}
-                onChange={(event) => {
-                  setDraftTitle(event.target.value);
-                  clearError();
-                  setError("");
-                }}
-                onBlur={handleBlur}
-                onKeyDown={handleInputKeyDown}
-                autoFocus
-                disabled={isPending}
-                className="h-8 text-sm"
-              />
-            ) : canEdit ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={startEditing}
-                className="h-auto flex-1 justify-start p-0 text-left text-sm font-normal hover:bg-transparent"
-              >
-                {card.title}
-              </Button>
-            ) : (
-              <p className="flex-1 text-sm">{card.title}</p>
-            )}
+            <div className="flex items-start justify-between gap-2">
+              {canEdit && editing ? (
+                <Input
+                  value={draftTitle}
+                  onChange={(event) => {
+                    setDraftTitle(event.target.value);
+                    clearError();
+                    setError("");
+                  }}
+                  onBlur={handleBlur}
+                  onKeyDown={handleInputKeyDown}
+                  autoFocus
+                  disabled={isPending}
+                  className="h-8 text-sm"
+                />
+              ) : canEdit ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={startEditing}
+                  className="h-auto flex-1 justify-start whitespace-normal break-words p-0 text-left text-sm font-normal hover:bg-transparent"
+                >
+                  {card.title}
+                </Button>
+              ) : (
+                <p className="flex-1 whitespace-normal break-words text-sm">
+                  {card.title}
+                </p>
+              )}
 
-            {(canEdit || canArchive) && (
-              <div ref={actionsMenuRef}>
-                <div className="flex items-center gap-1">
-                  {canDrag ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="Drag card"
-                      className="cursor-grab active:cursor-grabbing"
-                      onPointerDown={handleActionsMenuPointerDown}
-                      {...dragAttributes}
-                      {...dragListeners}
-                    >
-                      <span className="text-base leading-none">⋮⋮</span>
-                    </Button>
-                  ) : null}
-
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
+              {(canEdit || canArchive) && (
+                <div ref={actionsMenuRef}>
+                  <div className="flex items-center gap-1">
+                    {canDrag ? (
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon-sm"
-                        aria-label="Card actions"
+                        aria-label="Drag card"
+                        className="cursor-grab active:cursor-grabbing"
                         onPointerDown={handleActionsMenuPointerDown}
+                        {...dragAttributes}
+                        {...dragListeners}
                       >
-                        <span className="text-base">⋯</span>
+                        <HugeiconsIcon
+                          icon={DragDropVerticalIcon}
+                          size={16}
+                          strokeWidth={2}
+                          className="text-muted-foreground"
+                        />
                       </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {canEdit && (
-                        <DropdownMenuItem onSelect={startEditing}>
-                          Rename
-                        </DropdownMenuItem>
-                      )}
-                      {canArchive && (
-                        <DropdownMenuItem
-                          onSelect={() => setArchiveDialogOpen(true)}
-                          className="text-destructive focus:text-destructive"
-                        >
-                          Archive
-                        </DropdownMenuItem>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-            )}
-          </div>
+                    ) : null}
 
-          {editError ? <p className="text-xs text-destructive">{editError}</p> : null}
-          {error ? <p className="text-xs text-destructive">{error}</p> : null}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="Card actions"
+                          onPointerDown={handleActionsMenuPointerDown}
+                        >
+                          <HugeiconsIcon
+                            icon={MoreHorizontalIcon}
+                            size={16}
+                            strokeWidth={2}
+                            className="text-muted-foreground"
+                          />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {canEdit && (
+                          <DropdownMenuItem onSelect={startEditing}>
+                            Rename
+                          </DropdownMenuItem>
+                        )}
+                        {canArchive && (
+                          <DropdownMenuItem
+                            onSelect={() => setArchiveDialogOpen(true)}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            Archive
+                          </DropdownMenuItem>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {editError ? <p className="text-xs text-destructive">{editError}</p> : null}
+            {error ? <p className="text-xs text-destructive">{error}</p> : null}
           </CardContent>
         </Card>
       </div>

@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { DragDropVerticalIcon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Fragment, useState, useTransition } from "react";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
@@ -31,6 +33,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 type ListColumnProps = {
   list: {
@@ -52,6 +55,12 @@ type ListColumnProps = {
   sortableId: string;
   canSortList: boolean;
   canSortCards: boolean;
+  isListDropTarget: boolean;
+  isCardDropTarget: boolean;
+  cardDropIndicator: {
+    cardId: string | null;
+    placement: "before" | "after" | "end";
+  } | null;
 };
 
 export function ListColumn({
@@ -64,6 +73,9 @@ export function ListColumn({
   sortableId,
   canSortList,
   canSortCards,
+  isListDropTarget,
+  isCardDropTarget,
+  cardDropIndicator,
 }: ListColumnProps) {
   const [newCardTitle, setNewCardTitle] = useState("");
   const [addCardExpanded, setAddCardExpanded] = useState(false);
@@ -104,7 +116,6 @@ export function ListColumn({
     transform,
     transition,
     isDragging,
-    isOver,
   } = useSortable({
     id: sortableId,
     data: {
@@ -117,6 +128,26 @@ export function ListColumn({
     transform: CSS.Transform.toString(transform),
     transition,
   };
+
+  function shouldRenderBeforeIndicator(cardId: string): boolean {
+    return (
+      cardDropIndicator?.cardId === cardId &&
+      cardDropIndicator.placement === "before"
+    );
+  }
+
+  function shouldRenderAfterIndicator(cardId: string): boolean {
+    return (
+      cardDropIndicator?.cardId === cardId &&
+      cardDropIndicator.placement === "after"
+    );
+  }
+
+  function renderCardDropIndicator() {
+    return (
+      <div className="h-0 rounded-full border-t-2 border-primary/70 shadow-[0_0_0_1px_var(--color-background)]" />
+    );
+  }
 
   function handleDelete() {
     const formData = new FormData();
@@ -173,7 +204,11 @@ export function ListColumn({
       <div
         ref={setNodeRef}
         style={listStyle}
-        className="flex w-80 shrink-0 flex-col gap-2 rounded-lg bg-muted p-3"
+        className={cn(
+          "flex w-80 shrink-0 flex-col gap-2 rounded-lg bg-muted p-3 transition",
+          isDragging && "opacity-55 ring-2 ring-primary/30",
+          isListDropTarget && !isDragging && "ring-2 ring-primary/40",
+        )}
       >
         <div className="flex items-center justify-between gap-2">
           {canEdit && editing ? (
@@ -217,7 +252,12 @@ export function ListColumn({
                     {...dragAttributes}
                     {...dragListeners}
                   >
-                    <span className="text-base leading-none">⋮⋮</span>
+                    <HugeiconsIcon
+                      icon={DragDropVerticalIcon}
+                      size={16}
+                      strokeWidth={2}
+                      className="text-muted-foreground"
+                    />
                   </Button>
                 ) : null}
 
@@ -230,7 +270,12 @@ export function ListColumn({
                       aria-label="List actions"
                       onPointerDown={handleActionsMenuPointerDown}
                     >
-                      <span className="text-base">⋯</span>
+                      <HugeiconsIcon
+                        icon={MoreHorizontalIcon}
+                        size={16}
+                        strokeWidth={2}
+                        className="text-muted-foreground"
+                      />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
@@ -261,30 +306,47 @@ export function ListColumn({
           strategy={verticalListSortingStrategy}
         >
           <div
-            className={`space-y-2 rounded-md ${
-              isOver && !isDragging ? "ring-1 ring-white/50" : ""
-            }`}
+            className={cn(
+              "rounded-md border border-transparent p-1 transition-colors",
+              isCardDropTarget && "border-primary/40 bg-background/80",
+            )}
           >
             {list.cards.length === 0 ? (
-              <Card size="sm" className="gap-2 border-dashed border-border/60 py-3 shadow-none">
-                <CardContent className="px-3 py-0">
-                  <p className="text-xs text-muted-foreground">No cards yet</p>
-                </CardContent>
-              </Card>
+              <div className="flex flex-col gap-2">
+                {cardDropIndicator?.placement === "end" ? renderCardDropIndicator() : null}
+                <Card
+                  size="sm"
+                  className="gap-2 border-dashed border-border/60 py-3 shadow-none"
+                >
+                  <CardContent className="px-3 py-0">
+                    <p className="text-xs text-muted-foreground">No cards yet</p>
+                  </CardContent>
+                </Card>
+              </div>
             ) : (
-              list.cards.map((card) => (
-                <ListCardItem
-                  key={card.id}
-                  card={{
-                    id: card.id,
-                    title: card.title,
-                    listId: card.listId,
-                  }}
-                  canEdit={canEditCard}
-                  canArchive={canArchiveCard}
-                  canDrag={canSortCards}
-                />
-              ))
+              <div className="flex flex-col gap-2">
+                {list.cards.map((card) => (
+                  <Fragment key={card.id}>
+                    {shouldRenderBeforeIndicator(card.id)
+                      ? renderCardDropIndicator()
+                      : null}
+                    <ListCardItem
+                      card={{
+                        id: card.id,
+                        title: card.title,
+                        listId: card.listId,
+                      }}
+                      canEdit={canEditCard}
+                      canArchive={canArchiveCard}
+                      canDrag={canSortCards}
+                    />
+                    {shouldRenderAfterIndicator(card.id)
+                      ? renderCardDropIndicator()
+                      : null}
+                  </Fragment>
+                ))}
+                {cardDropIndicator?.placement === "end" ? renderCardDropIndicator() : null}
+              </div>
             )}
           </div>
         </SortableContext>

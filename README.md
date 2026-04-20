@@ -16,6 +16,26 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Local PostgreSQL (Docker)
+
+Start a local PostgreSQL instance for Planora:
+
+```bash
+docker compose up -d
+```
+
+Use this `DATABASE_URL` in your `.env` when running locally:
+
+```bash
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/planora?schema=public"
+```
+
+Then run Prisma migrations:
+
+```bash
+npx prisma migrate dev
+```
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
