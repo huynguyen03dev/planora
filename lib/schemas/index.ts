@@ -26,11 +26,13 @@ export {
   archiveCardSchema,
   reorderCardSchema,
   moveCardSchema,
+  updateCardDetailsSchema,
   type CreateCardInput,
   type UpdateCardInput,
   type ArchiveCardInput,
   type ReorderCardInput,
   type MoveCardInput,
+  type UpdateCardDetailsInput,
 } from "./card";
 
 export {
@@ -41,3 +43,8 @@ export {
   type AcceptInvitationInput,
   type DeclineInvitationInput,
 } from "./invitation";
+
+export {
+  createCommentSchema,
+  type CreateCommentInput,
+} from "./comment";

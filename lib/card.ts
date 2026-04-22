@@ -19,6 +19,22 @@ export type CardRecord = {
   updatedAt: Date;
 };
 
+export type CardDetailRecord = {
+  id: string;
+  listId: string;
+  title: string;
+  description: string | null;
+  updatedAt: Date;
+};
+
+const CARD_DETAIL_SELECT = {
+  id: true,
+  listId: true,
+  title: true,
+  description: true,
+  updatedAt: true,
+} as const;
+
 export type CardWithListBoardRecord = {
   card: CardRecord;
   list: {
@@ -306,4 +322,49 @@ export async function getCardWithListAndBoard(
     },
     board: list.board,
   };
+}
+
+export async function getCardDetailForBoard(
+  boardId: string,
+  cardId: string,
+): Promise<CardDetailRecord | null> {
+  const card = await db.card.findUnique({
+    where: {
+      id: cardId,
+      archivedAt: null,
+    },
+    select: {
+      ...CARD_DETAIL_SELECT,
+      list: {
+        select: {
+          boardId: true,
+        },
+      },
+    },
+  });
+
+  if (!card || card.list.boardId !== boardId) {
+    return null;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { list: _list, ...cardData } = card;
+  return cardData;
+}
+
+export async function updateCardDetails(
+  cardId: string,
+  data: { title: string; description: string | null },
+): Promise<CardDetailRecord> {
+  return db.card.update({
+    where: {
+      id: cardId,
+      archivedAt: null,
+    },
+    data: {
+      title: data.title,
+      description: data.description,
+    },
+    select: CARD_DETAIL_SELECT,
+  });
 }

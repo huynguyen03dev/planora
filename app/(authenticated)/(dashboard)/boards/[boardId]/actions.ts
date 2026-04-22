@@ -6,11 +6,13 @@ import { getBoardById } from "@/lib/board";
 import {
   createCard,
   updateCardTitle,
+  updateCardDetails,
   archiveCard,
   getCardWithListAndBoard,
   reorderCardWithinListByNeighbors,
   moveCardToListByNeighbors,
 } from "@/lib/card";
+import { createComment } from "@/lib/comment";
 import {
   createList,
   updateListTitle,
@@ -18,6 +20,7 @@ import {
   getListWithBoard,
   reorderListByNeighbors,
 } from "@/lib/list";
+import { createActivityEntry } from "@/lib/activity";
 import { hasWorkspacePermission } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
 import {
@@ -30,6 +33,8 @@ import {
   archiveCardSchema,
   reorderCardSchema,
   moveCardSchema,
+  updateCardDetailsSchema,
+  createCommentSchema,
 } from "@/lib/schemas";
 
 type CreateListResult =
@@ -415,5 +420,109 @@ export async function moveCardAction(
     return { success: true };
   } catch {
     return { success: false, error: "Failed to move card. Please try again." };
+  }
+}
+
+type UpdateCardDetailsResult =
+  | { success: true }
+  | { success: false; error: string };
+
+type CreateCommentResult =
+  | { success: true; commentId: string }
+  | { success: false; error: string };
+
+export async function updateCardDetailsAction(
+  formData: FormData,
+): Promise<UpdateCardDetailsResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = updateCardDetailsSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  const { userId } = await verifySession();
+
+  const { cardId, title, description } = parsed.data;
+
+  const result = await getCardWithListAndBoard(cardId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(result.board.workspaceId, {
+    card: ["update"],
+  });
+
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  try {
+    await updateCardDetails(cardId, { title, description });
+    await createActivityEntry({
+      workspaceId: result.board.workspaceId,
+      boardId: result.list.boardId,
+      cardId,
+      userId,
+      action: "UPDATED",
+      entityType: "CARD",
+      metadata: { title, description: description ?? null },
+    });
+    revalidatePath(`/boards/${result.list.boardId}`);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to update card. Please try again." };
+  }
+}
+
+export async function createCommentAction(
+  formData: FormData,
+): Promise<CreateCommentResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = createCommentSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  const { userId } = await verifySession();
+
+  const { cardId, content } = parsed.data;
+
+  const result = await getCardWithListAndBoard(cardId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canComment = await hasWorkspacePermission(result.board.workspaceId, {
+    comment: ["create"],
+  });
+
+  if (!canComment) {
+    return { success: false, error: "Card not found" };
+  }
+
+  try {
+    const comment = await createComment({
+      cardId,
+      userId,
+      content,
+    });
+    await createActivityEntry({
+      workspaceId: result.board.workspaceId,
+      boardId: result.list.boardId,
+      cardId,
+      userId,
+      action: "COMMENTED",
+      entityType: "COMMENT",
+      metadata: { commentId: comment.id },
+    });
+    revalidatePath(`/boards/${result.list.boardId}`);
+    return { success: true, commentId: comment.id };
+  } catch {
+    return { success: false, error: "Failed to create comment. Please try again." };
   }
 }

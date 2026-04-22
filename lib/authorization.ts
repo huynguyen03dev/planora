@@ -24,6 +24,7 @@ export type BoardPagePermissions = {
   canCreateCard: boolean;
   canEditCard: boolean;
   canArchiveCard: boolean;
+  canComment: boolean;
 };
 
 const rolePermissionMap: Record<WorkspaceRole, BoardPagePermissions> = {
@@ -36,6 +37,7 @@ const rolePermissionMap: Record<WorkspaceRole, BoardPagePermissions> = {
     canCreateCard: true,
     canEditCard: true,
     canArchiveCard: true,
+    canComment: true,
   },
   editor: {
     canEditBoard: true,
@@ -46,6 +48,7 @@ const rolePermissionMap: Record<WorkspaceRole, BoardPagePermissions> = {
     canCreateCard: true,
     canEditCard: true,
     canArchiveCard: true,
+    canComment: true,
   },
   viewer: {
     canEditBoard: false,
@@ -56,6 +59,7 @@ const rolePermissionMap: Record<WorkspaceRole, BoardPagePermissions> = {
     canCreateCard: false,
     canEditCard: false,
     canArchiveCard: false,
+    canComment: true,
   },
 };
 

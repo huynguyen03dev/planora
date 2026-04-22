@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   type CollisionDetection,
   DndContext,
@@ -67,6 +68,10 @@ export function BoardContent({
   canEditCard,
   canArchiveCard,
 }: BoardContentProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
   const [boardLists, setBoardLists] = useState(lists);
   const [error, setError] = useState("");
   const [activeDrag, setActiveDrag] = useState<{
@@ -99,6 +104,14 @@ export function BoardContent({
     () => boardLists.map((list) => toListSortableId(list.id)),
     [boardLists],
   );
+
+  function openCard(cardId: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("cardId", cardId);
+
+    const query = params.toString();
+    router.push(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }
 
   const collisionDetectionStrategy: CollisionDetection = (args) => {
     const activeParsed = parseSortableId(String(args.active.id));
@@ -551,6 +564,7 @@ export function BoardContent({
                 sortableId={toListSortableId(list.id)}
                 canSortList={canEdit && !isPersisting}
                 canSortCards={canEditCard && !isPersisting}
+                onOpenCard={openCard}
                 isListDropTarget={activeDrag?.kind === "list" && listDropTargetId === list.id}
                 isCardDropTarget={activeDrag?.kind === "card" && listDropTargetId === list.id}
                 cardDropIndicator={

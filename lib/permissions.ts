@@ -1,10 +1,5 @@
 import { createAccessControl } from "better-auth/plugins/access";
-import {
-  defaultStatements,
-  adminAc,
-  memberAc,
-  ownerAc,
-} from "better-auth/plugins/organization/access";
+import { defaultStatements, ownerAc } from "better-auth/plugins/organization/access";
 
 /**
  * Access-control statements for the organization plugin.

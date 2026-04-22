@@ -10,12 +10,8 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-import {
-  archiveCardAction,
-  updateCardAction,
-} from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
+import { archiveCardAction } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
 import { toCardSortableId } from "@/components/boards/board-dnd-types";
-import { useInlineTitleEditor } from "@/components/boards/use-inline-title-editor";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,7 +30,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 type ListCardItemProps = {
@@ -46,6 +41,7 @@ type ListCardItemProps = {
   canEdit: boolean;
   canArchive: boolean;
   canDrag: boolean;
+  onOpenCard: (cardId: string) => void;
 };
 
 const animateCardLayoutChanges: AnimateLayoutChanges = (args) =>
@@ -59,35 +55,13 @@ export function ListCardItem({
   canEdit,
   canArchive,
   canDrag,
+  onOpenCard,
 }: ListCardItemProps) {
   const [error, setError] = useState("");
 
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [isArchiving, startArchiveTransition] = useTransition();
 
-  const titleEditor = useInlineTitleEditor({
-    initialTitle: card.title,
-    canEdit,
-    onSave: async (nextTitle) => {
-      const formData = new FormData();
-      formData.set("cardId", card.id);
-      formData.set("title", nextTitle);
-      return updateCardAction(formData);
-    },
-  });
-  const {
-    actionsMenuRef,
-    draftTitle,
-    editing,
-    error: editError,
-    isPending,
-    clearError,
-    setDraftTitle,
-    startEditing,
-    handleBlur,
-    handleInputKeyDown,
-    handleActionsMenuPointerDown,
-  } = titleEditor;
   const {
     attributes: dragAttributes,
     listeners: dragListeners,
@@ -103,7 +77,7 @@ export function ListCardItem({
       listId: card.listId,
     },
     animateLayoutChanges: animateCardLayoutChanges,
-    disabled: !canDrag || editing,
+    disabled: !canDrag,
   });
   const cardTransform = transform
     ? CSS.Transform.toString({ ...transform, x: 0 })
@@ -140,59 +114,38 @@ export function ListCardItem({
         >
           <CardContent className="space-y-2 px-3">
             <div className="flex items-start justify-between gap-2">
-              {canEdit && editing ? (
-                <Input
-                  value={draftTitle}
-                  onChange={(event) => {
-                    setDraftTitle(event.target.value);
-                    clearError();
-                    setError("");
-                  }}
-                  onBlur={handleBlur}
-                  onKeyDown={handleInputKeyDown}
-                  autoFocus
-                  disabled={isPending}
-                  className="h-8 text-sm"
-                />
-              ) : canEdit ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={startEditing}
-                  className="h-auto flex-1 justify-start whitespace-normal break-words p-0 text-left text-sm font-normal hover:bg-transparent"
-                >
-                  {card.title}
-                </Button>
-              ) : (
-                <p className="flex-1 whitespace-normal break-words text-sm">
-                  {card.title}
-                </p>
-              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => onOpenCard(card.id)}
+                className="h-auto flex-1 justify-start whitespace-normal break-words p-0 text-left text-sm font-normal hover:bg-transparent"
+              >
+                {card.title}
+              </Button>
 
-              {(canEdit || canArchive) && (
-                <div ref={actionsMenuRef}>
-                  <div className="flex items-center gap-1">
-                    {canDrag ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Drag card"
-                        className="cursor-grab text-muted-foreground hover:bg-muted hover:text-foreground active:cursor-grabbing"
-                        onPointerDown={handleActionsMenuPointerDown}
-                        {...dragAttributes}
-                        {...dragListeners}
-                      >
-                        <HugeiconsIcon
-                          icon={DragDropVerticalIcon}
-                          size={16}
-                          strokeWidth={2}
-                          className="text-current transition-colors"
-                        />
-                      </Button>
-                    ) : null}
+              {(canEdit || canArchive || canDrag) && (
+                <div className="flex items-center gap-1">
+                  {canDrag ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Drag card"
+                      className="cursor-grab text-muted-foreground hover:bg-muted hover:text-foreground active:cursor-grabbing"
+                      {...dragAttributes}
+                      {...dragListeners}
+                    >
+                      <HugeiconsIcon
+                        icon={DragDropVerticalIcon}
+                        size={16}
+                        strokeWidth={2}
+                        className="text-current transition-colors"
+                      />
+                    </Button>
+                  ) : null}
 
+                  {(canEdit || canArchive) && (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
@@ -200,7 +153,6 @@ export function ListCardItem({
                           variant="ghost"
                           size="icon-sm"
                           aria-label="Card actions"
-                          onPointerDown={handleActionsMenuPointerDown}
                           className="text-muted-foreground hover:bg-muted hover:text-foreground"
                         >
                           <HugeiconsIcon
@@ -212,11 +164,9 @@ export function ListCardItem({
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        {canEdit && (
-                          <DropdownMenuItem onSelect={startEditing}>
-                            Rename
-                          </DropdownMenuItem>
-                        )}
+                        <DropdownMenuItem onSelect={() => onOpenCard(card.id)}>
+                          Open details
+                        </DropdownMenuItem>
                         {canArchive && (
                           <DropdownMenuItem
                             onSelect={() => setArchiveDialogOpen(true)}
@@ -227,12 +177,11 @@ export function ListCardItem({
                         )}
                       </DropdownMenuContent>
                     </DropdownMenu>
-                  </div>
+                  )}
                 </div>
               )}
             </div>
 
-            {editError ? <p className="text-xs text-destructive">{editError}</p> : null}
             {error ? <p className="text-xs text-destructive">{error}</p> : null}
           </CardContent>
         </Card>

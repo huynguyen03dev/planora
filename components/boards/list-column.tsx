@@ -55,6 +55,7 @@ type ListColumnProps = {
   sortableId: string;
   canSortList: boolean;
   canSortCards: boolean;
+  onOpenCard: (cardId: string) => void;
   isListDropTarget: boolean;
   isCardDropTarget: boolean;
   cardDropIndicator: {
@@ -73,6 +74,7 @@ export function ListColumn({
   sortableId,
   canSortList,
   canSortCards,
+  onOpenCard,
   isListDropTarget,
   isCardDropTarget,
   cardDropIndicator,
@@ -340,6 +342,7 @@ export function ListColumn({
                       canEdit={canEditCard}
                       canArchive={canArchiveCard}
                       canDrag={canSortCards}
+                      onOpenCard={onOpenCard}
                     />
                     {shouldRenderAfterIndicator(card.id)
                       ? renderCardDropIndicator()

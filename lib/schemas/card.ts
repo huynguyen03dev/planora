@@ -83,3 +83,22 @@ export const moveCardSchema = z
   );
 
 export type MoveCardInput = z.infer<typeof moveCardSchema>;
+
+const MAX_CARD_DESCRIPTION_LENGTH = 10000;
+
+export const updateCardDetailsSchema = z.object({
+  cardId: z.string().uuid({ message: "Invalid card ID" }),
+  title: z
+    .string({ message: "Title is required" })
+    .trim()
+    .min(MIN_CARD_TITLE_LENGTH, "Title is required")
+    .max(MAX_CARD_TITLE_LENGTH, `Title must be ${MAX_CARD_TITLE_LENGTH} characters or less`),
+  description: z
+    .string()
+    .max(MAX_CARD_DESCRIPTION_LENGTH, `Description must be ${MAX_CARD_DESCRIPTION_LENGTH} characters or less`)
+    .transform((val) => (val === "" ? null : val))
+    .nullable()
+    .default(null),
+});
+
+export type UpdateCardDetailsInput = z.infer<typeof updateCardDetailsSchema>;
