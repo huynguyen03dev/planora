@@ -22,7 +22,11 @@ import {
   reorderListByNeighbors,
 } from "@/lib/list";
 import { createActivityEntry } from "@/lib/activity";
-import { assignMemberToCard, removeMemberFromCard } from "@/lib/card-member";
+import {
+  assignMemberToCard,
+  removeMemberFromCard,
+  type CardMemberRecord,
+} from "@/lib/card-member";
 import { hasWorkspacePermission } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
 import {
@@ -436,11 +440,11 @@ type CreateCommentResult =
   | { success: false; error: string };
 
 type AssignCardMemberResult =
-  | { success: true; memberId: string }
+  | { success: true; changed: boolean; member: CardMemberRecord }
   | { success: false; error: string };
 
 type RemoveCardMemberResult =
-  | { success: true }
+  | { success: true; changed: boolean }
   | { success: false; error: string };
 
 export async function updateCardDetailsAction(
@@ -550,17 +554,17 @@ export async function assignCardMemberAction(
     return { success: false, error: firstError || "Validation failed" };
   }
 
-  await verifySession();
+  const { userId: actorUserId } = await verifySession();
 
   const { cardId, userId } = parsed.data;
 
-  // Get card with board and workspace info for permission checking
+  // Get card with board and workspace info for permission checking.
   const cardResult = await getCardWithListAndBoard(cardId);
   if (!cardResult || cardResult.board.archivedAt) {
     return { success: false, error: "Card not found" };
   }
 
-  // Check if user has permission to update cards in this workspace
+  // Check if user has permission to update cards in this workspace.
   const canUpdateCard = await hasWorkspacePermission(cardResult.board.workspaceId, {
     card: ["update"],
   });
@@ -569,7 +573,7 @@ export async function assignCardMemberAction(
     return { success: false, error: "Card not found" };
   }
 
-  // Check if target user belongs to the same workspace
+  // Check if target user belongs to the same workspace.
   const workspaceMember = await db.workspaceMember.findFirst({
     where: {
       organizationId: cardResult.board.workspaceId,
@@ -582,26 +586,30 @@ export async function assignCardMemberAction(
   }
 
   try {
-    // Use the data access layer to assign member to card
-    const member = await assignMemberToCard({ cardId, userId });
-    
-    // Create activity entry for assignment
-    await createActivityEntry({
-      workspaceId: cardResult.board.workspaceId,
-      boardId: cardResult.board.id,
-      cardId,
-      userId: (await verifySession()).userId,
-      action: "UPDATED", // Using UPDATED as the action type for assignment
-      entityType: "CARD",
-      metadata: { 
-        actionType: "assign-member",
-        targetUserId: userId,
-        targetUserName: member.name
-      },
-    });
-    
+    const assignment = await assignMemberToCard({ cardId, userId });
+
+    if (assignment.changed) {
+      await createActivityEntry({
+        workspaceId: cardResult.board.workspaceId,
+        boardId: cardResult.board.id,
+        cardId,
+        userId: actorUserId,
+        action: "CREATED",
+        entityType: "MEMBER",
+        metadata: {
+          actionType: "assign-member",
+          targetUserId: userId,
+          targetUserName: assignment.member.name,
+        },
+      });
+    }
+
     revalidatePath(`/boards/${cardResult.board.id}`);
-    return { success: true, memberId: member.id };
+    return {
+      success: true,
+      changed: assignment.changed,
+      member: assignment.member,
+    };
   } catch (error) {
     console.error("Failed to assign member to card:", error);
     return { success: false, error: "Failed to assign member. Please try again." };
@@ -619,17 +627,17 @@ export async function removeCardMemberAction(
     return { success: false, error: firstError || "Validation failed" };
   }
 
-  await verifySession();
+  const { userId: actorUserId } = await verifySession();
 
   const { cardId, userId } = parsed.data;
 
-  // Get card with board and workspace info for permission checking
+  // Get card with board and workspace info for permission checking.
   const cardResult = await getCardWithListAndBoard(cardId);
   if (!cardResult || cardResult.board.archivedAt) {
     return { success: false, error: "Card not found" };
   }
 
-  // Check if user has permission to update cards in this workspace
+  // Check if user has permission to update cards in this workspace.
   const canUpdateCard = await hasWorkspacePermission(cardResult.board.workspaceId, {
     card: ["update"],
   });
@@ -638,48 +646,32 @@ export async function removeCardMemberAction(
     return { success: false, error: "Card not found" };
   }
 
-  // Check if target user belongs to the same workspace (for consistency)
-  const workspaceMember = await db.workspaceMember.findFirst({
-    where: {
-      organizationId: cardResult.board.workspaceId,
-      userId,
-    },
-    include: {
-      user: {
-        select: {
-          name: true,
-        },
-      },
-    },
-  });
-
-  if (!workspaceMember) {
-    return { success: false, error: "User not in workspace" };
-  }
-
-  const removedUserName = workspaceMember.user.name;
-
   try {
-    // Use the data access layer to remove member from card
-    await removeMemberFromCard({ cardId, userId });
-    
-    // Create activity entry for removal
-    await createActivityEntry({
-      workspaceId: cardResult.board.workspaceId,
-      boardId: cardResult.board.id,
-      cardId,
-      userId: (await verifySession()).userId,
-      action: "UPDATED", // Using UPDATED as the action type for removal
-      entityType: "CARD",
-      metadata: { 
-        actionType: "remove-member",
-        targetUserId: userId,
-        targetUserName: removedUserName
-},
-    });
-    
+    const removal = await removeMemberFromCard({ cardId, userId });
+
+    if (removal.changed) {
+      const removedUser = await db.user.findUnique({
+        where: { id: userId },
+        select: { name: true },
+      });
+
+      await createActivityEntry({
+        workspaceId: cardResult.board.workspaceId,
+        boardId: cardResult.board.id,
+        cardId,
+        userId: actorUserId,
+        action: "DELETED",
+        entityType: "MEMBER",
+        metadata: {
+          actionType: "remove-member",
+          targetUserId: userId,
+          targetUserName: removedUser?.name ?? "a member",
+        },
+      });
+    }
+
     revalidatePath(`/boards/${cardResult.board.id}`);
-    return { success: true };
+    return { success: true, changed: removal.changed };
   } catch (error) {
     console.error("Failed to remove member from card:", error);
     return { success: false, error: "Failed to remove member. Please try again." };

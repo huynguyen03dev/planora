@@ -106,14 +106,18 @@ function CardDetailDialogBody({
   canEdit,
   canComment,
 }: CardDetailDialogBodyProps) {
+  const router = useRouter();
   const [draftTitle, setDraftTitle] = useState(card.title);
   const [draftDescription, setDraftDescription] = useState(card.description ?? "");
   const [error, setError] = useState("");
-  const [localAssignees, setLocalAssignees] = useState(assignees);
   const [isPending, startTransition] = useTransition();
 
   const isDirty =
     draftTitle.trim() !== card.title || draftDescription !== (card.description ?? "");
+  const assignedMemberIds = new Set(assignees.map((member) => member.id));
+  const availableMembers = assignableMembers.filter(
+    (member) => !assignedMemberIds.has(member.id),
+  );
 
   function handleSave() {
     if (isPending) {
@@ -148,21 +152,23 @@ function CardDetailDialogBody({
   }
 
   async function handleAssignMember(userId: string) {
-    if (!canEdit) return;
-    
+    if (!canEdit || isPending) {
+      return;
+    }
+
+    setError("");
+
     startTransition(async () => {
       const formData = new FormData();
       formData.set("cardId", card.id);
       formData.set("userId", userId);
-      
+
       const result = await assignCardMemberAction(formData);
       if (!result.success) {
         setError(result.error);
       } else {
-        // Find the member from assignableMembers and add to local assignees
-        const member = assignableMembers.find((m) => m.id === userId);
-        if (member) {
-          setLocalAssignees([...localAssignees, member]);
+        if (result.changed) {
+          router.refresh();
         }
         setError("");
       }
@@ -170,19 +176,24 @@ function CardDetailDialogBody({
   }
 
   async function handleRemoveMember(userId: string) {
-    if (!canEdit) return;
-    
+    if (!canEdit || isPending) {
+      return;
+    }
+
+    setError("");
+
     startTransition(async () => {
       const formData = new FormData();
       formData.set("cardId", card.id);
       formData.set("userId", userId);
-      
+
       const result = await removeCardMemberAction(formData);
       if (!result.success) {
         setError(result.error);
       } else {
-        // Update local assignees list
-        setLocalAssignees(localAssignees.filter((a) => a.id !== userId));
+        if (result.changed) {
+          router.refresh();
+        }
         setError("");
       }
     });
@@ -274,6 +285,79 @@ function CardDetailDialogBody({
               )}
             </section>
 
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-base font-semibold">Members</h3>
+                <span className="text-xs text-muted-foreground">
+                  {canEdit ? "Manage assignees" : "Visible to all members"}
+                </span>
+              </div>
+
+              {assignees.length === 0 ? (
+                <div className="rounded-lg border bg-background p-4">
+                  <p className="text-sm text-muted-foreground">
+                    No members assigned yet.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {assignees.map((member) => (
+                    <div
+                      key={member.id}
+                      className="flex items-center justify-between rounded-lg border bg-background px-3 py-2"
+                    >
+                      <div>
+                        <div className="text-sm font-medium">{member.name}</div>
+                        <div className="text-xs text-muted-foreground">{member.email}</div>
+                      </div>
+                      {canEdit ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={isPending}
+                          onClick={() => {
+                            handleRemoveMember(member.id);
+                          }}
+                        >
+                          Remove
+                        </Button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {canEdit ? (
+                <div className="space-y-3">
+                  <h4 className="text-sm font-semibold">Add members</h4>
+                  {availableMembers.length === 0 ? (
+                    <div className="rounded-lg border bg-background p-3">
+                      <p className="text-sm text-muted-foreground">
+                        All workspace members are already assigned to this card.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {availableMembers.map((member) => (
+                        <Button
+                          key={member.id}
+                          variant="outline"
+                          size="sm"
+                          className="w-full justify-start"
+                          disabled={isPending}
+                          onClick={() => {
+                            handleAssignMember(member.id);
+                          }}
+                        >
+                          {member.name} ({member.email})
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </section>
+
             <section className="space-y-3 rounded-lg border bg-muted/20 p-4">
               <h3 className="text-sm font-semibold">Card metadata</h3>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -342,57 +426,6 @@ function CardDetailDialogBody({
                     {activity.map((entry) => (
                       <ActivityItem key={entry.id} activity={entry} />
                     ))}
-                  </div>
-                )}
-
-                {localAssignees.length > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="text-sm font-semibold">Members</h4>
-                    <div className="space-y-2">
-                      {localAssignees.map((member) => (
-                        <div
-                          key={member.id}
-                          className="flex items-center justify-between rounded-lg border bg-background/50 px-3 py-2"
-                        >
-                          <div>
-                            <div className="text-sm font-medium">{member.name}</div>
-                            <div className="text-xs text-muted-foreground">{member.email}</div>
-                          </div>
-                          {canEdit && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-onClick={() => {
-                            handleRemoveMember(member.id);
-                          }}
-                            >
-                              Remove
-                            </Button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {canEdit && assignableMembers.length > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="text-sm font-semibold">Add members</h4>
-                    <div className="space-y-2">
-                      {assignableMembers.map((member) => (
-                        <Button
-                          key={member.id}
-                          variant="outline"
-                          size="sm"
-                          className="w-full justify-start"
-                          onClick={() => {
-                            handleAssignMember(member.id);
-                          }}
-                        >
-                          {member.name} ({member.email})
-                        </Button>
-                      ))}
-                    </div>
                   </div>
                 )}
               </div>
