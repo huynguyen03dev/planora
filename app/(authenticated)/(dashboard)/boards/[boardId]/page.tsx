@@ -10,10 +10,14 @@ import {
 } from "@/lib/authorization";
 import { getCardDetailForBoard } from "@/lib/card";
 import { getCommentsByCardId } from "@/lib/comment";
+import type { CommentRecord } from "@/lib/comment";
 import { getActivityByCardId } from "@/lib/activity";
+import type { ActivityRecord } from "@/lib/activity";
 import { getBoardTheme } from "@/lib/constants";
 import { verifySession } from "@/lib/dal";
 import { getListsByBoardId } from "@/lib/list";
+import { getCardMembers, getAssignableWorkspaceMembers } from "@/lib/card-member";
+import type { CardMemberRecord, AssignableWorkspaceMemberRecord } from "@/lib/card-member";
 
 type BoardPageProps = {
   params: Promise<{ boardId: string }>;
@@ -61,13 +65,47 @@ export default async function BoardPage({
       ? rawCardId
       : null;
 
-  const [lists, selectedCard] = await Promise.all([
-    getListsByBoardId(boardId),
-    selectedCardId ? getCardDetailForBoard(boardId, selectedCardId) : Promise.resolve(null),
-  ]);
+  // Load lists first (needed regardless of card selection)
+  const lists = await getListsByBoardId(boardId);
+  
+  // Initialize data variables
+  let selectedCard = null;
+  let comments: CommentRecord[] = [];
+  let activity: ActivityRecord[] = [];
+  let assignees: CardMemberRecord[] = [];
+  let assignableMembers: AssignableWorkspaceMemberRecord[] = [];
 
-  const comments = selectedCard ? await getCommentsByCardId(selectedCard.id) : [];
-  const activity = selectedCard ? await getActivityByCardId(selectedCard.id) : [];
+  // If a card ID is provided, load card details and related data
+  if (selectedCardId) {
+    selectedCard = await getCardDetailForBoard(boardId, selectedCardId);
+    
+    // Fail-closed: treat invalid/foreign/archived card as no selection
+    if (!selectedCard) {
+      selectedCard = null;
+    }
+    
+    // Load card-specific data in parallel (only if card is valid)
+    if (selectedCard) {
+      const [
+        cardComments,
+        cardActivity,
+        cardAssignees,
+      ] = await Promise.all([
+        getCommentsByCardId(selectedCard.id),
+        getActivityByCardId(selectedCard.id),
+        getCardMembers(selectedCard.id),
+      ]);
+      
+      comments = cardComments;
+      activity = cardActivity;
+      assignees = cardAssignees;
+      
+      // Load assignable members only if the current user can edit cards
+      if (canEditCard) {
+        assignableMembers = await getAssignableWorkspaceMembers(board.workspaceId);
+      }
+    }
+  }
 
   const boardTheme = getBoardTheme(board.backgroundColor);
 
@@ -105,6 +143,8 @@ export default async function BoardPage({
         card={selectedCard}
         comments={comments}
         activity={activity}
+        assignees={assignees}
+        assignableMembers={assignableMembers}
         canEdit={canEditCard}
         canComment={canComment}
       />

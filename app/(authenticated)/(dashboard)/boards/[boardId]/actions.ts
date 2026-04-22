@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import db from "@/lib/prisma";
 import { getBoardById } from "@/lib/board";
 import {
   createCard,
@@ -21,6 +22,7 @@ import {
   reorderListByNeighbors,
 } from "@/lib/list";
 import { createActivityEntry } from "@/lib/activity";
+import { assignMemberToCard, removeMemberFromCard } from "@/lib/card-member";
 import { hasWorkspacePermission } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
 import {
@@ -35,6 +37,8 @@ import {
   moveCardSchema,
   updateCardDetailsSchema,
   createCommentSchema,
+  assignCardMemberSchema,
+  removeCardMemberSchema,
 } from "@/lib/schemas";
 
 type CreateListResult =
@@ -431,6 +435,14 @@ type CreateCommentResult =
   | { success: true; commentId: string }
   | { success: false; error: string };
 
+type AssignCardMemberResult =
+  | { success: true; memberId: string }
+  | { success: false; error: string };
+
+type RemoveCardMemberResult =
+  | { success: true }
+  | { success: false; error: string };
+
 export async function updateCardDetailsAction(
   formData: FormData,
 ): Promise<UpdateCardDetailsResult> {
@@ -524,5 +536,152 @@ export async function createCommentAction(
     return { success: true, commentId: comment.id };
   } catch {
     return { success: false, error: "Failed to create comment. Please try again." };
+  }
+}
+
+export async function assignCardMemberAction(
+  formData: FormData,
+): Promise<AssignCardMemberResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = assignCardMemberSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  await verifySession();
+
+  const { cardId, userId } = parsed.data;
+
+  // Get card with board and workspace info for permission checking
+  const cardResult = await getCardWithListAndBoard(cardId);
+  if (!cardResult || cardResult.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  // Check if user has permission to update cards in this workspace
+  const canUpdateCard = await hasWorkspacePermission(cardResult.board.workspaceId, {
+    card: ["update"],
+  });
+
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  // Check if target user belongs to the same workspace
+  const workspaceMember = await db.workspaceMember.findFirst({
+    where: {
+      organizationId: cardResult.board.workspaceId,
+      userId,
+    },
+  });
+
+  if (!workspaceMember) {
+    return { success: false, error: "User not in workspace" };
+  }
+
+  try {
+    // Use the data access layer to assign member to card
+    const member = await assignMemberToCard({ cardId, userId });
+    
+    // Create activity entry for assignment
+    await createActivityEntry({
+      workspaceId: cardResult.board.workspaceId,
+      boardId: cardResult.board.id,
+      cardId,
+      userId: (await verifySession()).userId,
+      action: "UPDATED", // Using UPDATED as the action type for assignment
+      entityType: "CARD",
+      metadata: { 
+        actionType: "assign-member",
+        targetUserId: userId,
+        targetUserName: member.name
+      },
+    });
+    
+    revalidatePath(`/boards/${cardResult.board.id}`);
+    return { success: true, memberId: member.id };
+  } catch (error) {
+    console.error("Failed to assign member to card:", error);
+    return { success: false, error: "Failed to assign member. Please try again." };
+  }
+}
+
+export async function removeCardMemberAction(
+  formData: FormData,
+): Promise<RemoveCardMemberResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = removeCardMemberSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  await verifySession();
+
+  const { cardId, userId } = parsed.data;
+
+  // Get card with board and workspace info for permission checking
+  const cardResult = await getCardWithListAndBoard(cardId);
+  if (!cardResult || cardResult.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  // Check if user has permission to update cards in this workspace
+  const canUpdateCard = await hasWorkspacePermission(cardResult.board.workspaceId, {
+    card: ["update"],
+  });
+
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  // Check if target user belongs to the same workspace (for consistency)
+  const workspaceMember = await db.workspaceMember.findFirst({
+    where: {
+      organizationId: cardResult.board.workspaceId,
+      userId,
+    },
+    include: {
+      user: {
+        select: {
+          name: true,
+        },
+      },
+    },
+  });
+
+  if (!workspaceMember) {
+    return { success: false, error: "User not in workspace" };
+  }
+
+  const removedUserName = workspaceMember.user.name;
+
+  try {
+    // Use the data access layer to remove member from card
+    await removeMemberFromCard({ cardId, userId });
+    
+    // Create activity entry for removal
+    await createActivityEntry({
+      workspaceId: cardResult.board.workspaceId,
+      boardId: cardResult.board.id,
+      cardId,
+      userId: (await verifySession()).userId,
+      action: "UPDATED", // Using UPDATED as the action type for removal
+      entityType: "CARD",
+      metadata: { 
+        actionType: "remove-member",
+        targetUserId: userId,
+        targetUserName: removedUserName
+},
+    });
+    
+    revalidatePath(`/boards/${cardResult.board.id}`);
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to remove member from card:", error);
+    return { success: false, error: "Failed to remove member. Please try again." };
   }
 }

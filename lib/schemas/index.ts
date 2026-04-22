@@ -48,3 +48,10 @@ export {
   createCommentSchema,
   type CreateCommentInput,
 } from "./comment";
+
+export {
+  assignCardMemberSchema,
+  removeCardMemberSchema,
+  type AssignCardMemberInput,
+  type RemoveCardMemberInput,
+} from "./card-member";

@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-import { createCommentAction, updateCardDetailsAction } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
+import { createCommentAction, updateCardDetailsAction, assignCardMemberAction, removeCardMemberAction } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import type { CardDetailRecord } from "@/lib/card";
 import type { CommentRecord } from "@/lib/comment";
 import type { ActivityRecord } from "@/lib/activity";
+import type { CardMemberRecord, AssignableWorkspaceMemberRecord } from "@/lib/card-member";
 import { cn } from "@/lib/utils";
 
 type CardDetailSheetProps = {
@@ -23,6 +24,8 @@ type CardDetailSheetProps = {
   card: CardDetailRecord | null;
   comments: CommentRecord[];
   activity: ActivityRecord[];
+  assignees: CardMemberRecord[];
+  assignableMembers: AssignableWorkspaceMemberRecord[];
   canEdit: boolean;
   canComment: boolean;
 };
@@ -32,6 +35,8 @@ export function CardDetailSheet({
   card,
   comments,
   activity,
+  assignees,
+  assignableMembers,
   canEdit,
   canComment,
 }: CardDetailSheetProps) {
@@ -72,6 +77,8 @@ export function CardDetailSheet({
           card={currentCard}
           comments={comments}
           activity={activity}
+          assignees={assignees}
+          assignableMembers={assignableMembers}
           canEdit={canEdit}
           canComment={canComment}
         />
@@ -84,6 +91,8 @@ type CardDetailDialogBodyProps = {
   card: CardDetailRecord;
   comments: CommentRecord[];
   activity: ActivityRecord[];
+  assignees: CardMemberRecord[];
+  assignableMembers: AssignableWorkspaceMemberRecord[];
   canEdit: boolean;
   canComment: boolean;
 };
@@ -92,12 +101,15 @@ function CardDetailDialogBody({
   card,
   comments,
   activity,
+  assignees,
+  assignableMembers,
   canEdit,
   canComment,
 }: CardDetailDialogBodyProps) {
   const [draftTitle, setDraftTitle] = useState(card.title);
   const [draftDescription, setDraftDescription] = useState(card.description ?? "");
   const [error, setError] = useState("");
+  const [localAssignees, setLocalAssignees] = useState(assignees);
   const [isPending, startTransition] = useTransition();
 
   const isDirty =
@@ -133,6 +145,47 @@ function CardDetailDialogBody({
     setDraftTitle(card.title);
     setDraftDescription(card.description ?? "");
     setError("");
+  }
+
+  async function handleAssignMember(userId: string) {
+    if (!canEdit) return;
+    
+    startTransition(async () => {
+      const formData = new FormData();
+      formData.set("cardId", card.id);
+      formData.set("userId", userId);
+      
+      const result = await assignCardMemberAction(formData);
+      if (!result.success) {
+        setError(result.error);
+      } else {
+        // Find the member from assignableMembers and add to local assignees
+        const member = assignableMembers.find((m) => m.id === userId);
+        if (member) {
+          setLocalAssignees([...localAssignees, member]);
+        }
+        setError("");
+      }
+    });
+  }
+
+  async function handleRemoveMember(userId: string) {
+    if (!canEdit) return;
+    
+    startTransition(async () => {
+      const formData = new FormData();
+      formData.set("cardId", card.id);
+      formData.set("userId", userId);
+      
+      const result = await removeCardMemberAction(formData);
+      if (!result.success) {
+        setError(result.error);
+      } else {
+        // Update local assignees list
+        setLocalAssignees(localAssignees.filter((a) => a.id !== userId));
+        setError("");
+      }
+    });
   }
 
   return (
@@ -180,9 +233,7 @@ function CardDetailDialogBody({
                     className="h-11 text-lg font-semibold"
                   />
                 ) : (
-                  <h2 className="text-2xl font-semibold tracking-tight">
-                    {card.title}
-                  </h2>
+                  <h2 className="text-2xl font-semibold tracking-tight">{card.title}</h2>
                 )}
               </div>
 
@@ -291,6 +342,57 @@ function CardDetailDialogBody({
                     {activity.map((entry) => (
                       <ActivityItem key={entry.id} activity={entry} />
                     ))}
+                  </div>
+                )}
+
+                {localAssignees.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-semibold">Members</h4>
+                    <div className="space-y-2">
+                      {localAssignees.map((member) => (
+                        <div
+                          key={member.id}
+                          className="flex items-center justify-between rounded-lg border bg-background/50 px-3 py-2"
+                        >
+                          <div>
+                            <div className="text-sm font-medium">{member.name}</div>
+                            <div className="text-xs text-muted-foreground">{member.email}</div>
+                          </div>
+                          {canEdit && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+onClick={() => {
+                            handleRemoveMember(member.id);
+                          }}
+                            >
+                              Remove
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {canEdit && assignableMembers.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-semibold">Add members</h4>
+                    <div className="space-y-2">
+                      {assignableMembers.map((member) => (
+                        <Button
+                          key={member.id}
+                          variant="outline"
+                          size="sm"
+                          className="w-full justify-start"
+                          onClick={() => {
+                            handleAssignMember(member.id);
+                          }}
+                        >
+                          {member.name} ({member.email})
+                        </Button>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -453,7 +555,7 @@ function ActivityItem({ activity }: ActivityItemProps) {
     minute: "2-digit",
   });
 
-  const actionLabel = getActivityLabel(activity.action, activity.entityType);
+  const actionLabel = getActivityLabel(activity.action, activity.entityType, activity.metadata);
 
   return (
     <div className="rounded-lg border bg-background p-3">
@@ -473,7 +575,19 @@ function ActivityItem({ activity }: ActivityItemProps) {
   );
 }
 
-function getActivityLabel(action: string, entityType: string): string {
+function getActivityLabel(action: string, entityType: string, metadata: Record<string, unknown> | null): string {
+  // Handle member assignment activities
+  if (metadata && typeof metadata === "object" && "actionType" in metadata) {
+    const actionType = (metadata as { actionType: string }).actionType;
+    const targetName = (metadata as { targetUserName?: string }).targetUserName || "a member";
+    
+    if (actionType === "assign-member") {
+      return `assigned ${targetName} to this card`;
+    } else if (actionType === "remove-member") {
+      return `removed ${targetName} from this card`;
+    }
+  }
+
   const entityLabels: Record<string, string> = {
     CARD: "card",
     LIST: "list",
