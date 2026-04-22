@@ -247,7 +247,7 @@ export function ListColumn({
                     variant="ghost"
                     size="icon-sm"
                     aria-label="Drag list"
-                    className="cursor-grab active:cursor-grabbing"
+                    className="cursor-grab text-muted-foreground hover:bg-muted hover:text-foreground active:cursor-grabbing"
                     onPointerDown={handleActionsMenuPointerDown}
                     {...dragAttributes}
                     {...dragListeners}
@@ -256,7 +256,7 @@ export function ListColumn({
                       icon={DragDropVerticalIcon}
                       size={16}
                       strokeWidth={2}
-                      className="text-muted-foreground"
+                      className="text-current transition-colors"
                     />
                   </Button>
                 ) : null}
@@ -269,12 +269,13 @@ export function ListColumn({
                       size="icon-sm"
                       aria-label="List actions"
                       onPointerDown={handleActionsMenuPointerDown}
+                      className="text-muted-foreground hover:bg-muted hover:text-foreground"
                     >
                       <HugeiconsIcon
                         icon={MoreHorizontalIcon}
                         size={16}
                         strokeWidth={2}
-                        className="text-muted-foreground"
+                        className="text-current transition-colors"
                       />
                     </Button>
                   </DropdownMenuTrigger>
@@ -307,7 +308,7 @@ export function ListColumn({
         >
           <div
             className={cn(
-              "rounded-md border border-transparent p-1 transition-colors",
+              "rounded-md border border-transparent p-1 transition-colors hover:bg-muted/30",
               isCardDropTarget && "border-primary/40 bg-background/80",
             )}
           >
@@ -399,7 +400,7 @@ export function ListColumn({
               type="button"
               variant="ghost"
               size="sm"
-              className="justify-start"
+              className="justify-start text-muted-foreground hover:bg-muted hover:text-foreground"
               onClick={() => setAddCardExpanded(true)}
             >
               + Add a card

@@ -179,7 +179,7 @@ export function ListCardItem({
                         variant="ghost"
                         size="icon-sm"
                         aria-label="Drag card"
-                        className="cursor-grab active:cursor-grabbing"
+                        className="cursor-grab text-muted-foreground hover:bg-muted hover:text-foreground active:cursor-grabbing"
                         onPointerDown={handleActionsMenuPointerDown}
                         {...dragAttributes}
                         {...dragListeners}
@@ -188,7 +188,7 @@ export function ListCardItem({
                           icon={DragDropVerticalIcon}
                           size={16}
                           strokeWidth={2}
-                          className="text-muted-foreground"
+                          className="text-current transition-colors"
                         />
                       </Button>
                     ) : null}
@@ -201,12 +201,13 @@ export function ListCardItem({
                           size="icon-sm"
                           aria-label="Card actions"
                           onPointerDown={handleActionsMenuPointerDown}
+                          className="text-muted-foreground hover:bg-muted hover:text-foreground"
                         >
                           <HugeiconsIcon
                             icon={MoreHorizontalIcon}
                             size={16}
                             strokeWidth={2}
-                            className="text-muted-foreground"
+                            className="text-current transition-colors"
                           />
                         </Button>
                       </DropdownMenuTrigger>

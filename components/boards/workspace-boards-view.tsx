@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Link from "next/link";
 
 import { BoardCard } from "./board-card";
 import { CreateBoardModal } from "./create-board-modal";
@@ -28,18 +29,27 @@ export function WorkspaceBoardsView({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <div
-          className={`flex size-10 items-center justify-center rounded-lg ${workspaceBadgeGradient} text-lg font-bold text-white`}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div
+            className={`flex size-10 items-center justify-center rounded-lg ${workspaceBadgeGradient} text-lg font-bold text-white`}
+          >
+            {initial}
+          </div>
+          <div>
+            <h1 className="text-xl font-semibold">{workspace.name}</h1>
+            <p className="text-sm text-muted-foreground">
+              {boards.length} {boards.length === 1 ? "board" : "boards"}
+            </p>
+          </div>
+        </div>
+
+        <Link
+          href={`/workspace?workspace=${workspace.id}`}
+          className="rounded-md border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
-          {initial}
-        </div>
-        <div>
-          <h1 className="text-xl font-semibold">{workspace.name}</h1>
-          <p className="text-sm text-muted-foreground">
-            {boards.length} {boards.length === 1 ? "board" : "boards"}
-          </p>
-        </div>
+          Manage members
+        </Link>
       </div>
 
       <div className="flex flex-wrap gap-4">

@@ -10,6 +10,7 @@ type PermissionRequest = {
   list?: Array<"create" | "update" | "delete">;
   card?: Array<"create" | "update" | "delete">;
   comment?: Array<"create" | "update" | "delete">;
+  invitation?: Array<"create" | "cancel">;
 };
 
 export type WorkspaceRole = "admin" | "editor" | "viewer";

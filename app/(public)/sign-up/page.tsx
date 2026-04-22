@@ -33,7 +33,7 @@ export default function SignUpPage() {
       { name, email, password },
       {
         onSuccess() {
-          router.push("/workspace");
+          router.push("/boards");
         },
         onError(ctx) {
           setError(ctx.error.message);

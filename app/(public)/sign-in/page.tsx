@@ -2,7 +2,7 @@
 
 import { Suspense, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { signIn } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,13 +17,12 @@ import {
 } from "@/components/ui/card";
 
 function SignInForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const redirect = searchParams.get("redirect");
   const redirectTo =
     redirect && redirect.startsWith("/") && !redirect.startsWith("//")
       ? redirect
-      : "/workspace";
+      : "/boards";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -41,9 +40,6 @@ function SignInForm() {
         callbackURL: redirectTo,
       },
       {
-        onSuccess() {
-          router.push(redirectTo);
-        },
         onError(ctx) {
           setError(ctx.error.message);
           setLoading(false);
