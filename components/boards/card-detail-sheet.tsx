@@ -13,9 +13,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { CardAttachments } from "@/components/boards/card-attachments";
 import type { CardDetailRecord } from "@/lib/card";
 import type { CommentRecord } from "@/lib/comment";
 import type { ActivityRecord } from "@/lib/activity";
+import type { AttachmentRecord } from "@/lib/attachment";
 import type { CardMemberRecord, AssignableWorkspaceMemberRecord } from "@/lib/card-member";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +26,7 @@ type CardDetailSheetProps = {
   card: CardDetailRecord | null;
   comments: CommentRecord[];
   activity: ActivityRecord[];
+  attachments: AttachmentRecord[];
   assignees: CardMemberRecord[];
   assignableMembers: AssignableWorkspaceMemberRecord[];
   canEdit: boolean;
@@ -35,6 +38,7 @@ export function CardDetailSheet({
   card,
   comments,
   activity,
+  attachments,
   assignees,
   assignableMembers,
   canEdit,
@@ -77,6 +81,7 @@ export function CardDetailSheet({
           card={currentCard}
           comments={comments}
           activity={activity}
+          attachments={attachments}
           assignees={assignees}
           assignableMembers={assignableMembers}
           canEdit={canEdit}
@@ -91,6 +96,7 @@ type CardDetailDialogBodyProps = {
   card: CardDetailRecord;
   comments: CommentRecord[];
   activity: ActivityRecord[];
+  attachments: AttachmentRecord[];
   assignees: CardMemberRecord[];
   assignableMembers: AssignableWorkspaceMemberRecord[];
   canEdit: boolean;
@@ -101,6 +107,7 @@ function CardDetailDialogBody({
   card,
   comments,
   activity,
+  attachments,
   assignees,
   assignableMembers,
   canEdit,
@@ -357,6 +364,12 @@ function CardDetailDialogBody({
                 </div>
               ) : null}
             </section>
+
+            <CardAttachments
+              cardId={card.id}
+              attachments={attachments}
+              canEdit={canEdit}
+            />
 
             <section className="space-y-3 rounded-lg border bg-muted/20 p-4">
               <h3 className="text-sm font-semibold">Card metadata</h3>

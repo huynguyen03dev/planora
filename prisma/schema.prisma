@@ -342,6 +342,11 @@ model Attachment {
   fileSize  Int
   createdAt DateTime @default(now())
 
+  // Cloudinary provider metadata (for future cleanup support)
+  cloudinaryPublicId   String?
+  cloudinaryResourceType String?
+
+  @@index([cardId])
   @@map("attachment")
 }
 

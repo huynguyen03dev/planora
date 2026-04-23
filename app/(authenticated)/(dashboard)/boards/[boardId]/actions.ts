@@ -14,6 +14,7 @@ import {
   moveCardToListByNeighbors,
 } from "@/lib/card";
 import { createComment } from "@/lib/comment";
+import { createAttachment } from "@/lib/attachment";
 import {
   createList,
   updateListTitle,
@@ -43,7 +44,9 @@ import {
   createCommentSchema,
   assignCardMemberSchema,
   removeCardMemberSchema,
+  uploadAttachmentSchema,
 } from "@/lib/schemas";
+import { validateFileForUpload, uploadToCloudinary } from "@/lib/cloudinary";
 
 type CreateListResult =
   | { success: true; listId: string }
@@ -675,5 +678,107 @@ export async function removeCardMemberAction(
   } catch (error) {
     console.error("Failed to remove member from card:", error);
     return { success: false, error: "Failed to remove member. Please try again." };
+  }
+}
+
+type UploadAttachmentResult =
+  | { success: true; attachmentId: string }
+  | { success: false; error: string };
+
+export async function uploadAttachmentAction(
+  formData: FormData,
+): Promise<UploadAttachmentResult> {
+  const cardId = formData.get("cardId");
+  const file = formData.get("file");
+
+  if (!cardId || typeof cardId !== "string" || !file || !(file instanceof File)) {
+    return { success: false, error: "Invalid request" };
+  }
+
+  const parsed = uploadAttachmentSchema.safeParse({ cardId, file });
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  const { userId: actorUserId } = await verifySession();
+
+  const { cardId: parsedCardId } = parsed.data;
+
+  // Get card with board and workspace info for permission checking.
+  const cardResult = await getCardWithListAndBoard(parsedCardId);
+  if (!cardResult || cardResult.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  // Check if user has permission to update cards in this workspace.
+  const canUpdateCard = await hasWorkspacePermission(cardResult.board.workspaceId, {
+    card: ["update"],
+  });
+
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  // Validate file
+  const fileValidation = validateFileForUpload(file);
+  if (!fileValidation.valid) {
+    return { success: false, error: fileValidation.error };
+  }
+
+  let cloudinaryResult;
+  try {
+    cloudinaryResult = await uploadToCloudinary({ file });
+  } catch (error) {
+    console.error("Cloudinary upload failed:", error);
+    return { success: false, error: "Failed to upload file to cloud storage. Please try again." };
+  }
+
+  try {
+    const attachment = await createAttachment({
+      cardId: parsedCardId,
+      userId: actorUserId,
+      fileName: file.name,
+      fileUrl: cloudinaryResult.secureUrl,
+      fileType: file.type,
+      fileSize: file.size,
+      cloudinaryPublicId: cloudinaryResult.publicId,
+      cloudinaryResourceType: cloudinaryResult.resourceType,
+    });
+
+    await createActivityEntry({
+      workspaceId: cardResult.board.workspaceId,
+      boardId: cardResult.board.id,
+      cardId: parsedCardId,
+      userId: actorUserId,
+      action: "CREATED",
+      entityType: "ATTACHMENT",
+      metadata: {
+        fileName: file.name,
+        fileSize: file.size,
+      },
+    });
+
+    revalidatePath(`/boards/${cardResult.board.id}`);
+    return { success: true, attachmentId: attachment.id };
+  } catch (error) {
+    console.error("Failed to save attachment:", error);
+    try {
+      const { v2: cloudinary } = await import("cloudinary");
+      const config = (await import("@/lib/cloudinary")).getCloudinaryConfig();
+      cloudinary.config({
+        cloud_name: config.cloudName,
+        api_key: config.apiKey,
+        api_secret: config.apiSecret,
+      });
+      await cloudinary.uploader.destroy(cloudinaryResult.publicId, {
+        resource_type: cloudinaryResult.resourceType,
+      });
+      console.log("Cleaned up orphaned Cloudinary file:", cloudinaryResult.publicId);
+    } catch (cleanupError) {
+      console.error("Failed to clean up Cloudinary file:", cleanupError);
+    }
+    return { success: false, error: "Failed to save attachment. Please try again." };
   }
 }

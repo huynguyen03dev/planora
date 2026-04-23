@@ -55,3 +55,8 @@ export {
   type AssignCardMemberInput,
   type RemoveCardMemberInput,
 } from "./card-member";
+
+export {
+  uploadAttachmentSchema,
+  type UploadAttachmentInput,
+} from "./attachment";

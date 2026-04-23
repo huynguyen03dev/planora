@@ -11,6 +11,8 @@ import {
 import { getCardDetailForBoard } from "@/lib/card";
 import { getCommentsByCardId } from "@/lib/comment";
 import type { CommentRecord } from "@/lib/comment";
+import { getAttachmentsByCardId } from "@/lib/attachment";
+import type { AttachmentRecord } from "@/lib/attachment";
 import { getActivityByCardId } from "@/lib/activity";
 import type { ActivityRecord } from "@/lib/activity";
 import { getBoardTheme } from "@/lib/constants";
@@ -71,6 +73,7 @@ export default async function BoardPage({
   // Initialize data variables
   let selectedCard = null;
   let comments: CommentRecord[] = [];
+  let attachments: AttachmentRecord[] = [];
   let activity: ActivityRecord[] = [];
   let assignees: CardMemberRecord[] = [];
   let assignableMembers: AssignableWorkspaceMemberRecord[] = [];
@@ -88,15 +91,18 @@ export default async function BoardPage({
     if (selectedCard) {
       const [
         cardComments,
+        cardAttachments,
         cardActivity,
         cardAssignees,
       ] = await Promise.all([
         getCommentsByCardId(selectedCard.id),
+        getAttachmentsByCardId(selectedCard.id),
         getActivityByCardId(selectedCard.id),
         getCardMembers(selectedCard.id),
       ]);
       
       comments = cardComments;
+      attachments = cardAttachments;
       activity = cardActivity;
       assignees = cardAssignees;
       
@@ -143,6 +149,7 @@ export default async function BoardPage({
         card={selectedCard}
         comments={comments}
         activity={activity}
+        attachments={attachments}
         assignees={assignees}
         assignableMembers={assignableMembers}
         canEdit={canEditCard}
