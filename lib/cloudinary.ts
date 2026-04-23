@@ -115,14 +115,31 @@ export async function uploadToCloudinary({
 
   const arrayBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
-  const base64 = buffer.toString("base64");
-  const dataUri = `data:${file.type};base64,${base64}`;
 
-  const result = await cloudinary.uploader.upload(dataUri, {
-    folder,
-    resource_type: "auto",
-    use_filename: true,
-    unique_filename: true,
+  const result = await new Promise<Record<string, unknown>>((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder,
+        resource_type: "auto",
+        use_filename: true,
+        unique_filename: true,
+      },
+      (error, uploadResult) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        if (!uploadResult) {
+          reject(new Error("Cloudinary upload returned no result"));
+          return;
+        }
+
+        resolve(uploadResult as Record<string, unknown>);
+      },
+    );
+
+    uploadStream.end(buffer);
   });
 
   return parseCloudinaryResponse(result);
