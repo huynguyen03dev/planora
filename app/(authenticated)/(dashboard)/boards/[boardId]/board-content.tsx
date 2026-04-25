@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   type CollisionDetection,
@@ -8,8 +8,11 @@ import {
   DragOverlay,
   KeyboardSensor,
   PointerSensor,
+  closestCenter,
   closestCorners,
+  getFirstCollision,
   pointerWithin,
+  rectIntersection,
   useSensor,
   useSensors,
   type DragEndEvent,
@@ -30,6 +33,7 @@ import {
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
 import {
   parseSortableId,
+  toCardSortableId,
   toListSortableId,
 } from "@/components/boards/board-dnd-types";
 import { AddListButton } from "@/components/boards/add-list-button";
@@ -86,10 +90,18 @@ export function BoardContent({
   } | null>(null);
   const [isPersisting, startPersistTransition] = useTransition();
   const snapshotRef = useRef<typeof lists | null>(null);
+  const lastOverId = useRef<string | null>(null);
+  const recentlyMovedToNewContainer = useRef(false);
 
   useEffect(() => {
     setBoardLists(lists);
   }, [lists]);
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      recentlyMovedToNewContainer.current = false;
+    });
+  }, [boardLists]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -113,34 +125,70 @@ export function BoardContent({
     router.push(query ? `${pathname}?${query}` : pathname, { scroll: false });
   }
 
-  const collisionDetectionStrategy: CollisionDetection = (args) => {
-    const activeParsed = parseSortableId(String(args.active.id));
+  const collisionDetectionStrategy: CollisionDetection = useCallback(
+    (args) => {
+      const activeParsed = parseSortableId(String(args.active.id));
 
-    if (activeParsed.kind === "list") {
-      const listOnlyContainers = args.droppableContainers.filter((container) => {
-        const parsed = parseSortableId(String(container.id));
-        return parsed.kind === "list";
-      });
+      // --- List dragging: filter to list-only containers ---
+      if (activeParsed.kind === "list") {
+        const listOnlyContainers = args.droppableContainers.filter((container) => {
+          return parseSortableId(String(container.id)).kind === "list";
+        });
 
-      if (listOnlyContainers.length > 0) {
         const pointerCollisions = pointerWithin({
           ...args,
           droppableContainers: listOnlyContainers,
         });
-
-        if (pointerCollisions.length > 0) {
-          return pointerCollisions;
-        }
+        if (pointerCollisions.length > 0) return pointerCollisions;
 
         return closestCorners({
           ...args,
           droppableContainers: listOnlyContainers,
         });
       }
-    }
 
-    return closestCorners(args);
-  };
+      // --- Card dragging: official multi-container pattern ---
+      const pointerIntersections = pointerWithin(args);
+      const intersections =
+        pointerIntersections.length > 0
+          ? pointerIntersections
+          : rectIntersection(args);
+
+      let overId = getFirstCollision(intersections, "id");
+
+      if (overId != null) {
+        const overParsed = parseSortableId(String(overId));
+
+        if (overParsed.kind === "list" && overParsed.id) {
+          const list = boardLists.find((l) => l.id === overParsed.id);
+
+          if (list && list.cards.length > 0) {
+            const cardIds = list.cards.map((c) => toCardSortableId(c.id));
+            const closest = closestCenter({
+              ...args,
+              droppableContainers: args.droppableContainers.filter((c) =>
+                cardIds.includes(String(c.id)),
+              ),
+            })[0]?.id;
+
+            if (closest) {
+              overId = closest;
+            }
+          }
+        }
+
+        lastOverId.current = String(overId);
+        return [{ id: overId }];
+      }
+
+      if (recentlyMovedToNewContainer.current) {
+        lastOverId.current = String(args.active.id);
+      }
+
+      return lastOverId.current ? [{ id: lastOverId.current }] : [];
+    },
+    [boardLists],
+  );
 
   function findCardLocation(
     sourceLists: typeof boardLists,
@@ -191,6 +239,8 @@ export function BoardContent({
     }
 
     snapshotRef.current = boardLists;
+    lastOverId.current = null;
+    recentlyMovedToNewContainer.current = false;
     setActiveDrag({
       kind: parsed.kind,
       id: parsed.id,
@@ -217,11 +267,15 @@ export function BoardContent({
   function handleDragCancel() {
     restoreSnapshot();
     finalizeDrag();
+    lastOverId.current = null;
+    recentlyMovedToNewContainer.current = false;
   }
 
   function abortDrag() {
     restoreSnapshot();
     finalizeDrag();
+    lastOverId.current = null;
+    recentlyMovedToNewContainer.current = false;
   }
 
   function handleDragOver(event: DragOverEvent) {
@@ -382,6 +436,10 @@ export function BoardContent({
       listId: nextLists[targetListIndex].id,
     });
 
+    if (sourceLocation.listIndex !== targetListIndex) {
+      recentlyMovedToNewContainer.current = true;
+    }
+
     setBoardLists(nextLists);
   }
 
@@ -471,20 +529,22 @@ export function BoardContent({
       : null;
 
     clearDragVisuals();
-
-    if (
-      initialLocation &&
-      initialLocation.listIndex === finalLocation.listIndex &&
-      initialLocation.cardIndex === finalLocation.cardIndex
-    ) {
-      snapshotRef.current = null;
-      return;
-    }
+    lastOverId.current = null;
+    recentlyMovedToNewContainer.current = false;
 
     const sourceList = initialLocation ? initialLists?.[initialLocation.listIndex] ?? null : null;
     const targetList = boardLists[finalLocation.listIndex] ?? null;
     if (!sourceList || !targetList) {
       abortDrag();
+      return;
+    }
+
+    if (
+      initialLocation &&
+      sourceList.id === targetList.id &&
+      initialLocation.cardIndex === finalLocation.cardIndex
+    ) {
+      snapshotRef.current = null;
       return;
     }
 

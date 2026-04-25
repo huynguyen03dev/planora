@@ -342,9 +342,8 @@ Lists, cards, checklists, and checklist items use **double precision float** pos
 
 ```
 Constants:
-  GAP         = 16384    (2^14 — initial spacing between items)
-  MIN_GAP     = 0.125    (minimum allowed gap before cascade shift)
-  MAX_POSITION = 2^50    (upper bound before full renormalization)
+  GAP          = 16384    (2^14 — initial spacing between items)
+  MIN_GAP      = 0.001    (minimum allowed gap before full renormalization)
 
 Initial items:  16384, 32768, 49152, 65536, ...
 Insert between 16384 and 32768 → (16384 + 32768) / 2 = 24576
@@ -352,18 +351,31 @@ Insert between 16384 and 32768 → (16384 + 32768) / 2 = 24576
 Edge cases:
   - Prepend (before first): firstItem.position - GAP
   - Append (after last): lastItem.position + GAP
-  - Gap < MIN_GAP: cascade-shift neighbors outward
-  - Position > MAX_POSITION: full renormalize → GAP * (index + 1)
+  - Gap < MIN_GAP: full renormalize all siblings → GAP * (index + 1)
 ```
 
-With GAP=16384 and MIN_GAP=0.125, you get **131,072 inserts** between the same two items before a cascade shift is needed. More than enough for any Kanban board.
+With GAP=16384 and MIN_GAP=0.001, you get well over 100,000 inserts between the same two items before renormalization. More than enough for any Kanban board.
+
+**Why full renormalization instead of cascade-shift:**
+Cascade-shifting individual neighbors is complex (how far to shift? what if shifting causes new collisions?) and hard to make concurrent-safe. Full renormalization — re-spacing ALL siblings in one transaction to `GAP * (index + 1)` — is simpler, atomic, and guarantees clean spacing. The cost is one extra query, but it only triggers after extreme repeated reordering.
 
 **Position update flow:**
-1. Client drag-ends → sends `{ cardId, newListId?, prevCardPosition?, nextCardPosition? }`
-2. Server computes midpoint: `(prev + next) / 2`
-3. If gap < MIN_GAP → shift neighbors, broadcast shifted positions via Socket.io
-4. If position > MAX_POSITION → full renormalize all siblings
-5. Save to DB → emit Socket.io event → return updated card
+1. Client drag-ends → sends `{ cardId, targetListId?, prevCardId?, nextCardId? }`
+   - Send **neighbor IDs**, not positions. The server looks up current positions from DB, avoiding stale-position race conditions with concurrent users.
+2. Server fetches neighbor positions from DB, computes midpoint: `(prev + next) / 2`
+3. If computed gap < MIN_GAP → full renormalize all siblings in that list/board → retry with fresh positions
+4. Save to DB → (when Socket.io is implemented) emit event → return result
+5. Retry up to 3 times on unique constraint violations (renormalize between retries)
+
+**Renormalization function (must exist for both lists AND cards):**
+```
+normalizePositions(parentId):
+  1. Fetch all siblings ordered by [position ASC, createdAt ASC]
+  2. In a single transaction, update each to position = GAP * (index + 1)
+```
+
+**Unique constraints:**
+Both `List(boardId, position)` and `Card(listId, position)` should have unique constraints to prevent two items sharing the same position. The retry logic handles constraint violations by renormalizing and retrying.
 
 ### 4.5 Key indexes
 
@@ -442,8 +454,64 @@ If the hard MVP is not stable by the end of **Week 3**, all remaining time must 
 
 ### 5.5 Cards
 - Create / edit / archive cards
-- Drag & drop within and between lists (using @dnd-kit or react-beautiful-dnd successor)
+- Drag & drop within and between lists (using @dnd-kit)
 - Position-based ordering (float)
+
+#### 5.5.1 Card drag-and-drop — client-side architecture (@dnd-kit)
+
+**Context:** @dnd-kit uses nested `SortableContext`s — an outer horizontal context for lists,
+and an inner vertical context per list for cards. This multi-container setup requires careful
+collision detection and state management to work reliably.
+
+**Reference:** Based on the [official dnd-kit MultipleContainers example](https://github.com/clauderic/dnd-kit/blob/master/stories/2%20-%20Presets/Sortable/MultipleContainers.tsx).
+
+**Collision detection strategy (card-aware):**
+When the active dragged item is a **card**, apply the official multi-container pattern:
+1. **Phase 1 — `pointerWithin`:** Run on ALL droppable containers (both `card:*` and `list:*`
+   sortables). This gives precision — only matches when the pointer is physically inside a
+   droppable rect.
+2. **Phase 2 — `rectIntersection` fallback:** If `pointerWithin` returns no matches (pointer
+   is in a gap), use `rectIntersection` to find intersecting containers.
+3. **`getFirstCollision`** to extract the best match from the collision array.
+4. **Container drill-down:** If the match is a `list:*` ID (a list container, not a card):
+   - If the list has cards → run `closestCenter` filtered to only that list's card sortables
+     to find the specific card target.
+   - If the list is empty → use the list ID as-is (means "drop at end of this list").
+5. **`lastOverId` caching:** Cache the last valid match in a ref. When no collision is found
+   and `recentlyMovedToNewContainer` is true, return `activeId` to prevent stale matches.
+   Otherwise fall back to the cached `lastOverId`.
+
+When the active item is a **list**, keep the existing strategy (filter to list-only
+containers, `pointerWithin` → `closestCorners`).
+
+**No separate `useDroppable` needed:** Each list's `useSortable` (in the outer
+`SortableContext`) already provides a droppable rect covering the entire column. The
+collision detection's container drill-down handles both empty and non-empty lists. This
+matches the official dnd-kit pattern where containers are sortable (not separately droppable).
+
+**Preventing oscillation during `handleDragOver`:**
+Use the official `recentlyMovedToNewContainer` pattern (from the dnd-kit MultipleContainers
+example, also addresses known issues #552 and #1678):
+- **`recentlyMovedToNewContainer` ref (boolean):** Set to `true` after any cross-list
+  card move in `handleDragOver`.
+- **Reset via `useEffect` + `requestAnimationFrame`:** After `boardLists` state updates,
+  reset the flag in a `requestAnimationFrame` callback. This ensures the reset happens
+  AFTER React has processed the state update AND the browser has recalculated layout.
+- **Integration with collision detection:** When `recentlyMovedToNewContainer` is true
+  and no collision is found, the collision strategy returns `activeId` instead of a stale
+  match, preventing the bounce-back loop.
+
+**DragOverlay:**
+Always use `DragOverlay` for the visual preview of the dragged card. The original card
+in the list should show reduced opacity (`0.5`) as a placeholder. This separation
+prevents the dragged card's DOM element from interfering with collision detection.
+
+**`handleDragEnd` — persist to server:**
+- Compare source list ID vs target list ID (not array indices) to determine if the card
+  moved across lists.
+- Extract `prevCardId` / `nextCardId` from the card's neighbors in the optimistic state.
+- Call `reorderCardAction` (same list) or `moveCardAction` (cross-list).
+- On server error, restore the snapshot taken at `handleDragStart`.
 
 ### 5.6 Card Detail (Modal)
 - Title (inline edit)
@@ -697,7 +765,7 @@ Prepare this exact flow for the committee presentation:
 | Risk                                          | Mitigation                                                            |
 | --------------------------------------------- | --------------------------------------------------------------------- |
 | Better Auth org plugin doesn't map to my roles | Test role mapping in week 1. Fallback: implement roles manually       |
-| Drag & drop ordering bugs                     | Use float positions + renormalization. Test edge cases early           |
+| Drag & drop ordering bugs                     | Use float positions + full renormalization (see §4.4). Card-aware collision detection with `pointerWithin` + `closestCenter` (see §5.5.1). Anti-oscillation guard in `handleDragOver`. `useDroppable` on each list's card area for empty-list drops. |
 | Socket.io + custom server deployment issues   | Set up Docker + deploy in week 1, not week 4                          |
 | Email delivery issues (Resend quota/DNS)      | Prepare fallback: in-app only for demo + capture SMTP logs/screenshots |
 | Burndown/Lead Time data quality mismatch       | Freeze metric definitions early; validate with seeded scenarios         |

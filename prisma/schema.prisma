@@ -253,7 +253,7 @@ model Card {
   attachments Attachment[]
   activities  Activity[]   @relation("CardActivity")
 
-  @@index([listId, position])
+  @@unique([listId, position])
   @@index([listId, archivedAt])
   @@map("card")
 }
