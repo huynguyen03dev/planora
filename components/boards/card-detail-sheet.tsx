@@ -20,6 +20,23 @@ import type { ActivityRecord } from "@/lib/activity";
 import type { AttachmentRecord } from "@/lib/attachment";
 import type { CardMemberRecord, AssignableWorkspaceMemberRecord } from "@/lib/card-member";
 import { cn } from "@/lib/utils";
+import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
+
+type UIComment = {
+  id: string;
+  content: string;
+  createdAt: Date;
+  user: { id: string; name: string; image: string | null };
+};
+
+type UIActivity = {
+  id: string;
+  action: string;
+  entityType: string;
+  createdAt: Date;
+  user: { id: string; name: string; image: string | null };
+  metadata: Record<string, unknown> | null;
+};
 
 type CardDetailSheetProps = {
   open: boolean;
@@ -36,8 +53,8 @@ type CardDetailSheetProps = {
 export function CardDetailSheet({
   open,
   card,
-  comments,
-  activity,
+  comments: initialComments,
+  activity: initialActivity,
   attachments,
   assignees,
   assignableMembers,
@@ -47,7 +64,18 @@ export function CardDetailSheet({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+
+  const storeSelectedCard = useBoardStore((state) => state.selectedCard);
   const [dismissedCardId, setDismissedCardId] = useState<string | null>(null);
+
+  const liveComments: UIComment[] =
+    storeSelectedCard && card && storeSelectedCard.card.id === card.id
+      ? storeSelectedCard.comments
+      : initialComments;
+  const liveActivity: UIActivity[] =
+    storeSelectedCard && card && storeSelectedCard.card.id === card.id
+      ? storeSelectedCard.activity
+      : initialActivity;
 
   if (!card) {
     return null;
@@ -79,8 +107,8 @@ export function CardDetailSheet({
         <CardDetailDialogBody
           key={currentCard.id}
           card={currentCard}
-          comments={comments}
-          activity={activity}
+          comments={liveComments}
+          activity={liveActivity}
           attachments={attachments}
           assignees={assignees}
           assignableMembers={assignableMembers}
@@ -94,8 +122,8 @@ export function CardDetailSheet({
 
 type CardDetailDialogBodyProps = {
   card: CardDetailRecord;
-  comments: CommentRecord[];
-  activity: ActivityRecord[];
+  comments: UIComment[];
+  activity: UIActivity[];
   attachments: AttachmentRecord[];
   assignees: CardMemberRecord[];
   assignableMembers: AssignableWorkspaceMemberRecord[];
@@ -546,7 +574,7 @@ function CommentComposer({ cardId, canComment }: CommentComposerProps) {
 }
 
 type CommentItemProps = {
-  comment: CommentRecord;
+  comment: UIComment;
 };
 
 function CommentItem({ comment }: CommentItemProps) {
@@ -583,7 +611,7 @@ function CommentItem({ comment }: CommentItemProps) {
 }
 
 type ActivityItemProps = {
-  activity: ActivityRecord;
+  activity: UIActivity;
 };
 
 function ActivityItem({ activity }: ActivityItemProps) {

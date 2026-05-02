@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { BoardContent } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-content";
+import { BoardStoreProvider } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store-provider";
 import { BoardHeader } from "@/components/boards/board-header";
 import { CardDetailSheet } from "@/components/boards/card-detail-sheet";
 import { getBoardById } from "@/lib/board";
@@ -115,46 +116,117 @@ export default async function BoardPage({
 
   const boardTheme = getBoardTheme(board.backgroundColor);
 
-  return (
-    <div className="flex h-full min-h-0 flex-1 flex-col p-6">
-      <BoardHeader
-        board={{
-          id: board.id,
-          title: board.title,
-          backgroundColor: board.backgroundColor,
-        }}
-        canEdit={canEditBoard}
-        canDelete={canDeleteBoard}
-      />
+  const listsWithCards = lists.map((list) => ({
+    id: list.id,
+    title: list.title,
+    boardId: list.boardId,
+    cards: list.cards.map((card) => ({
+      id: card.id,
+      listId: card.listId,
+      title: card.title,
+      position: card.position,
+    })),
+  }));
 
-      <div
-        className="-mt-px flex flex-1 flex-col rounded-b-xl border border-t-0 border-white/20"
-        style={{ background: boardTheme.surface }}
-      >
-        <BoardContent
-          boardId={board.id}
-          lists={lists}
-          canEdit={canEditList}
-          canDelete={canDeleteList}
-          canCreateList={canCreateList}
-          canCreateCard={canCreateCard}
-          canEditCard={canEditCard}
-          canArchiveCard={canArchiveCard}
+  const selectedCardData = selectedCard
+    ? {
+        card: {
+          id: selectedCard.id,
+          listId: selectedCard.listId,
+          title: selectedCard.title,
+          description: selectedCard.description,
+          updatedAt: selectedCard.updatedAt,
+        },
+        comments: comments.map((c) => ({
+          id: c.id,
+          content: c.content,
+          createdAt: c.createdAt,
+          user: c.user,
+        })),
+        activity: activity.map((a) => ({
+          id: a.id,
+          action: a.action,
+          entityType: a.entityType,
+          createdAt: a.createdAt,
+          user: a.user,
+          metadata: a.metadata,
+        })),
+        attachments: attachments.map((a) => ({
+          id: a.id,
+          url: a.fileUrl,
+          filename: a.fileName,
+          mimeType: a.fileType,
+          size: a.fileSize,
+          uploadedAt: a.createdAt,
+        })),
+        assignees: assignees.map((a) => ({
+          id: a.id,
+          name: a.name,
+          email: a.email,
+          image: a.image,
+        })),
+        assignableMembers: assignableMembers.map((m) => ({
+          id: m.id,
+          name: m.name,
+          email: m.email,
+          image: m.image,
+        })),
+      }
+    : null;
+
+  return (
+    <BoardStoreProvider
+      boardId={board.id}
+      lists={listsWithCards}
+      selectedCardId={selectedCardId}
+      selectedCard={selectedCardData}
+      canEdit={canEditList}
+      canDelete={canDeleteList}
+      canCreateList={canCreateList}
+      canCreateCard={canCreateCard}
+      canEditCard={canEditCard}
+      canArchiveCard={canArchiveCard}
+    >
+      <div className="flex h-full min-h-0 flex-1 flex-col p-6">
+        <BoardHeader
+          board={{
+            id: board.id,
+            title: board.title,
+            backgroundColor: board.backgroundColor,
+          }}
+          canEdit={canEditBoard}
+          canDelete={canDeleteBoard}
+        />
+
+        <div
+          className="-mt-px flex flex-1 flex-col rounded-b-xl border border-t-0 border-white/20"
+          style={{ background: boardTheme.surface }}
+        >
+          <BoardContent
+            boardId={board.id}
+            lists={listsWithCards}
+            canEdit={canEditList}
+            canDelete={canDeleteList}
+            canCreateList={canCreateList}
+            canCreateCard={canCreateCard}
+            canEditCard={canEditCard}
+            canArchiveCard={canArchiveCard}
+          />
+        </div>
+
+        <CardDetailSheet
+          key={selectedCard?.id ?? "card-detail-sheet-closed"}
+          open={Boolean(selectedCard)}
+          card={selectedCard}
+          comments={comments}
+          activity={activity}
+          attachments={attachments}
+          assignees={assignees}
+          assignableMembers={assignableMembers}
+          canEdit={canEditCard}
+          canComment={canComment}
         />
       </div>
-
-      <CardDetailSheet
-        key={selectedCard?.id ?? "card-detail-sheet-closed"}
-        open={Boolean(selectedCard)}
-        card={selectedCard}
-        comments={comments}
-        activity={activity}
-        attachments={attachments}
-        assignees={assignees}
-        assignableMembers={assignableMembers}
-        canEdit={canEditCard}
-        canComment={canComment}
-      />
-    </div>
+    </BoardStoreProvider>
   );
 }

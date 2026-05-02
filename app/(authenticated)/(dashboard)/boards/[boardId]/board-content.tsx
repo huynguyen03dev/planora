@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   type CollisionDetection,
@@ -36,6 +36,7 @@ import { AddListButton } from "@/components/boards/add-list-button";
 import { ListColumn } from "@/components/boards/list-column";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useBoardStore, type ListWithCards } from "./board-store";
 
 type BoardContentProps = {
   boardId: string;
@@ -72,7 +73,10 @@ export function BoardContent({
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const [boardLists, setBoardLists] = useState(lists);
+  const storeBoardId = useBoardStore((state) => state.boardId);
+  const storeLists = useBoardStore((state) => state.lists);
+  const boardLists = storeBoardId === boardId ? storeLists : lists;
+
   const [error, setError] = useState("");
   const [activeDrag, setActiveDrag] = useState<{
     kind: "list" | "card";
@@ -85,11 +89,12 @@ export function BoardContent({
     placement: "before" | "after" | "end";
   } | null>(null);
   const [isPersisting, startPersistTransition] = useTransition();
-  const snapshotRef = useRef<typeof lists | null>(null);
+  const snapshotRef = useRef<ListWithCards[] | null>(null);
 
-  useEffect(() => {
-    setBoardLists(lists);
-  }, [lists]);
+  function updateBoardLists(newLists: ListWithCards[]) {
+    const setLists = useBoardStore.getState().setLists;
+    setLists(newLists);
+  }
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -203,10 +208,9 @@ export function BoardContent({
     setCardDropIndicator(null);
   }
 
-  function restoreSnapshot() {
-    if (snapshotRef.current) {
-      setBoardLists(snapshotRef.current);
-    }
+  function refreshFromServer() {
+    snapshotRef.current = null;
+    router.refresh();
   }
 
   function finalizeDrag() {
@@ -215,12 +219,12 @@ export function BoardContent({
   }
 
   function handleDragCancel() {
-    restoreSnapshot();
+    refreshFromServer();
     finalizeDrag();
   }
 
   function abortDrag() {
-    restoreSnapshot();
+    refreshFromServer();
     finalizeDrag();
   }
 
@@ -253,7 +257,7 @@ export function BoardContent({
         return;
       }
 
-      setBoardLists(arrayMove(boardLists, activeIndex, targetIndex));
+      updateBoardLists(arrayMove(boardLists, activeIndex, targetIndex));
       return;
     }
 
@@ -349,40 +353,6 @@ export function BoardContent({
 
     setListDropTargetId(targetListId);
     setCardDropIndicator(nextIndicator);
-
-    const nextLists = boardLists.map((list) => ({
-      ...list,
-      cards: [...list.cards],
-    }));
-
-    const [movedCard] = nextLists[sourceLocation.listIndex].cards.splice(
-      sourceLocation.cardIndex,
-      1,
-    );
-
-    if (!movedCard) {
-      return;
-    }
-
-    const adjustedTargetIndex =
-      sourceLocation.listIndex === targetListIndex &&
-      sourceLocation.cardIndex < targetCardIndex
-        ? targetCardIndex - 1
-        : targetCardIndex;
-
-    if (
-      sourceLocation.listIndex === targetListIndex &&
-      sourceLocation.cardIndex === adjustedTargetIndex
-    ) {
-      return;
-    }
-
-    nextLists[targetListIndex].cards.splice(adjustedTargetIndex, 0, {
-      ...movedCard,
-      listId: nextLists[targetListIndex].id,
-    });
-
-    setBoardLists(nextLists);
   }
 
   function handleDragEnd(event: DragEndEvent) {
@@ -414,7 +384,7 @@ export function BoardContent({
 
       if (activeIndex !== -1 && overIndex !== -1 && activeIndex !== overIndex) {
         nextLists = arrayMove(boardLists, activeIndex, overIndex);
-        setBoardLists(nextLists);
+        updateBoardLists(nextLists);
       }
 
       const finalIndex = nextLists.findIndex((list) => list.id === activeParsed.id);
@@ -442,14 +412,15 @@ export function BoardContent({
       startPersistTransition(async () => {
         const result = await reorderListAction(formData);
         if (!result.success) {
-          restoreSnapshot();
           setError(result.error);
           snapshotRef.current = null;
+          router.refresh();
           return;
         }
 
         setError("");
         snapshotRef.current = null;
+        router.refresh();
       });
       return;
     }
@@ -459,43 +430,104 @@ export function BoardContent({
       return;
     }
 
-    const finalLocation = findCardLocation(boardLists, activeParsed.id);
-    if (!finalLocation) {
+    const initialLists = snapshotRef.current ?? boardLists;
+    const initialLocation = findCardLocation(initialLists, activeParsed.id);
+    if (!initialLocation) {
       abortDrag();
       return;
     }
 
-    const initialLists = snapshotRef.current;
-    const initialLocation = initialLists
-      ? findCardLocation(initialLists, activeParsed.id)
-      : null;
+    const indicator = cardDropIndicator;
+    let targetListId: string | null = null;
+    let targetCardIndex = -1;
 
-    clearDragVisuals();
+    if (indicator) {
+      const targetListIndex = initialLists.findIndex((list) => list.id === indicator.listId);
+      if (targetListIndex === -1) {
+        abortDrag();
+        return;
+      }
+
+      if (indicator.placement === "end" || indicator.cardId === null) {
+        targetCardIndex = initialLists[targetListIndex].cards.length;
+      } else {
+        const overIdx = initialLists[targetListIndex].cards.findIndex(
+          (card) => card.id === indicator.cardId,
+        );
+        if (overIdx === -1) {
+          abortDrag();
+          return;
+        }
+        targetCardIndex = overIdx + (indicator.placement === "after" ? 1 : 0);
+      }
+
+      targetListId = indicator.listId;
+    } else if (overParsed.kind === "list") {
+      const targetListIndex = initialLists.findIndex((list) => list.id === overParsed.id);
+      if (targetListIndex === -1) {
+        abortDrag();
+        return;
+      }
+      targetListId = overParsed.id;
+      targetCardIndex = initialLists[targetListIndex].cards.length;
+    } else {
+      abortDrag();
+      return;
+    }
+
+    const sourceListIndex = initialLocation.listIndex;
+    const targetListIndex = initialLists.findIndex((list) => list.id === targetListId);
+    if (targetListIndex === -1) {
+      abortDrag();
+      return;
+    }
+
+    const adjustedTargetIndex =
+      sourceListIndex === targetListIndex && initialLocation.cardIndex < targetCardIndex
+        ? targetCardIndex - 1
+        : targetCardIndex;
 
     if (
-      initialLocation &&
-      initialLocation.listIndex === finalLocation.listIndex &&
-      initialLocation.cardIndex === finalLocation.cardIndex
+      sourceListIndex === targetListIndex &&
+      initialLocation.cardIndex === adjustedTargetIndex
     ) {
-      snapshotRef.current = null;
+      finalizeDrag();
       return;
     }
 
-    const sourceList = initialLocation ? initialLists?.[initialLocation.listIndex] ?? null : null;
-    const targetList = boardLists[finalLocation.listIndex] ?? null;
-    if (!sourceList || !targetList) {
+    const nextLists = initialLists.map((list) => ({
+      ...list,
+      cards: [...list.cards],
+    }));
+
+    const [movedCard] = nextLists[sourceListIndex].cards.splice(
+      initialLocation.cardIndex,
+      1,
+    );
+    if (!movedCard) {
       abortDrag();
       return;
     }
 
-    const finalCards = boardLists[finalLocation.listIndex].cards;
+    const targetList = nextLists[targetListIndex];
+    targetList.cards.splice(adjustedTargetIndex, 0, {
+      ...movedCard,
+      listId: targetList.id,
+    });
+
+    const sourceListId = initialLists[sourceListIndex].id;
+    const movedAcrossLists = sourceListId !== targetList.id;
+
+    const finalCards = targetList.cards;
     const prevCardId =
-      finalLocation.cardIndex > 0 ? finalCards[finalLocation.cardIndex - 1].id : null;
+      adjustedTargetIndex > 0 ? finalCards[adjustedTargetIndex - 1].id : null;
     const nextCardId =
-      finalLocation.cardIndex < finalCards.length - 1
-        ? finalCards[finalLocation.cardIndex + 1].id
+      adjustedTargetIndex < finalCards.length - 1
+        ? finalCards[adjustedTargetIndex + 1].id
         : null;
-    const movedAcrossLists = sourceList.id !== targetList.id;
+
+    updateBoardLists(nextLists);
+    clearDragVisuals();
 
     const formData = new FormData();
     formData.set("cardId", activeParsed.id);
@@ -515,14 +547,15 @@ export function BoardContent({
         : await reorderCardAction(formData);
 
       if (!result.success) {
-        restoreSnapshot();
         setError(result.error);
         snapshotRef.current = null;
+        router.refresh();
         return;
       }
 
       setError("");
       snapshotRef.current = null;
+      router.refresh();
     });
   }
 
@@ -551,7 +584,7 @@ export function BoardContent({
         ) : null}
 
         <SortableContext items={listItems} strategy={horizontalListSortingStrategy}>
-          <div className="flex w-max min-w-full gap-4 p-4">
+          <div className="flex w-max min-w-full items-start gap-4 p-4">
             {boardLists.map((list) => (
               <ListColumn
                 key={list.id}

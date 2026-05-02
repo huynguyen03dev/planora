@@ -30,6 +30,7 @@ import {
 } from "@/lib/card-member";
 import { hasWorkspacePermission } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
+import { emitCardMoved, emitCommentCreated } from "@/lib/realtime/server";
 import {
   createListSchema,
   updateListSchema,
@@ -372,11 +373,18 @@ export async function reorderCardAction(
   }
 
   try {
-    await reorderCardWithinListByNeighbors({
+    const reorderedCard = await reorderCardWithinListByNeighbors({
       cardId,
       prevCardId: prevCardId ?? null,
       nextCardId: nextCardId ?? null,
     });
+
+    emitCardMoved(result.list.boardId, {
+      cardId: reorderedCard.id,
+      listId: reorderedCard.listId,
+      position: reorderedCard.position,
+    });
+
     revalidatePath(`/boards/${result.list.boardId}`);
     return { success: true };
   } catch {
@@ -421,12 +429,19 @@ export async function moveCardAction(
   }
 
   try {
-    await moveCardToListByNeighbors({
+    const movedCard = await moveCardToListByNeighbors({
       cardId,
       targetListId,
       prevCardId: prevCardId ?? null,
       nextCardId: nextCardId ?? null,
     });
+
+    emitCardMoved(cardResult.list.boardId, {
+      cardId: movedCard.id,
+      listId: movedCard.listId,
+      position: movedCard.position,
+    });
+
     revalidatePath(`/boards/${cardResult.list.boardId}`);
     return { success: true };
   } catch {
@@ -530,7 +545,7 @@ export async function createCommentAction(
       userId,
       content,
     });
-    await createActivityEntry({
+    const activity = await createActivityEntry({
       workspaceId: result.board.workspaceId,
       boardId: result.list.boardId,
       cardId,
@@ -539,6 +554,37 @@ export async function createCommentAction(
       entityType: "COMMENT",
       metadata: { commentId: comment.id },
     });
+
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { name: true, image: true },
+    });
+
+    emitCommentCreated(result.list.boardId, {
+      cardId,
+      comment: {
+        id: comment.id,
+        content: comment.content,
+        createdAt: comment.createdAt.toISOString(),
+        updatedAt: comment.updatedAt?.toISOString() ?? null,
+        author: {
+          id: userId,
+          name: user?.name ?? "Unknown",
+          image: user?.image ?? null,
+        },
+      },
+      activity: {
+        id: activity.id,
+        type: activity.action,
+        createdAt: activity.createdAt.toISOString(),
+        user: {
+          id: userId,
+          name: user?.name ?? "Unknown",
+          image: user?.image ?? null,
+        },
+      },
+    });
+
     revalidatePath(`/boards/${result.list.boardId}`);
     return { success: true, commentId: comment.id };
   } catch {
