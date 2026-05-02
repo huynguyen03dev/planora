@@ -31,6 +31,7 @@ import {
 import { hasWorkspacePermission } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
 import { emitCardMoved, emitCommentCreated } from "@/lib/realtime/server";
+import { notifyCardAssigned, notifyCommentOnCard } from "@/lib/notification";
 import {
   createListSchema,
   updateListSchema,
@@ -585,6 +586,24 @@ export async function createCommentAction(
       },
     });
 
+    // Best-effort notification fan-out for comment
+    try {
+      const boardForTitle = await db.board.findUnique({
+        where: { id: result.list.boardId },
+        select: { title: true },
+      });
+      await notifyCommentOnCard({
+        cardId,
+        cardTitle: result.card.title,
+        boardId: result.list.boardId,
+        boardTitle: boardForTitle?.title ?? "Untitled board",
+        commenterUserId: userId,
+        commenterName: user?.name ?? "Unknown",
+      });
+    } catch (notificationError) {
+      console.error("Failed to send comment notifications:", notificationError);
+    }
+
     revalidatePath(`/boards/${result.list.boardId}`);
     return { success: true, commentId: comment.id };
   } catch {
@@ -651,6 +670,29 @@ export async function assignCardMemberAction(
           targetUserName: assignment.member.name,
         },
       });
+
+      // Best-effort notification for assigned user
+      try {
+        const boardForTitle = await db.board.findUnique({
+          where: { id: cardResult.board.id },
+          select: { title: true },
+        });
+        const actorForName = await db.user.findUnique({
+          where: { id: actorUserId },
+          select: { name: true },
+        });
+        await notifyCardAssigned({
+          recipientUserId: userId,
+          actorUserId,
+          cardId,
+          cardTitle: cardResult.card.title,
+          boardId: cardResult.board.id,
+          boardTitle: boardForTitle?.title ?? "Untitled board",
+          assignedByName: actorForName?.name ?? "Unknown",
+        });
+      } catch (notificationError) {
+        console.error("Failed to send assignment notification:", notificationError);
+      }
     }
 
     revalidatePath(`/boards/${cardResult.board.id}`);

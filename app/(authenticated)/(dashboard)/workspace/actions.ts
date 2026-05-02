@@ -8,6 +8,7 @@ import { verifySession } from "@/lib/dal";
 import db from "@/lib/prisma";
 import { inviteMemberSchema } from "@/lib/schemas";
 import { auth } from "@/lib/auth";
+import { notifyInvited } from "@/lib/notification";
 
 type InviteMemberResult =
   | { success: true; invitationId: string }
@@ -26,7 +27,7 @@ function toErrorMessage(error: unknown, fallback: string): string {
 export async function inviteMemberAction(
   formData: FormData,
 ): Promise<InviteMemberResult> {
-  await verifySession();
+  const { userId: inviterUserId } = await verifySession();
 
   const rawData = Object.fromEntries(formData);
   const parsed = inviteMemberSchema.safeParse(rawData);
@@ -96,6 +97,25 @@ export async function inviteMemberAction(
 
     revalidatePath("/workspace");
     revalidatePath("/boards");
+
+    // Best-effort in-app notification for invited user
+    try {
+      const inviter = await db.user.findUnique({
+        where: { id: inviterUserId },
+        select: { name: true },
+      });
+      const workspace = await db.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { name: true },
+      });
+      await notifyInvited({
+        invitedEmail: normalizedEmail,
+        inviterName: inviter?.name ?? "Someone",
+        workspaceName: workspace?.name ?? "a workspace",
+      });
+    } catch (notificationError) {
+      console.error("Failed to send invite notification:", notificationError);
+    }
 
     return { success: true, invitationId: invitation.id };
   } catch (error) {

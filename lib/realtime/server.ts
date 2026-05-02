@@ -1,6 +1,6 @@
 import { Server } from "socket.io";
 
-import type { ServerToClientEvents, ClientToServerEvents } from "./types";
+import type { NotificationNewPayload, ServerToClientEvents, ClientToServerEvents } from "./types";
 import { ROOMS } from "./events";
 
 declare global {
@@ -85,5 +85,19 @@ export function emitCommentCreated(boardId: string, payload: {
     });
   } catch (error) {
     console.error("[realtime] Failed to emit comment:created:", error);
+  }
+}
+
+export function emitNotificationNew(userId: string, payload: NotificationNewPayload) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.user(userId)).emit("notification:new", payload);
+  } catch (error) {
+    console.error("[realtime] Failed to emit notification:new:", error);
   }
 }

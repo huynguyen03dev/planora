@@ -33,9 +33,20 @@ export interface CommentCreatedPayload extends BoardEventPayload {
   };
 }
 
+export interface NotificationNewPayload {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  linkUrl: string | null;
+  isRead: boolean;
+  createdAt: string;
+}
+
 export type ServerToClientEvents = {
   "card:moved": (payload: CardMovedPayload) => void;
   "comment:created": (payload: CommentCreatedPayload) => void;
+  "notification:new": (payload: NotificationNewPayload) => void;
   "board:error": (payload: { message: string }) => void;
 };
 
