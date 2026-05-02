@@ -3,6 +3,17 @@ import "server-only";
 import db from "@/lib/prisma";
 
 const CARD_POSITION_GAP = 16384;
+const MIN_POSITION_GAP = 0.0001;
+const MAX_REORDER_CARD_RETRIES = 3;
+
+function isUniqueConstraintError(error: unknown): error is { code: string } {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+
+  const withCode = error as { code?: unknown };
+  return withCode.code === "P2002";
+}
 
 export type CardRecord = {
   id: string;
@@ -183,55 +194,96 @@ async function resolveCardPosition(data: {
   return lastCard ? lastCard.position + CARD_POSITION_GAP : CARD_POSITION_GAP;
 }
 
+async function normalizeCardPositions(listId: string): Promise<void> {
+  const cards = await db.card.findMany({
+    where: { listId, archivedAt: null },
+    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+    select: { id: true },
+  });
+
+  if (cards.length === 0) {
+    return;
+  }
+
+  await db.$transaction(
+    cards.map((card, index) =>
+      db.card.update({
+        where: { id: card.id },
+        data: { position: CARD_POSITION_GAP * (index + 1) },
+      }),
+    ),
+  );
+}
+
 export async function reorderCardWithinListByNeighbors(data: {
   cardId: string;
   prevCardId?: string | null;
   nextCardId?: string | null;
 }): Promise<CardRecord> {
-  const existingCard = await db.card.findUnique({
-    where: {
-      id: data.cardId,
-      archivedAt: null,
-    },
-    select: {
-      id: true,
-      listId: true,
-    },
-  });
+  for (let attempt = 0; attempt < MAX_REORDER_CARD_RETRIES; attempt += 1) {
+    const existingCard = await db.card.findUnique({
+      where: {
+        id: data.cardId,
+        archivedAt: null,
+      },
+      select: {
+        id: true,
+        listId: true,
+        position: true,
+      },
+    });
 
-  if (!existingCard) {
-    throw new Error("Card not found");
+    if (!existingCard) {
+      throw new Error("Card not found");
+    }
+
+    const nextPosition = await resolveCardPosition({
+      targetListId: existingCard.listId,
+      prevCardId: data.prevCardId,
+      nextCardId: data.nextCardId,
+    });
+
+    const gapToCurrent = Math.abs(nextPosition - existingCard.position);
+    if (gapToCurrent < MIN_POSITION_GAP) {
+      await normalizeCardPositions(existingCard.listId);
+      continue;
+    }
+
+    try {
+      return await db.card.update({
+        where: {
+          id: data.cardId,
+          archivedAt: null,
+        },
+        data: {
+          position: nextPosition,
+        },
+        select: {
+          id: true,
+          listId: true,
+          title: true,
+          description: true,
+          position: true,
+          priority: true,
+          dueDate: true,
+          coverImage: true,
+          archivedAt: true,
+          createdById: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+    } catch (error) {
+      if (isUniqueConstraintError(error) && attempt < MAX_REORDER_CARD_RETRIES - 1) {
+        await normalizeCardPositions(existingCard.listId);
+        continue;
+      }
+
+      throw error;
+    }
   }
 
-  const nextPosition = await resolveCardPosition({
-    targetListId: existingCard.listId,
-    prevCardId: data.prevCardId,
-    nextCardId: data.nextCardId,
-  });
-
-  return db.card.update({
-    where: {
-      id: data.cardId,
-      archivedAt: null,
-    },
-    data: {
-      position: nextPosition,
-    },
-    select: {
-      id: true,
-      listId: true,
-      title: true,
-      description: true,
-      position: true,
-      priority: true,
-      dueDate: true,
-      coverImage: true,
-      archivedAt: true,
-      createdById: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  });
+  throw new Error("Failed to reorder card after retries");
 }
 
 export async function moveCardToListByNeighbors(data: {
@@ -240,36 +292,62 @@ export async function moveCardToListByNeighbors(data: {
   prevCardId?: string | null;
   nextCardId?: string | null;
 }): Promise<CardRecord> {
-  const nextPosition = await resolveCardPosition({
-    targetListId: data.targetListId,
-    prevCardId: data.prevCardId,
-    nextCardId: data.nextCardId,
-  });
+  for (let attempt = 0; attempt < MAX_REORDER_CARD_RETRIES; attempt += 1) {
+    const nextPosition = await resolveCardPosition({
+      targetListId: data.targetListId,
+      prevCardId: data.prevCardId,
+      nextCardId: data.nextCardId,
+    });
 
-  return db.card.update({
-    where: {
-      id: data.cardId,
-      archivedAt: null,
-    },
-    data: {
-      listId: data.targetListId,
-      position: nextPosition,
-    },
-    select: {
-      id: true,
-      listId: true,
-      title: true,
-      description: true,
-      position: true,
-      priority: true,
-      dueDate: true,
-      coverImage: true,
-      archivedAt: true,
-      createdById: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  });
+    const existingCard = await db.card.findUnique({
+      where: { id: data.cardId, archivedAt: null },
+      select: { position: true, listId: true },
+    });
+
+    if (existingCard && existingCard.listId === data.targetListId) {
+      const gapToCurrent = Math.abs(nextPosition - existingCard.position);
+      if (gapToCurrent < MIN_POSITION_GAP) {
+        await normalizeCardPositions(data.targetListId);
+        continue;
+      }
+    }
+
+    try {
+      return await db.card.update({
+        where: {
+          id: data.cardId,
+          archivedAt: null,
+        },
+        data: {
+          listId: data.targetListId,
+          position: nextPosition,
+        },
+        select: {
+          id: true,
+          listId: true,
+          title: true,
+          description: true,
+          position: true,
+          priority: true,
+          dueDate: true,
+          coverImage: true,
+          archivedAt: true,
+          createdById: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+    } catch (error) {
+      if (isUniqueConstraintError(error) && attempt < MAX_REORDER_CARD_RETRIES - 1) {
+        await normalizeCardPositions(data.targetListId);
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw new Error("Failed to move card after retries");
 }
 
 export async function getCardWithListAndBoard(
