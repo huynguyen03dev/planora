@@ -85,7 +85,7 @@ export function ListCardItem({
   const cardStyle = {
     transform: cardTransform,
     transition: cardTransform ? transition : undefined,
-    opacity: isDragging ? 0.65 : 1,
+    opacity: isDragging ? 0 : 1,
   };
 
   function handleArchive() {
@@ -107,10 +107,7 @@ export function ListCardItem({
       <div ref={setNodeRef} style={cardStyle}>
         <Card
           size="sm"
-          className={cn(
-            "gap-2 py-3 shadow-sm transition",
-            isDragging && "ring-2 ring-primary/25",
-          )}
+          className={cn("gap-2 py-3 shadow-sm transition")}
         >
           <CardContent className="space-y-2 px-3">
             <div className="flex items-start justify-between gap-2">

@@ -208,7 +208,7 @@ export function ListColumn({
         style={listStyle}
         className={cn(
           "flex w-80 shrink-0 flex-col gap-2 rounded-lg bg-muted p-3 transition",
-          isDragging && "opacity-55 ring-2 ring-primary/30",
+          isDragging && "opacity-0",
           isListDropTarget && !isDragging && "ring-2 ring-primary/40",
         )}
       >
