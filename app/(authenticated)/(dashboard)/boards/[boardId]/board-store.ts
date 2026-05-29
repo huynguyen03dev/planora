@@ -8,6 +8,7 @@ export type ListWithCards = {
   id: string;
   title: string;
   boardId: string;
+  isDone: boolean;
   cards: Array<{
     id: string;
     listId: string;
@@ -22,6 +23,9 @@ export type SelectedCardData = {
     listId: string;
     title: string;
     description: string | null;
+    estimateHours: number | null;
+    dueDate: Date | null;
+    completedAt: Date | null;
     updatedAt: Date;
   };
   comments: Array<{

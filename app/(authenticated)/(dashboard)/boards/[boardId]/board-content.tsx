@@ -44,6 +44,7 @@ type BoardContentProps = {
     id: string;
     title: string;
     boardId: string;
+    isDone: boolean;
     cards: Array<{
       id: string;
       listId: string;

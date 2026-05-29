@@ -9,6 +9,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   createCardAction,
   updateListAction,
+  updateListIsDoneAction,
   deleteListAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
 import { ListCardItem } from "@/components/boards/list-card-item";
@@ -27,8 +28,10 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -40,6 +43,7 @@ type ListColumnProps = {
     id: string;
     title: string;
     boardId: string;
+    isDone: boolean;
     cards: Array<{
       id: string;
       listId: string;
@@ -86,6 +90,7 @@ export function ListColumn({
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isDeleting, startDeleteTransition] = useTransition();
+  const [isUpdatingDone, startDoneTransition] = useTransition();
 
   const titleEditor = useInlineTitleEditor({
     initialTitle: list.title,
@@ -165,6 +170,19 @@ export function ListColumn({
     });
   }
 
+  function handleToggleDoneList(nextIsDone: boolean) {
+    const formData = new FormData();
+    formData.set("listId", list.id);
+    formData.set("isDone", String(nextIsDone));
+
+    startDoneTransition(async () => {
+      const result = await updateListIsDoneAction(formData);
+      if (!result.success) {
+        setError(result.error);
+      }
+    });
+  }
+
   function handleCreateCard(event: React.FormEvent) {
     event.preventDefault();
 
@@ -239,6 +257,11 @@ export function ListColumn({
           ) : (
             <h3 className="flex-1 truncate text-sm font-semibold">{list.title}</h3>
           )}
+          {list.isDone ? (
+            <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700">
+              Done
+            </span>
+          ) : null}
 
           {(canEdit || canDelete) && (
             <div ref={actionsMenuRef}>
@@ -286,6 +309,18 @@ export function ListColumn({
                       <DropdownMenuItem onSelect={startEditing}>
                         Rename
                       </DropdownMenuItem>
+                    )}
+                    {canEdit && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuCheckboxItem
+                          checked={list.isDone}
+                          disabled={isUpdatingDone}
+                          onCheckedChange={handleToggleDoneList}
+                        >
+                          Done list
+                        </DropdownMenuCheckboxItem>
+                      </>
                     )}
                     {canDelete && (
                       <DropdownMenuItem

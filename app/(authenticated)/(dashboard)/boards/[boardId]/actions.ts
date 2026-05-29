@@ -1,36 +1,37 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { Prisma } from "@/app/generated/prisma/client";
 
 import db from "@/lib/prisma";
 import { getBoardById } from "@/lib/board";
 import {
-  createCard,
   updateCardTitle,
   updateCardDetails,
-  archiveCard,
   getCardWithListAndBoard,
   reorderCardWithinListByNeighbors,
-  moveCardToListByNeighbors,
+  getCardWithListAndMembers,
 } from "@/lib/card";
 import { createComment } from "@/lib/comment";
 import { createAttachment } from "@/lib/attachment";
 import {
   createList,
   updateListTitle,
-  deleteList,
+  updateListIsDone,
   getListWithBoard,
   reorderListByNeighbors,
 } from "@/lib/list";
 import { createActivityEntry } from "@/lib/activity";
 import {
-  assignMemberToCard,
-  removeMemberFromCard,
   type CardMemberRecord,
 } from "@/lib/card-member";
 import { hasWorkspacePermission } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
-import { emitCardMoved, emitCommentCreated } from "@/lib/realtime/server";
+import {
+  emitAnalyticsRefresh,
+  emitCardMoved,
+  emitCommentCreated,
+} from "@/lib/realtime/server";
 import { notifyCardAssigned, notifyCommentOnCard } from "@/lib/notification";
 import {
   createListSchema,
@@ -47,8 +48,132 @@ import {
   assignCardMemberSchema,
   removeCardMemberSchema,
   uploadAttachmentSchema,
+  updateListIsDoneSchema,
+  updateCardEstimateSchema,
+  updateCardDueDateSchema,
 } from "@/lib/schemas";
+import {
+  buildCardArchivedEvent,
+  buildCardCompletedEvent,
+  buildCardCreatedEvent,
+    buildCardDeletedEvent,
+    buildCardMemberAssignedEvent,
+    buildCardMemberUnassignedEvent,
+    buildCardMoveLifecycleEvents,
+    buildDueDateChangedEvent,
+    buildDueDateClearedEvent,
+    buildDueDateSetEvent,
+  buildEstimateChangedEvent,
+  buildEstimateSetEvent,
+  recordCardHistoryEvents,
+} from "@/lib/card-history";
 import { validateFileForUpload, uploadToCloudinary } from "@/lib/cloudinary";
+
+const CARD_POSITION_GAP = 16384;
+const MAX_REORDER_CARD_RETRIES = 3;
+
+function toIsoOrNull(date: Date | null | undefined): string | null {
+  return date?.toISOString() ?? null;
+}
+
+async function getMemberIdsForCard(
+  tx: Prisma.TransactionClient,
+  cardId: string,
+): Promise<string[]> {
+  const members = await tx.cardMember.findMany({
+    where: { cardId },
+    select: { userId: true },
+    orderBy: { assignedAt: "asc" },
+  });
+
+  return members.map((member) => member.userId);
+}
+
+async function resolveCardPositionForTx(
+  tx: Prisma.TransactionClient,
+  data: {
+    targetListId: string;
+    prevCardId?: string | null;
+    nextCardId?: string | null;
+  },
+): Promise<number> {
+  const [prevCard, nextCard] = await Promise.all([
+    data.prevCardId
+      ? tx.card.findUnique({
+          where: { id: data.prevCardId, archivedAt: null },
+          select: { id: true, listId: true, position: true },
+        })
+      : null,
+    data.nextCardId
+      ? tx.card.findUnique({
+          where: { id: data.nextCardId, archivedAt: null },
+          select: { id: true, listId: true, position: true },
+        })
+      : null,
+  ]);
+
+  if (data.prevCardId && (!prevCard || prevCard.listId !== data.targetListId)) {
+    throw new Error("Invalid prevCardId");
+  }
+
+  if (data.nextCardId && (!nextCard || nextCard.listId !== data.targetListId)) {
+    throw new Error("Invalid nextCardId");
+  }
+
+  if (prevCard && nextCard) {
+    const lower = Math.min(prevCard.position, nextCard.position);
+    const upper = Math.max(prevCard.position, nextCard.position);
+    return (lower + upper) / 2;
+  }
+
+  if (prevCard) {
+    return prevCard.position + CARD_POSITION_GAP;
+  }
+
+  if (nextCard) {
+    return nextCard.position - CARD_POSITION_GAP;
+  }
+
+  const lastCard = await tx.card.findFirst({
+    where: {
+      listId: data.targetListId,
+      archivedAt: null,
+    },
+    orderBy: [{ position: "desc" }, { createdAt: "desc" }],
+    select: { position: true },
+  });
+
+  return lastCard ? lastCard.position + CARD_POSITION_GAP : CARD_POSITION_GAP;
+}
+
+async function normalizeCardPositionsForTx(
+  tx: Prisma.TransactionClient,
+  listId: string,
+): Promise<void> {
+  const cards = await tx.card.findMany({
+    where: { listId, archivedAt: null },
+    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+    select: { id: true },
+  });
+
+  await Promise.all(
+    cards.map((card, index) =>
+      tx.card.update({
+        where: { id: card.id },
+        data: { position: CARD_POSITION_GAP * (index + 1) },
+      }),
+    ),
+  );
+}
+
+function isUniqueConstraintError(error: unknown): error is { code: string } {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "P2002"
+  );
+}
 
 type CreateListResult =
   | { success: true; listId: string }
@@ -86,6 +211,18 @@ type MoveCardResult =
   | { success: true }
   | { success: false; error: string };
 
+type UpdateListIsDoneResult =
+  | { success: true }
+  | { success: false; error: string };
+
+type UpdateCardEstimateResult =
+  | { success: true }
+  | { success: false; error: string };
+
+type UpdateCardDueDateResult =
+  | { success: true }
+  | { success: false; error: string };
+
 export async function createListAction(
   formData: FormData,
 ): Promise<CreateListResult> {
@@ -99,7 +236,7 @@ export async function createListAction(
 
   await verifySession();
 
-  const { boardId, title } = parsed.data;
+  const { boardId, title, isDone } = parsed.data;
 
   const board = await getBoardById(boardId);
   if (!board) {
@@ -115,7 +252,7 @@ export async function createListAction(
   }
 
   try {
-    const list = await createList({ boardId, title });
+    const list = await createList({ boardId, title, isDone });
     revalidatePath(`/boards/${boardId}`);
     return { success: true, listId: list.id };
   } catch {
@@ -160,6 +297,44 @@ export async function updateListAction(
   }
 }
 
+export async function updateListIsDoneAction(
+  formData: FormData,
+): Promise<UpdateListIsDoneResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = updateListIsDoneSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  await verifySession();
+
+  const { listId, isDone } = parsed.data;
+
+  const result = await getListWithBoard(listId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "List not found" };
+  }
+
+  const canUpdateList = await hasWorkspacePermission(result.board.workspaceId, {
+    list: ["update"],
+  });
+
+  if (!canUpdateList) {
+    return { success: false, error: "List not found" };
+  }
+
+  try {
+    await updateListIsDone(listId, isDone);
+    revalidatePath(`/boards/${result.list.boardId}`);
+    emitAnalyticsRefresh(result.board.workspaceId);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to update list. Please try again." };
+  }
+}
+
 export async function deleteListAction(
   formData: FormData,
 ): Promise<DeleteListResult> {
@@ -170,7 +345,7 @@ export async function deleteListAction(
     return { success: false, error: "List not found" };
   }
 
-  await verifySession();
+  const { userId } = await verifySession();
 
   const { listId } = parsed.data;
 
@@ -188,8 +363,45 @@ export async function deleteListAction(
   }
 
   try {
-    await deleteList(listId);
+    await db.$transaction(async (tx) => {
+      const cards = await tx.card.findMany({
+        where: { listId },
+        select: {
+          id: true,
+          estimateHours: true,
+          dueDate: true,
+          completedAt: true,
+          archivedAt: true,
+          members: {
+            select: { userId: true },
+            orderBy: { assignedAt: "asc" },
+          },
+        },
+      });
+      await recordCardHistoryEvents(
+        tx,
+        cards.map((card) =>
+          buildCardDeletedEvent(
+            result.board.workspaceId,
+            result.board.id,
+            card.id,
+            {
+              memberIds: card.members.map((member) => member.userId),
+              estimateHours: card.estimateHours,
+              dueDate: toIsoOrNull(card.dueDate),
+              completedAt: toIsoOrNull(card.completedAt),
+              archivedAt: toIsoOrNull(card.archivedAt),
+            },
+            userId,
+          ),
+        ),
+      );
+      await tx.list.delete({
+        where: { id: listId },
+      });
+    });
     revalidatePath(`/boards/${result.list.boardId}`);
+    emitAnalyticsRefresh(result.board.workspaceId);
     return { success: true };
   } catch {
     return { success: false, error: "Failed to delete list. Please try again." };
@@ -225,8 +437,80 @@ export async function createCardAction(
   }
 
   try {
-    const card = await createCard({ listId, title, createdById: userId });
+    const card = await db.$transaction(async (tx) => {
+      const lastCard = await tx.card.findFirst({
+        where: {
+          listId,
+          archivedAt: null,
+        },
+        orderBy: [{ position: "desc" }, { createdAt: "desc" }],
+        select: { position: true },
+      });
+      const position = lastCard
+        ? lastCard.position + CARD_POSITION_GAP
+        : CARD_POSITION_GAP;
+      const completedAt = result.list.isDone ? new Date() : null;
+      const createdCard = await tx.card.create({
+        data: {
+          listId,
+          title,
+          createdById: userId,
+          position,
+          completedAt,
+        },
+        select: {
+          id: true,
+          listId: true,
+          title: true,
+          estimateHours: true,
+          dueDate: true,
+          archivedAt: true,
+          deletedAt: true,
+        },
+      });
+      const memberIds = await getMemberIdsForCard(tx, createdCard.id);
+      const events = [
+        buildCardCreatedEvent(
+          result.board.workspaceId,
+          result.board.id,
+          createdCard.id,
+          {
+            listId: result.list.id,
+            listIsDone: result.list.isDone,
+            estimateHours: createdCard.estimateHours,
+            dueDate: toIsoOrNull(createdCard.dueDate),
+            memberIds,
+            archivedAt: toIsoOrNull(createdCard.archivedAt),
+            deletedAt: toIsoOrNull(createdCard.deletedAt),
+          },
+          userId,
+        ),
+      ];
+
+      if (result.list.isDone) {
+        events.push(
+          buildCardCompletedEvent(
+            result.board.workspaceId,
+            result.board.id,
+            createdCard.id,
+            {
+              listId: result.list.id,
+              estimateHours: createdCard.estimateHours,
+              dueDate: toIsoOrNull(createdCard.dueDate),
+              memberIds,
+              firstCompletion: true,
+            },
+            userId,
+          ),
+        );
+      }
+
+      await recordCardHistoryEvents(tx, events);
+      return createdCard;
+    });
+
     revalidatePath(`/boards/${result.list.boardId}`);
+    emitAnalyticsRefresh(result.board.workspaceId);
     return { success: true, cardId: card.id };
   } catch {
     return { success: false, error: "Failed to create card. Please try again." };
@@ -280,7 +564,7 @@ export async function archiveCardAction(
     return { success: false, error: "Card not found" };
   }
 
-  await verifySession();
+  const { userId } = await verifySession();
 
   const { cardId } = parsed.data;
 
@@ -298,8 +582,39 @@ export async function archiveCardAction(
   }
 
   try {
-    await archiveCard(cardId);
+    await db.$transaction(async (tx) => {
+      const card = await tx.card.update({
+        where: {
+          id: cardId,
+          archivedAt: null,
+        },
+        data: { archivedAt: new Date() },
+        select: {
+          id: true,
+          estimateHours: true,
+          dueDate: true,
+          members: {
+            select: { userId: true },
+            orderBy: { assignedAt: "asc" },
+          },
+        },
+      });
+      await recordCardHistoryEvents(tx, [
+        buildCardArchivedEvent(
+          result.board.workspaceId,
+          result.board.id,
+          card.id,
+          {
+            memberIds: card.members.map((member) => member.userId),
+            estimateHours: card.estimateHours,
+            dueDate: toIsoOrNull(card.dueDate),
+          },
+          userId,
+        ),
+      ]);
+    });
     revalidatePath(`/boards/${result.list.boardId}`);
+    emitAnalyticsRefresh(result.board.workspaceId);
     return { success: true };
   } catch {
     return { success: false, error: "Failed to archive card. Please try again." };
@@ -393,6 +708,185 @@ export async function reorderCardAction(
   }
 }
 
+export async function updateCardEstimateAction(
+  formData: FormData,
+): Promise<UpdateCardEstimateResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = updateCardEstimateSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  const { userId } = await verifySession();
+  const { cardId, estimateHours } = parsed.data;
+
+  const snapshot = await getCardWithListAndMembers(cardId);
+  if (!snapshot) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(snapshot.board.workspaceId, {
+    card: ["update"],
+  });
+
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  if (snapshot.card.completedAt) {
+    return { success: false, error: "Estimate cannot be changed after first completion" };
+  }
+
+  try {
+    if (estimateHours !== snapshot.card.estimateHours) {
+      await db.$transaction(async (tx) => {
+        await tx.card.update({
+          where: {
+            id: cardId,
+            archivedAt: null,
+          },
+          data: { estimateHours: estimateHours ?? null },
+        });
+        const metadata = {
+          previousEstimateHours: snapshot.card.estimateHours,
+          nextEstimateHours: estimateHours ?? null,
+          memberIds: snapshot.memberIds,
+        };
+
+        const event = snapshot.card.estimateHours == null
+          ? buildEstimateSetEvent(
+              snapshot.board.workspaceId,
+              snapshot.board.id,
+              snapshot.card.id,
+              metadata,
+              userId,
+            )
+          : buildEstimateChangedEvent(
+              snapshot.board.workspaceId,
+              snapshot.board.id,
+              snapshot.card.id,
+              metadata,
+              userId,
+            );
+
+        await recordCardHistoryEvents(tx, [event]);
+      });
+    } else {
+      await db.card.update({
+        where: {
+          id: cardId,
+          archivedAt: null,
+        },
+        data: { estimateHours: estimateHours ?? null },
+      });
+    }
+
+    revalidatePath(`/boards/${snapshot.board.id}`);
+    emitAnalyticsRefresh(snapshot.board.workspaceId);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to update estimate. Please try again." };
+  }
+}
+
+export async function updateCardDueDateAction(
+  formData: FormData,
+): Promise<UpdateCardDueDateResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = updateCardDueDateSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  const { userId } = await verifySession();
+  const { cardId, dueDate } = parsed.data;
+
+  const snapshot = await getCardWithListAndMembers(cardId);
+  if (!snapshot) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(snapshot.board.workspaceId, {
+    card: ["update"],
+  });
+
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const previousDueDate = snapshot.card.dueDate;
+  const nextDueDate = dueDate ?? null;
+
+  try {
+    const previousIso = previousDueDate?.toISOString() ?? null;
+    const nextIso = nextDueDate?.toISOString() ?? null;
+
+    if (previousIso !== nextIso) {
+      await db.$transaction(async (tx) => {
+        await tx.card.update({
+          where: {
+            id: cardId,
+            archivedAt: null,
+          },
+          data: { dueDate: nextDueDate },
+        });
+        const metadata = {
+          previousDueDate: previousIso,
+          nextDueDate: nextIso,
+          memberIds: snapshot.memberIds,
+        };
+
+        let event;
+        if (previousDueDate == null && nextDueDate != null) {
+          event = buildDueDateSetEvent(
+            snapshot.board.workspaceId,
+            snapshot.board.id,
+            snapshot.card.id,
+            metadata,
+            userId,
+          );
+        } else if (previousDueDate != null && nextDueDate == null) {
+          event = buildDueDateClearedEvent(
+            snapshot.board.workspaceId,
+            snapshot.board.id,
+            snapshot.card.id,
+            metadata,
+            userId,
+          );
+        } else {
+          event = buildDueDateChangedEvent(
+            snapshot.board.workspaceId,
+            snapshot.board.id,
+            snapshot.card.id,
+            metadata,
+            userId,
+          );
+        }
+
+        await recordCardHistoryEvents(tx, [event]);
+      });
+    } else {
+      await db.card.update({
+        where: {
+          id: cardId,
+          archivedAt: null,
+        },
+        data: { dueDate: nextDueDate },
+      });
+    }
+
+    revalidatePath(`/boards/${snapshot.board.id}`);
+    emitAnalyticsRefresh(snapshot.board.workspaceId);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to update due date. Please try again." };
+  }
+}
+
 export async function moveCardAction(
   formData: FormData,
 ): Promise<MoveCardResult> {
@@ -403,7 +897,7 @@ export async function moveCardAction(
     return { success: false, error: "Card not found" };
   }
 
-  await verifySession();
+  const { userId } = await verifySession();
 
   const { cardId, targetListId, prevCardId, nextCardId } = parsed.data;
 
@@ -429,13 +923,97 @@ export async function moveCardAction(
     return { success: false, error: "Card not found" };
   }
 
+  const snapshot = await getCardWithListAndMembers(cardId);
+  if (!snapshot) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const workspaceSettings = await db.workspace.findUnique({
+    where: { id: cardResult.board.workspaceId },
+    select: { requireEstimateBeforeDone: true },
+  });
+  const movesIntoDone = !snapshot.list.isDone && targetListResult.list.isDone;
+  if (
+    movesIntoDone &&
+    workspaceSettings?.requireEstimateBeforeDone &&
+    snapshot.card.estimateHours == null
+  ) {
+    return {
+      success: false,
+      error: "Set an estimate before moving this card to a done list",
+    };
+  }
+
   try {
-    const movedCard = await moveCardToListByNeighbors({
-      cardId,
-      targetListId,
-      prevCardId: prevCardId ?? null,
-      nextCardId: nextCardId ?? null,
-    });
+    let movedCard: { id: string; listId: string; position: number } | null = null;
+
+    for (let attempt = 0; attempt < MAX_REORDER_CARD_RETRIES; attempt += 1) {
+      try {
+        movedCard = await db.$transaction(async (tx) => {
+          const nextPosition = await resolveCardPositionForTx(tx, {
+            targetListId,
+            prevCardId: prevCardId ?? null,
+            nextCardId: nextCardId ?? null,
+          });
+          const movesOutOfDone = snapshot.list.isDone && !targetListResult.list.isDone;
+          const nextCompletedAt = movesIntoDone
+            ? (snapshot.card.completedAt ?? new Date())
+            : movesOutOfDone
+              ? null
+              : snapshot.card.completedAt;
+          const updatedCard = await tx.card.update({
+            where: {
+              id: cardId,
+              archivedAt: null,
+            },
+            data: {
+              listId: targetListId,
+              position: nextPosition,
+              completedAt: nextCompletedAt,
+            },
+            select: {
+              id: true,
+              listId: true,
+              position: true,
+              estimateHours: true,
+              dueDate: true,
+              completedAt: true,
+            },
+            });
+            const memberIds = await getMemberIdsForCard(tx, cardId);
+            const events = buildCardMoveLifecycleEvents({
+              workspaceId: cardResult.board.workspaceId,
+              boardId: cardResult.board.id,
+              cardId,
+              actorId: userId,
+              fromListId: snapshot.list.id,
+              toListId: targetListResult.list.id,
+              fromListIsDone: snapshot.list.isDone,
+              toListIsDone: targetListResult.list.isDone,
+              estimateHours: updatedCard.estimateHours,
+              dueDate: toIsoOrNull(updatedCard.dueDate),
+              memberIds,
+              completedAtBeforeMove: snapshot.card.completedAt,
+            });
+
+            await recordCardHistoryEvents(tx, events);
+            return updatedCard;
+        });
+        break;
+      } catch (error) {
+        if (!isUniqueConstraintError(error) || attempt === MAX_REORDER_CARD_RETRIES - 1) {
+          throw error;
+        }
+
+        await db.$transaction(async (tx) => {
+          await normalizeCardPositionsForTx(tx, targetListId);
+        });
+      }
+    }
+
+    if (!movedCard) {
+      throw new Error("Failed to move card after retries");
+    }
 
     emitCardMoved(cardResult.list.boardId, {
       cardId: movedCard.id,
@@ -444,6 +1022,7 @@ export async function moveCardAction(
     });
 
     revalidatePath(`/boards/${cardResult.list.boardId}`);
+    emitAnalyticsRefresh(cardResult.board.workspaceId);
     return { success: true };
   } catch {
     return { success: false, error: "Failed to move card. Please try again." };
@@ -654,23 +1233,133 @@ export async function assignCardMemberAction(
   }
 
   try {
-    const assignment = await assignMemberToCard({ cardId, userId });
-
-    if (assignment.changed) {
-      await createActivityEntry({
-        workspaceId: cardResult.board.workspaceId,
-        boardId: cardResult.board.id,
-        cardId,
-        userId: actorUserId,
-        action: "CREATED",
-        entityType: "MEMBER",
-        metadata: {
-          actionType: "assign-member",
-          targetUserId: userId,
-          targetUserName: assignment.member.name,
+    const assignment = await db.$transaction(async (tx) => {
+      const existing = await tx.cardMember.findUnique({
+        where: {
+          cardId_userId: {
+            cardId,
+            userId,
+          },
+        },
+        select: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              image: true,
+              email: true,
+            },
+          },
         },
       });
 
+      if (existing) {
+        return {
+          changed: false,
+          member: {
+            id: existing.user.id,
+            name: existing.user.name,
+            image: existing.user.image,
+            email: existing.user.email,
+          },
+        };
+      }
+
+      const result = await tx.cardMember.create({
+        data: {
+          cardId,
+          userId,
+        },
+        select: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              image: true,
+              email: true,
+            },
+          },
+        },
+      });
+      const memberIds = await getMemberIdsForCard(tx, cardId);
+
+      await tx.activity.create({
+        data: {
+          workspaceId: cardResult.board.workspaceId,
+          boardId: cardResult.board.id,
+          cardId,
+          userId: actorUserId,
+          action: "CREATED",
+          entityType: "MEMBER",
+          metadata: {
+            actionType: "assign-member",
+            targetUserId: userId,
+            targetUserName: result.user.name,
+          },
+        },
+      });
+      await recordCardHistoryEvents(tx, [
+        buildCardMemberAssignedEvent(
+          cardResult.board.workspaceId,
+          cardResult.board.id,
+          cardId,
+          {
+            targetUserId: userId,
+            memberIds,
+          },
+          actorUserId,
+        ),
+      ]);
+
+      return {
+        changed: true,
+        member: {
+          id: result.user.id,
+          name: result.user.name,
+          image: result.user.image,
+          email: result.user.email,
+        },
+      };
+    }).catch(async (error) => {
+      if (!isUniqueConstraintError(error)) {
+        throw error;
+      }
+
+      const existing = await db.cardMember.findUnique({
+        where: {
+          cardId_userId: {
+            cardId,
+            userId,
+          },
+        },
+        select: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              image: true,
+              email: true,
+            },
+          },
+        },
+      });
+
+      if (!existing) {
+        throw error;
+      }
+
+      return {
+        changed: false,
+        member: {
+          id: existing.user.id,
+          name: existing.user.name,
+          image: existing.user.image,
+          email: existing.user.email,
+        },
+      };
+    });
+
+    if (assignment.changed) {
       // Best-effort notification for assigned user
       try {
         const boardForTitle = await db.board.findUnique({
@@ -696,6 +1385,9 @@ export async function assignCardMemberAction(
     }
 
     revalidatePath(`/boards/${cardResult.board.id}`);
+    if (assignment.changed) {
+      emitAnalyticsRefresh(cardResult.board.workspaceId);
+    }
     return {
       success: true,
       changed: assignment.changed,
@@ -738,30 +1430,59 @@ export async function removeCardMemberAction(
   }
 
   try {
-    const removal = await removeMemberFromCard({ cardId, userId });
+    const removal = await db.$transaction(async (tx) => {
+      const result = await tx.cardMember.deleteMany({
+        where: {
+          cardId,
+          userId,
+        },
+      });
 
-    if (removal.changed) {
-      const removedUser = await db.user.findUnique({
+      if (result.count === 0) {
+        return { changed: false };
+      }
+
+      const removedUser = await tx.user.findUnique({
         where: { id: userId },
         select: { name: true },
       });
+      const memberIds = await getMemberIdsForCard(tx, cardId);
 
-      await createActivityEntry({
-        workspaceId: cardResult.board.workspaceId,
-        boardId: cardResult.board.id,
-        cardId,
-        userId: actorUserId,
-        action: "DELETED",
-        entityType: "MEMBER",
-        metadata: {
-          actionType: "remove-member",
-          targetUserId: userId,
-          targetUserName: removedUser?.name ?? "a member",
+      await tx.activity.create({
+        data: {
+          workspaceId: cardResult.board.workspaceId,
+          boardId: cardResult.board.id,
+          cardId,
+          userId: actorUserId,
+          action: "DELETED",
+          entityType: "MEMBER",
+          metadata: {
+            actionType: "remove-member",
+            targetUserId: userId,
+            targetUserName: removedUser?.name ?? "a member",
+          },
         },
       });
-    }
+      await recordCardHistoryEvents(tx, [
+        buildCardMemberUnassignedEvent(
+          cardResult.board.workspaceId,
+          cardResult.board.id,
+          cardId,
+          {
+            targetUserId: userId,
+            memberIds,
+          },
+          actorUserId,
+        ),
+      ]);
+
+      return { changed: true };
+    });
 
     revalidatePath(`/boards/${cardResult.board.id}`);
+    if (removal.changed) {
+      emitAnalyticsRefresh(cardResult.board.workspaceId);
+    }
     return { success: true, changed: removal.changed };
   } catch (error) {
     console.error("Failed to remove member from card:", error);

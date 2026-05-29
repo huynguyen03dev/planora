@@ -120,6 +120,7 @@ export default async function BoardPage({
     id: list.id,
     title: list.title,
     boardId: list.boardId,
+    isDone: list.isDone,
     cards: list.cards.map((card) => ({
       id: card.id,
       listId: card.listId,
@@ -135,6 +136,9 @@ export default async function BoardPage({
           listId: selectedCard.listId,
           title: selectedCard.title,
           description: selectedCard.description,
+          estimateHours: selectedCard.estimateHours,
+          dueDate: selectedCard.dueDate,
+          completedAt: selectedCard.completedAt,
           updatedAt: selectedCard.updatedAt,
         },
         comments: comments.map((c) => ({

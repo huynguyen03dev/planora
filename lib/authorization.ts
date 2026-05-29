@@ -6,6 +6,8 @@ import { auth } from "@/lib/auth";
 import db from "@/lib/prisma";
 
 type PermissionRequest = {
+  organization?: Array<"update" | "delete">;
+  member?: Array<"create" | "update" | "delete">;
   board?: Array<"create" | "update" | "delete">;
   list?: Array<"create" | "update" | "delete">;
   card?: Array<"create" | "update" | "delete">;

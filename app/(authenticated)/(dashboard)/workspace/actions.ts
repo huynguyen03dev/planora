@@ -7,8 +7,10 @@ import { hasWorkspacePermission } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
 import db from "@/lib/prisma";
 import { inviteMemberSchema } from "@/lib/schemas";
+import { isValidTimezone } from "@/lib/timezone";
 import { auth } from "@/lib/auth";
 import { notifyInvited } from "@/lib/notification";
+import { emitAnalyticsRefresh } from "@/lib/realtime/server";
 
 type InviteMemberResult =
   | { success: true; invitationId: string }
@@ -122,6 +124,122 @@ export async function inviteMemberAction(
     return {
       success: false,
       error: toErrorMessage(error, "Failed to send invitation. Please try again."),
+    };
+  }
+}
+
+// ─── Workspace Analytics Settings ─────────────────────────────────
+
+type UpdateWorkspaceTimezoneResult =
+  | { success: true }
+  | { success: false; error: string };
+
+export async function updateWorkspaceTimezoneAction(
+  workspaceId: string,
+  timezone: string,
+): Promise<UpdateWorkspaceTimezoneResult> {
+  await verifySession();
+
+  if (!isValidTimezone(timezone)) {
+    return { success: false, error: "Invalid timezone. Please enter a valid IANA timezone string (e.g. America/New_York, UTC)." };
+  }
+
+  const canManageWorkspace = await hasWorkspacePermission(workspaceId, {
+    organization: ["update"],
+  });
+
+  if (!canManageWorkspace) {
+    return { success: false, error: "Workspace not found" };
+  }
+
+  try {
+    await db.workspace.update({
+      where: { id: workspaceId },
+      data: { timezone },
+    });
+
+    revalidatePath("/workspace");
+    emitAnalyticsRefresh(workspaceId);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: toErrorMessage(error, "Failed to update timezone."),
+    };
+  }
+}
+
+type UpdateWorkspaceRequireEstimateResult =
+  | { success: true }
+  | { success: false; error: string };
+
+export async function updateWorkspaceRequireEstimateAction(
+  workspaceId: string,
+  requireEstimateBeforeDone: boolean,
+): Promise<UpdateWorkspaceRequireEstimateResult> {
+  await verifySession();
+
+  const canManageWorkspace = await hasWorkspacePermission(workspaceId, {
+    organization: ["update"],
+  });
+
+  if (!canManageWorkspace) {
+    return { success: false, error: "Workspace not found" };
+  }
+
+  try {
+    await db.workspace.update({
+      where: { id: workspaceId },
+      data: { requireEstimateBeforeDone },
+    });
+
+    revalidatePath("/workspace");
+    emitAnalyticsRefresh(workspaceId);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: toErrorMessage(error, "Failed to update setting."),
+    };
+  }
+}
+
+type UpdateWorkspaceAnalyticsLaunchResult =
+  | { success: true }
+  | { success: false; error: string };
+
+/**
+ * Set the analytics launch boundary for a workspace.
+ * This marks when full analytics history started being captured.
+ * Admin-only action, typically called once after backfill.
+ */
+export async function updateWorkspaceAnalyticsLaunchAction(
+  workspaceId: string,
+  launchAt: Date,
+): Promise<UpdateWorkspaceAnalyticsLaunchResult> {
+  await verifySession();
+
+  const canManageWorkspace = await hasWorkspacePermission(workspaceId, {
+    organization: ["update"],
+  });
+
+  if (!canManageWorkspace) {
+    return { success: false, error: "Workspace not found" };
+  }
+
+  try {
+    await db.workspace.update({
+      where: { id: workspaceId },
+      data: { analyticsLaunchAt: launchAt },
+    });
+
+    revalidatePath("/workspace");
+    emitAnalyticsRefresh(workspaceId);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: toErrorMessage(error, "Failed to update analytics launch date."),
     };
   }
 }

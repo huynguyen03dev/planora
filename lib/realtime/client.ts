@@ -53,6 +53,24 @@ export function leaveBoard(boardId: string) {
   socket.emit("board:leave", { boardId });
 }
 
+export function joinWorkspace(workspaceId: string) {
+  if (!socket) {
+    console.warn("[realtime] Socket not initialized");
+    return;
+  }
+
+  socket.emit("workspace:join", { workspaceId });
+}
+
+export function leaveWorkspace(workspaceId: string) {
+  if (!socket) {
+    console.warn("[realtime] Socket not initialized");
+    return;
+  }
+
+  socket.emit("workspace:leave", { workspaceId });
+}
+
 export function disconnectSocket() {
   if (socket) {
     socket.disconnect();

@@ -21,6 +21,7 @@ export type ListRecord = {
   boardId: string;
   title: string;
   position: number;
+  isDone: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -47,6 +48,7 @@ export async function getListsByBoardId(
       boardId: true,
       title: true,
       position: true,
+      isDone: true,
       createdAt: true,
       updatedAt: true,
       cards: {
@@ -68,6 +70,7 @@ export async function getListsByBoardId(
 export async function createList(data: {
   boardId: string;
   title: string;
+  isDone?: boolean;
 }): Promise<ListRecord> {
   for (let attempt = 0; attempt < MAX_CREATE_LIST_RETRIES; attempt += 1) {
     const lastList = await db.list.findFirst({
@@ -84,12 +87,14 @@ export async function createList(data: {
           boardId: data.boardId,
           title: data.title,
           position,
+          isDone: data.isDone ?? false,
         },
         select: {
           id: true,
           boardId: true,
           title: true,
           position: true,
+          isDone: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -115,6 +120,23 @@ export async function updateListTitle(listId: string, title: string): Promise<Li
       boardId: true,
       title: true,
       position: true,
+      isDone: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+export async function updateListIsDone(listId: string, isDone: boolean): Promise<ListRecord> {
+  return db.list.update({
+    where: { id: listId },
+    data: { isDone },
+    select: {
+      id: true,
+      boardId: true,
+      title: true,
+      position: true,
+      isDone: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -239,6 +261,7 @@ export async function reorderListByNeighbors(data: {
           boardId: true,
           title: true,
           position: true,
+          isDone: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -273,6 +296,7 @@ export async function getListWithBoard(listId: string): Promise<{
       boardId: true,
       title: true,
       position: true,
+      isDone: true,
       createdAt: true,
       updatedAt: true,
       board: {

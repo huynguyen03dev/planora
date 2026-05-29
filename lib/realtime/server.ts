@@ -101,3 +101,20 @@ export function emitNotificationNew(userId: string, payload: NotificationNewPayl
     console.error("[realtime] Failed to emit notification:new:", error);
   }
 }
+
+export function emitAnalyticsRefresh(workspaceId: string) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.workspace(workspaceId)).emit("analytics:refresh", {
+      workspaceId,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit analytics:refresh:", error);
+  }
+}

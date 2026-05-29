@@ -23,6 +23,9 @@ export type CardRecord = {
   position: number;
   priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
   dueDate: Date | null;
+  estimateHours: number | null;
+  completedAt: Date | null;
+  deletedAt: Date | null;
   coverImage: string | null;
   archivedAt: Date | null;
   createdById: string;
@@ -35,6 +38,9 @@ export type CardDetailRecord = {
   listId: string;
   title: string;
   description: string | null;
+  estimateHours: number | null;
+  dueDate: Date | null;
+  completedAt: Date | null;
   updatedAt: Date;
 };
 
@@ -43,6 +49,9 @@ const CARD_DETAIL_SELECT = {
   listId: true,
   title: true,
   description: true,
+  estimateHours: true,
+  dueDate: true,
+  completedAt: true,
   updatedAt: true,
 } as const;
 
@@ -90,6 +99,9 @@ export async function createCard(data: {
       position: true,
       priority: true,
       dueDate: true,
+      estimateHours: true,
+      completedAt: true,
+      deletedAt: true,
       coverImage: true,
       archivedAt: true,
       createdById: true,
@@ -119,6 +131,9 @@ export async function updateCardTitle(
       position: true,
       priority: true,
       dueDate: true,
+      estimateHours: true,
+      completedAt: true,
+      deletedAt: true,
       coverImage: true,
       archivedAt: true,
       createdById: true,
@@ -266,6 +281,9 @@ export async function reorderCardWithinListByNeighbors(data: {
           position: true,
           priority: true,
           dueDate: true,
+          estimateHours: true,
+          completedAt: true,
+          deletedAt: true,
           coverImage: true,
           archivedAt: true,
           createdById: true,
@@ -330,6 +348,9 @@ export async function moveCardToListByNeighbors(data: {
           position: true,
           priority: true,
           dueDate: true,
+          estimateHours: true,
+          completedAt: true,
+          deletedAt: true,
           coverImage: true,
           archivedAt: true,
           createdById: true,
@@ -366,6 +387,9 @@ export async function getCardWithListAndBoard(
       position: true,
       priority: true,
       dueDate: true,
+      estimateHours: true,
+      completedAt: true,
+      deletedAt: true,
       coverImage: true,
       archivedAt: true,
       createdById: true,
@@ -444,5 +468,244 @@ export async function updateCardDetails(
       description: data.description,
     },
     select: CARD_DETAIL_SELECT,
+  });
+}
+
+// ─── Analytics-related card operations ─────────────────────────────
+
+export async function updateCardEstimate(
+  cardId: string,
+  estimateHours: number | null,
+): Promise<CardRecord> {
+  return db.card.update({
+    where: {
+      id: cardId,
+      archivedAt: null,
+    },
+    data: {
+      estimateHours,
+    },
+    select: {
+      id: true,
+      listId: true,
+      title: true,
+      description: true,
+      position: true,
+      priority: true,
+      dueDate: true,
+      estimateHours: true,
+      completedAt: true,
+      deletedAt: true,
+      coverImage: true,
+      archivedAt: true,
+      createdById: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+export async function updateCardDueDate(
+  cardId: string,
+  dueDate: Date | null,
+): Promise<CardRecord> {
+  return db.card.update({
+    where: {
+      id: cardId,
+      archivedAt: null,
+    },
+    data: {
+      dueDate,
+    },
+    select: {
+      id: true,
+      listId: true,
+      title: true,
+      description: true,
+      position: true,
+      priority: true,
+      dueDate: true,
+      estimateHours: true,
+      completedAt: true,
+      deletedAt: true,
+      coverImage: true,
+      archivedAt: true,
+      createdById: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+/**
+ * Mark a card as completed (first completion only).
+ * Sets completedAt if not already set.
+ */
+export async function completeCard(cardId: string): Promise<CardRecord> {
+  const card = await db.card.findUnique({
+    where: { id: cardId },
+    select: { completedAt: true },
+  });
+
+  // Only set completedAt if not already set (first completion only)
+  const completedAt = card?.completedAt ?? new Date();
+
+  return db.card.update({
+    where: {
+      id: cardId,
+      archivedAt: null,
+    },
+    data: {
+      completedAt,
+    },
+    select: {
+      id: true,
+      listId: true,
+      title: true,
+      description: true,
+      position: true,
+      priority: true,
+      dueDate: true,
+      estimateHours: true,
+      completedAt: true,
+      deletedAt: true,
+      coverImage: true,
+      archivedAt: true,
+      createdById: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+/**
+ * Get card with list and members for history snapshot.
+ * Used to capture metadata for analytics events.
+ */
+export async function getCardWithListAndMembers(cardId: string): Promise<{
+  card: CardRecord;
+  list: { id: string; boardId: string; isDone: boolean };
+  board: { id: string; workspaceId: string };
+  memberIds: string[];
+} | null> {
+  const card = await db.card.findUnique({
+    where: {
+      id: cardId,
+      archivedAt: null,
+    },
+    select: {
+      id: true,
+      listId: true,
+      title: true,
+      description: true,
+      position: true,
+      priority: true,
+      dueDate: true,
+      estimateHours: true,
+      completedAt: true,
+      deletedAt: true,
+      coverImage: true,
+      archivedAt: true,
+      createdById: true,
+      createdAt: true,
+      updatedAt: true,
+      list: {
+        select: {
+          id: true,
+          boardId: true,
+          isDone: true,
+          board: {
+            select: {
+              id: true,
+              workspaceId: true,
+            },
+          },
+        },
+      },
+      members: {
+        select: {
+          userId: true,
+        },
+      },
+    },
+  });
+
+  if (!card) {
+    return null;
+  }
+
+  const { list, members, ...cardData } = card;
+  return {
+    card: cardData,
+    list: {
+      id: list.id,
+      boardId: list.boardId,
+      isDone: list.isDone,
+    },
+    board: list.board,
+    memberIds: members.map((m) => m.userId),
+  };
+}
+
+/**
+ * Soft delete a card (sets deletedAt).
+ * Used for analytics tracking before hard delete.
+ */
+export async function softDeleteCard(cardId: string): Promise<CardRecord> {
+  return db.card.update({
+    where: {
+      id: cardId,
+    },
+    data: {
+      deletedAt: new Date(),
+    },
+    select: {
+      id: true,
+      listId: true,
+      title: true,
+      description: true,
+      position: true,
+      priority: true,
+      dueDate: true,
+      estimateHours: true,
+      completedAt: true,
+      deletedAt: true,
+      coverImage: true,
+      archivedAt: true,
+      createdById: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+/**
+ * Restore a card from archive.
+ */
+export async function restoreCard(cardId: string): Promise<CardRecord> {
+  return db.card.update({
+    where: {
+      id: cardId,
+    },
+    data: {
+      archivedAt: null,
+    },
+    select: {
+      id: true,
+      listId: true,
+      title: true,
+      description: true,
+      position: true,
+      priority: true,
+      dueDate: true,
+      estimateHours: true,
+      completedAt: true,
+      deletedAt: true,
+      coverImage: true,
+      archivedAt: true,
+      createdById: true,
+      createdAt: true,
+      updatedAt: true,
+    },
   });
 }

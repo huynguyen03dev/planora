@@ -3,6 +3,25 @@ import { z } from "zod";
 const MIN_CARD_TITLE_LENGTH = 1;
 const MAX_CARD_TITLE_LENGTH = 160;
 
+// Valid estimate hour values per PRD
+export const VALID_ESTIMATE_HOURS = [1, 2, 4, 8, 16] as const;
+
+export const estimateHoursSchema = z.preprocess(
+  (value) => {
+    if (value === "" || value == null) return null;
+    if (typeof value === "string") return Number(value);
+    return value;
+  },
+  z
+    .number()
+    .int()
+    .refine((val) => VALID_ESTIMATE_HOURS.includes(val as typeof VALID_ESTIMATE_HOURS[number]), {
+      message: `Estimate must be one of: ${VALID_ESTIMATE_HOURS.join(", ")}`,
+    })
+    .nullable()
+    .optional(),
+);
+
 export const createCardSchema = z.object({
   listId: z.string().uuid({ message: "Invalid list ID" }),
   title: z
@@ -102,3 +121,17 @@ export const updateCardDetailsSchema = z.object({
 });
 
 export type UpdateCardDetailsInput = z.infer<typeof updateCardDetailsSchema>;
+
+export const updateCardEstimateSchema = z.object({
+  cardId: z.string().uuid({ message: "Invalid card ID" }),
+  estimateHours: estimateHoursSchema,
+});
+
+export type UpdateCardEstimateInput = z.infer<typeof updateCardEstimateSchema>;
+
+export const updateCardDueDateSchema = z.object({
+  cardId: z.string().uuid({ message: "Invalid card ID" }),
+  dueDate: z.coerce.date().nullable().optional(),
+});
+
+export type UpdateCardDueDateInput = z.infer<typeof updateCardDueDateSchema>;

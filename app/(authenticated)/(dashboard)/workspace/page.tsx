@@ -4,8 +4,10 @@ import { redirect } from "next/navigation";
 import { hasWorkspacePermission } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
 import { listWorkspacePendingInvitations } from "@/lib/invitation";
+import db from "@/lib/prisma";
 import { listWorkspaceMembershipsByUserId } from "@/lib/workspace";
 
+import { AnalyticsSettingsForm } from "@/components/workspace/analytics-settings-form";
 import { InviteMemberForm } from "@/components/workspace/invite-member-form";
 import { WorkspaceInvitationsList } from "@/components/workspace/workspace-invitations-list";
 
@@ -41,6 +43,16 @@ export default async function WorkspacePage({ searchParams }: WorkspacePageProps
   const selectedWorkspaceInvitations = selectedWorkspaceId && canManageSelectedWorkspace
     ? await listWorkspacePendingInvitations(selectedWorkspaceId)
     : [];
+  const selectedWorkspaceSettings = selectedWorkspaceId && canManageSelectedWorkspace
+    ? await db.workspace.findUnique({
+        where: { id: selectedWorkspaceId },
+        select: {
+          id: true,
+          timezone: true,
+          requireEstimateBeforeDone: true,
+        },
+      })
+    : null;
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 p-6">
@@ -89,6 +101,15 @@ export default async function WorkspacePage({ searchParams }: WorkspacePageProps
           canManageSelectedWorkspace ? (
             <div className="space-y-5">
               <InviteMemberForm workspaceId={selectedWorkspaceId} />
+              {selectedWorkspaceSettings ? (
+                <AnalyticsSettingsForm
+                  workspaceId={selectedWorkspaceSettings.id}
+                  timezone={selectedWorkspaceSettings.timezone}
+                  requireEstimateBeforeDone={
+                    selectedWorkspaceSettings.requireEstimateBeforeDone
+                  }
+                />
+              ) : null}
               <div className="space-y-3">
                 <h3 className="text-sm font-semibold">Pending invitations</h3>
                 <WorkspaceInvitationsList invitations={selectedWorkspaceInvitations} />

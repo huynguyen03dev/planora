@@ -43,16 +43,28 @@ export interface NotificationNewPayload {
   createdAt: string;
 }
 
+export interface WorkspaceEventPayload {
+  workspaceId: string;
+}
+
+export interface AnalyticsRefreshPayload {
+  workspaceId: string;
+  timestamp: string;
+}
+
 export type ServerToClientEvents = {
   "card:moved": (payload: CardMovedPayload) => void;
   "comment:created": (payload: CommentCreatedPayload) => void;
   "notification:new": (payload: NotificationNewPayload) => void;
+  "analytics:refresh": (payload: AnalyticsRefreshPayload) => void;
   "board:error": (payload: { message: string }) => void;
 };
 
 export type ClientToServerEvents = {
   "board:join": (payload: BoardEventPayload) => void;
   "board:leave": (payload: BoardEventPayload) => void;
+  "workspace:join": (payload: WorkspaceEventPayload) => void;
+  "workspace:leave": (payload: WorkspaceEventPayload) => void;
 };
 
 export interface JoinBoardPayload {

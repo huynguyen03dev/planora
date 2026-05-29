@@ -50,3 +50,18 @@ export async function canUserJoinBoard(userId: string, boardId: string): Promise
     return false;
   }
 }
+
+export async function canUserJoinWorkspace(userId: string, workspaceId: string): Promise<boolean> {
+  try {
+    const member = await db.workspaceMember.findFirst({
+      where: {
+        userId,
+        organizationId: workspaceId,
+      },
+    });
+
+    return !!member;
+  } catch {
+    return false;
+  }
+}

@@ -48,6 +48,24 @@ enum NotificationType {
   INVITE
 }
 
+enum CardHistoryEventType {
+  CARD_CREATED
+  CARD_MOVED
+  CARD_COMPLETED
+  CARD_REOPENED
+  ESTIMATE_SET
+  ESTIMATE_CHANGED
+  DUE_DATE_SET
+  DUE_DATE_CHANGED
+  DUE_DATE_CLEARED
+  CARD_MEMBER_ASSIGNED
+  CARD_MEMBER_UNASSIGNED
+  CARD_ARCHIVED
+  CARD_RESTORED
+  CARD_DELETED
+  BASELINE_CAPTURED
+}
+
 // ─── Better Auth–managed tables ────────────────────────────────────
 
 model User {
@@ -129,20 +147,24 @@ model Verification {
 }
 
 model Workspace {
-  id        String   @id
-  name      String
-  slug      String
-  logo      String?
-  createdAt DateTime
-  metadata  String?
+  id                        String    @id
+  name                      String
+  slug                      String
+  logo                      String?
+  timezone                  String    @default("UTC")
+  requireEstimateBeforeDone Boolean   @default(false)
+  analyticsLaunchAt         DateTime?
+  createdAt                 DateTime
+  metadata                  String?
 
   // BA relations
   workspacemembers WorkspaceMember[]
   invitations     Invitation[]
 
   // App relations
-  boards     Board[]
-  activities Activity[]
+  boards               Board[]
+  activities           Activity[]
+  cardHistoryEvents    CardHistoryEvent[]
 
   @@unique([slug])
   @@map("workspace")
@@ -216,11 +238,12 @@ model BoardStar {
 }
 
 model List {
-  id        String   @id @default(uuid())
+  id        String  @id @default(uuid())
   boardId   String
-  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  board     Board   @relation(fields: [boardId], references: [id], onDelete: Cascade)
   title     String
   position  Float
+  isDone    Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -231,27 +254,30 @@ model List {
 }
 
 model Card {
-  id          String    @id @default(uuid())
-  listId      String
-  list        List      @relation(fields: [listId], references: [id], onDelete: Cascade)
-  title       String
-  description String?   @db.Text
-  position    Float
-  priority    Priority?
-  dueDate     DateTime?
-  coverImage  String?
-  archivedAt  DateTime?
-  createdById String
-  createdBy   User      @relation("CardCreator", fields: [createdById], references: [id])
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id            String    @id @default(uuid())
+  listId        String
+  list          List      @relation(fields: [listId], references: [id], onDelete: Cascade)
+  title         String
+  description   String?   @db.Text
+  position      Float
+  priority      Priority?
+  dueDate       DateTime?
+  estimateHours Int?
+  completedAt   DateTime?
+  deletedAt     DateTime?
+  coverImage    String?
+  archivedAt    DateTime?
+  createdById   String
+  createdBy     User      @relation("CardCreator", fields: [createdById], references: [id])
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  members     CardMember[]
-  labels      CardLabel[]
-  checklists  Checklist[]
-  comments    Comment[]
-  attachments Attachment[]
-  activities  Activity[]   @relation("CardActivity")
+  members          CardMember[]
+  labels           CardLabel[]
+  checklists       Checklist[]
+  comments         Comment[]
+  attachments      Attachment[]
+  activities       Activity[]        @relation("CardActivity")
 
   @@index([listId, position])
   @@index([listId, archivedAt])
@@ -384,4 +410,25 @@ model Notification {
 
   @@index([userId, isRead, createdAt])
   @@map("notification")
+}
+
+// ─── Analytics History (append-only, survives card/list deletion) ───
+
+model CardHistoryEvent {
+  id           String               @id @default(uuid())
+  sequence     BigInt               @default(autoincrement())
+  workspaceId  String
+  workspace    Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  boardId      String
+  cardId       String
+  actorId      String?
+  eventType    CardHistoryEventType
+  occurredAt   DateTime             @default(now())
+  metadata     Json?
+
+  @@index([workspaceId, occurredAt])
+  @@index([workspaceId, boardId, occurredAt])
+  @@index([cardId, sequence])
+  @@index([workspaceId, eventType, occurredAt])
+  @@map("cardHistoryEvent")
 }

@@ -4,7 +4,7 @@ import { parse } from "url";
 import next from "next";
 
 import { initIO } from "@/lib/realtime/server";
-import { authenticateSocket, canUserJoinBoard } from "@/lib/realtime/auth";
+import { authenticateSocket, canUserJoinBoard, canUserJoinWorkspace } from "@/lib/realtime/auth";
 import { ROOMS } from "@/lib/realtime/events";
 
 type SocketData = { userId: string };
@@ -62,6 +62,23 @@ app.prepare().then(() => {
     socket.on("board:leave", (payload) => {
       const { boardId } = payload;
       socket.leave(ROOMS.board(boardId));
+    });
+
+    socket.on("workspace:join", async (payload) => {
+      const { workspaceId } = payload;
+      const canJoin = await canUserJoinWorkspace(userId, workspaceId);
+
+      if (!canJoin) {
+        socket.emit("board:error", { message: "Not authorized to join this workspace" });
+        return;
+      }
+
+      socket.join(ROOMS.workspace(workspaceId));
+    });
+
+    socket.on("workspace:leave", (payload) => {
+      const { workspaceId } = payload;
+      socket.leave(ROOMS.workspace(workspaceId));
     });
 
     socket.on("disconnect", () => {

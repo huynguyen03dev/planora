@@ -3,7 +3,14 @@
 import { useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-import { createCommentAction, updateCardDetailsAction, assignCardMemberAction, removeCardMemberAction } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
+import {
+  assignCardMemberAction,
+  createCommentAction,
+  removeCardMemberAction,
+  updateCardDetailsAction,
+  updateCardDueDateAction,
+  updateCardEstimateAction,
+} from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,6 +28,12 @@ import type { AttachmentRecord } from "@/lib/attachment";
 import type { CardMemberRecord, AssignableWorkspaceMemberRecord } from "@/lib/card-member";
 import { cn } from "@/lib/utils";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
+
+const estimateOptions = ["", "1", "2", "4", "8", "16"] as const;
+
+function toDateInputValue(date: Date | null): string {
+  return date ? date.toISOString().slice(0, 10) : "";
+}
 
 type UIComment = {
   id: string;
@@ -144,6 +157,10 @@ function CardDetailDialogBody({
   const router = useRouter();
   const [draftTitle, setDraftTitle] = useState(card.title);
   const [draftDescription, setDraftDescription] = useState(card.description ?? "");
+  const [draftEstimateHours, setDraftEstimateHours] = useState(
+    card.estimateHours?.toString() ?? "",
+  );
+  const [draftDueDate, setDraftDueDate] = useState(toDateInputValue(card.dueDate));
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
 
@@ -183,7 +200,53 @@ function CardDetailDialogBody({
   function handleCancel() {
     setDraftTitle(card.title);
     setDraftDescription(card.description ?? "");
+    setDraftEstimateHours(card.estimateHours?.toString() ?? "");
+    setDraftDueDate(toDateInputValue(card.dueDate));
     setError("");
+  }
+
+  function handleSaveEstimate() {
+    if (!canEdit || isPending) {
+      return;
+    }
+
+    const formData = new FormData();
+    formData.set("cardId", card.id);
+    if (draftEstimateHours) {
+      formData.set("estimateHours", draftEstimateHours);
+    }
+
+    startTransition(async () => {
+      const result = await updateCardEstimateAction(formData);
+      if (!result.success) {
+        setError(result.error);
+        return;
+      }
+      setError("");
+      router.refresh();
+    });
+  }
+
+  function handleSaveDueDate() {
+    if (!canEdit || isPending) {
+      return;
+    }
+
+    const formData = new FormData();
+    formData.set("cardId", card.id);
+    if (draftDueDate) {
+      formData.set("dueDate", draftDueDate);
+    }
+
+    startTransition(async () => {
+      const result = await updateCardDueDateAction(formData);
+      if (!result.success) {
+        setError(result.error);
+        return;
+      }
+      setError("");
+      router.refresh();
+    });
   }
 
   async function handleAssignMember(userId: string) {
@@ -286,9 +349,82 @@ function CardDetailDialogBody({
               <div className="flex flex-wrap gap-2">
                 <ActionChip label="Add" />
                 <ActionChip label="Labels" />
-                <ActionChip label="Dates" />
                 <ActionChip label="Checklist" />
                 <ActionChip label="Members" />
+              </div>
+            </section>
+
+            <section className="grid gap-3 rounded-lg border bg-muted/20 p-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <label
+                  htmlFor="card-estimate-hours"
+                  className="text-sm font-semibold"
+                >
+                  Estimate
+                </label>
+                <select
+                  id="card-estimate-hours"
+                  value={draftEstimateHours}
+                  onChange={(event) => {
+                    setDraftEstimateHours(event.target.value);
+                    setError("");
+                  }}
+                  disabled={!canEdit || isPending || Boolean(card.completedAt)}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  {estimateOptions.map((option) => (
+                    <option key={option || "none"} value={option}>
+                      {option ? `${option}h` : "No estimate"}
+                    </option>
+                  ))}
+                </select>
+                {card.completedAt ? (
+                  <p className="text-xs text-muted-foreground">
+                    Locked after first completion.
+                  </p>
+                ) : null}
+                {canEdit ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={
+                      isPending ||
+                      Boolean(card.completedAt) ||
+                      draftEstimateHours === (card.estimateHours?.toString() ?? "")
+                    }
+                    onClick={handleSaveEstimate}
+                  >
+                    Save estimate
+                  </Button>
+                ) : null}
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="card-due-date" className="text-sm font-semibold">
+                  Due date
+                </label>
+                <Input
+                  id="card-due-date"
+                  type="date"
+                  value={draftDueDate}
+                  onChange={(event) => {
+                    setDraftDueDate(event.target.value);
+                    setError("");
+                  }}
+                  disabled={!canEdit || isPending}
+                />
+                {canEdit ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isPending || draftDueDate === toDateInputValue(card.dueDate)}
+                    onClick={handleSaveDueDate}
+                  >
+                    Save due date
+                  </Button>
+                ) : null}
               </div>
             </section>
 
@@ -402,8 +538,14 @@ function CardDetailDialogBody({
             <section className="space-y-3 rounded-lg border bg-muted/20 p-4">
               <h3 className="text-sm font-semibold">Card metadata</h3>
               <div className="grid gap-3 sm:grid-cols-2">
-                <MetaBlock label="Status" value="Ready for collaboration" />
-                <MetaBlock label="Next use" value="Labels, dates, members, attachments" />
+                <MetaBlock
+                  label="Estimate"
+                  value={card.estimateHours ? `${card.estimateHours}h` : "Unestimated"}
+                />
+                <MetaBlock
+                  label="Due date"
+                  value={draftDueDate || "No due date"}
+                />
               </div>
             </section>
 

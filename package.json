@@ -6,7 +6,10 @@
     "dev": "tsx --require dotenv/config server.ts",
     "build": "next build",
     "start": "NODE_ENV=production tsx --require dotenv/config server.ts",
-    "lint": "eslint"
+    "lint": "eslint",
+    "backfill:analytics": "tsx --require dotenv/config scripts/backfill-card-history.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -49,6 +52,7 @@
     "prisma": "^7.5.0",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^2.0.0"
   }
 }
