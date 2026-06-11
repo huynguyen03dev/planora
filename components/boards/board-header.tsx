@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { updateBoardAction } from "@/app/(authenticated)/(dashboard)/boards/actions";
+import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
 import { BoardMenu } from "@/components/boards/board-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +25,24 @@ export function BoardHeader({ board, canEdit, canDelete }: BoardHeaderProps) {
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
   const skipBlurSaveRef = useRef(false);
+
+  const socketConnected = useBoardStore((s) => s.socketConnected);
+  const [showReconnecting, setShowReconnecting] = useState(false);
+
+  useEffect(() => {
+    if (socketConnected) {
+      return;
+    }
+
+    const timer = setTimeout(() => setShowReconnecting(true), 1000);
+    // Reset on teardown — runs when we transition back to connected (or unmount),
+    // so the badge hides immediately on reconnect without a synchronous
+    // setState in the effect body.
+    return () => {
+      clearTimeout(timer);
+      setShowReconnecting(false);
+    };
+  }, [socketConnected]);
 
   const canSubmit = useMemo(() => {
     return draftTitle.trim() !== "" && draftTitle.trim() !== board.title.trim();
@@ -112,6 +131,16 @@ export function BoardHeader({ board, canEdit, canDelete }: BoardHeaderProps) {
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
+          {showReconnecting ? (
+            <span
+              role="status"
+              className="flex items-center gap-1.5 rounded-full bg-amber-500/90 px-2.5 py-1 text-xs font-medium text-white"
+            >
+              <span className="size-1.5 animate-pulse rounded-full bg-white" />
+              Reconnecting…
+            </span>
+          ) : null}
+
           <div className="flex items-center -space-x-2 pr-1">
             <span className="flex size-8 items-center justify-center rounded-full border-2 border-white bg-sky-200 text-xs font-semibold text-sky-900">
               AL

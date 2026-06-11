@@ -1,6 +1,6 @@
 import { Server } from "socket.io";
 
-import type { NotificationNewPayload, ServerToClientEvents, ClientToServerEvents } from "./types";
+import type { CardSnapshot, ListSnapshot, NotificationNewPayload, ServerToClientEvents, ClientToServerEvents } from "./types";
 import { ROOMS } from "./events";
 
 declare global {
@@ -45,6 +45,143 @@ export function emitCardMoved(boardId: string, payload: {
     });
   } catch (error) {
     console.error("[realtime] Failed to emit card:moved:", error);
+  }
+}
+
+export function emitListMoved(boardId: string, payload: {
+  listId: string;
+  position: number;
+}) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.board(boardId)).emit("list:moved", {
+      boardId,
+      ...payload,
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit list:moved:", error);
+  }
+}
+
+export function emitListCreated(boardId: string, payload: {
+  list: ListSnapshot;
+}) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.board(boardId)).emit("list:created", {
+      boardId,
+      ...payload,
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit list:created:", error);
+  }
+}
+
+export function emitListUpdated(boardId: string, payload: {
+  listId: string;
+  title?: string;
+  isDone?: boolean;
+}) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.board(boardId)).emit("list:updated", {
+      boardId,
+      ...payload,
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit list:updated:", error);
+  }
+}
+
+export function emitListDeleted(boardId: string, payload: {
+  listId: string;
+}) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.board(boardId)).emit("list:deleted", {
+      boardId,
+      ...payload,
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit list:deleted:", error);
+  }
+}
+
+export function emitCardCreated(boardId: string, payload: {
+  card: CardSnapshot;
+}) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.board(boardId)).emit("card:created", {
+      boardId,
+      ...payload,
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit card:created:", error);
+  }
+}
+
+export function emitCardUpdated(boardId: string, payload: {
+  cardId: string;
+  title: string;
+}) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.board(boardId)).emit("card:updated", {
+      boardId,
+      ...payload,
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit card:updated:", error);
+  }
+}
+
+export function emitCardArchived(boardId: string, payload: {
+  cardId: string;
+}) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.board(boardId)).emit("card:archived", {
+      boardId,
+      ...payload,
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit card:archived:", error);
   }
 }
 

@@ -23,7 +23,6 @@ export {
 } from "./list";
 export {
   createCardSchema,
-  updateCardSchema,
   archiveCardSchema,
   reorderCardSchema,
   moveCardSchema,
@@ -33,7 +32,6 @@ export {
   estimateHoursSchema,
   VALID_ESTIMATE_HOURS,
   type CreateCardInput,
-  type UpdateCardInput,
   type ArchiveCardInput,
   type ReorderCardInput,
   type MoveCardInput,

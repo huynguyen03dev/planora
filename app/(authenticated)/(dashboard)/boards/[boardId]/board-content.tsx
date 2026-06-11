@@ -26,6 +26,7 @@ type BoardContentProps = {
     title: string;
     boardId: string;
     isDone: boolean;
+    position: number;
     cards: Array<{
       id: string;
       listId: string;

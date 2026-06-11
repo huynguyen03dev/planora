@@ -1,9 +1,20 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-import { initSocket, joinBoard, leaveBoard, disconnectSocket } from "@/lib/realtime/client";
-import type { CardMovedPayload, CommentCreatedPayload } from "@/lib/realtime/types";
+import { initSocket, joinBoard, leaveBoard } from "@/lib/realtime/client";
+import type {
+  CardArchivedPayload,
+  CardCreatedPayload,
+  CardMovedPayload,
+  CardUpdatedPayload,
+  CommentCreatedPayload,
+  ListCreatedPayload,
+  ListDeletedPayload,
+  ListMovedPayload,
+  ListUpdatedPayload,
+} from "@/lib/realtime/types";
 
 import { useBoardStore, type ListWithCards, type SelectedCardData } from "./board-store";
 
@@ -28,6 +39,10 @@ export function BoardStoreProvider({
   selectedCardId,
   selectedCard,
 }: BoardStoreProviderProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const connectedRef = useRef(false);
   const setBoardId = useBoardStore((s) => s.setBoardId);
   const setLists = useBoardStore((s) => s.setLists);
   const setSelectedCardId = useBoardStore((s) => s.setSelectedCardId);
@@ -35,6 +50,13 @@ export function BoardStoreProvider({
   const setSocketConnected = useBoardStore((s) => s.setSocketConnected);
   const reset = useBoardStore((s) => s.reset);
   const applyRemoteCardMoved = useBoardStore((s) => s.applyRemoteCardMoved);
+  const applyRemoteListMoved = useBoardStore((s) => s.applyRemoteListMoved);
+  const applyRemoteListCreated = useBoardStore((s) => s.applyRemoteListCreated);
+  const applyRemoteListUpdated = useBoardStore((s) => s.applyRemoteListUpdated);
+  const applyRemoteListDeleted = useBoardStore((s) => s.applyRemoteListDeleted);
+  const applyRemoteCardCreated = useBoardStore((s) => s.applyRemoteCardCreated);
+  const applyRemoteCardUpdated = useBoardStore((s) => s.applyRemoteCardUpdated);
+  const applyRemoteCardArchived = useBoardStore((s) => s.applyRemoteCardArchived);
   const applyRemoteCommentCreated = useBoardStore((s) => s.applyRemoteCommentCreated);
 
   const normalizedLists = useMemo(() => {
@@ -67,6 +89,11 @@ export function BoardStoreProvider({
   useEffect(() => {
     const socket = initSocket();
 
+    // Seed connection state synchronously on mount. With a session-long socket,
+    // the `connect` event won't re-fire on a second board visit, so without this
+    // the connection badge would stick on a stale `false`.
+    setSocketConnected(socket.connected);
+
     function handleConnect() {
       setSocketConnected(true);
     }
@@ -84,6 +111,47 @@ export function BoardStoreProvider({
       applyRemoteCardMoved(payload);
     }
 
+    function handleListMoved(payload: ListMovedPayload) {
+      applyRemoteListMoved(payload);
+    }
+
+    function handleListCreated(payload: ListCreatedPayload) {
+      applyRemoteListCreated(payload);
+    }
+
+    function handleListUpdated(payload: ListUpdatedPayload) {
+      applyRemoteListUpdated(payload);
+    }
+
+    function handleListDeleted(payload: ListDeletedPayload) {
+      applyRemoteListDeleted(payload);
+    }
+
+    function handleCardCreated(payload: CardCreatedPayload) {
+      applyRemoteCardCreated(payload);
+    }
+
+    function handleCardUpdated(payload: CardUpdatedPayload) {
+      applyRemoteCardUpdated(payload);
+    }
+
+    function handleCardArchived(payload: CardArchivedPayload) {
+      // Capture whether this is the card whose detail sheet is currently open
+      // BEFORE clearing the store. The sheet's `open` state derives from the
+      // URL `?cardId` param + a server-fetched prop (page.tsx), not the store,
+      // so clearing the store alone won't close it — we must strip the param.
+      const openCardId = searchParams.get("cardId");
+
+      applyRemoteCardArchived(payload);
+
+      if (openCardId === payload.cardId) {
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete("cardId");
+        const query = params.toString();
+        router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+      }
+    }
+
     function handleCommentCreated(payload: CommentCreatedPayload) {
       applyRemoteCommentCreated(payload);
     }
@@ -92,6 +160,13 @@ export function BoardStoreProvider({
     socket.on("disconnect", handleDisconnect);
     socket.on("connect_error", handleConnectError);
     socket.on("card:moved", handleCardMoved);
+    socket.on("list:moved", handleListMoved);
+    socket.on("list:created", handleListCreated);
+    socket.on("list:updated", handleListUpdated);
+    socket.on("list:deleted", handleListDeleted);
+    socket.on("card:created", handleCardCreated);
+    socket.on("card:updated", handleCardUpdated);
+    socket.on("card:archived", handleCardArchived);
     socket.on("comment:created", handleCommentCreated);
 
     return () => {
@@ -99,10 +174,30 @@ export function BoardStoreProvider({
       socket.off("disconnect", handleDisconnect);
       socket.off("connect_error", handleConnectError);
       socket.off("card:moved", handleCardMoved);
+      socket.off("list:moved", handleListMoved);
+      socket.off("list:created", handleListCreated);
+      socket.off("list:updated", handleListUpdated);
+      socket.off("list:deleted", handleListDeleted);
+      socket.off("card:created", handleCardCreated);
+      socket.off("card:updated", handleCardUpdated);
+      socket.off("card:archived", handleCardArchived);
       socket.off("comment:created", handleCommentCreated);
-      disconnectSocket();
     };
-  }, [setSocketConnected, applyRemoteCardMoved, applyRemoteCommentCreated]);
+  }, [
+    setSocketConnected,
+    applyRemoteCardMoved,
+    applyRemoteListMoved,
+    applyRemoteListCreated,
+    applyRemoteListUpdated,
+    applyRemoteListDeleted,
+    applyRemoteCardCreated,
+    applyRemoteCardUpdated,
+    applyRemoteCardArchived,
+    applyRemoteCommentCreated,
+    router,
+    pathname,
+    searchParams,
+  ]);
 
   // Board room join/leave: separate from socket lifecycle
   useEffect(() => {
@@ -110,10 +205,15 @@ export function BoardStoreProvider({
 
     if (socket.connected) {
       joinBoard(boardId);
+      connectedRef.current = true; // baseline: we were already connected at mount
     }
 
     function onConnect() {
       joinBoard(boardId);
+      if (connectedRef.current) {
+        router.refresh(); // a reconnect after a drop — resync missed events
+      }
+      connectedRef.current = true;
     }
 
     socket.on("connect", onConnect);
@@ -122,7 +222,7 @@ export function BoardStoreProvider({
       socket.off("connect", onConnect);
       leaveBoard(boardId);
     };
-  }, [boardId]);
+  }, [boardId, router]);
 
   // Reset store on unmount
   useEffect(() => {

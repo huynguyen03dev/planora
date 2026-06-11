@@ -111,38 +111,6 @@ export async function createCard(data: {
   });
 }
 
-export async function updateCardTitle(
-  cardId: string,
-  title: string,
-): Promise<CardRecord> {
-  return db.card.update({
-    where: {
-      id: cardId,
-      archivedAt: null,
-    },
-    data: {
-      title,
-    },
-    select: {
-      id: true,
-      listId: true,
-      title: true,
-      description: true,
-      position: true,
-      priority: true,
-      dueDate: true,
-      estimateHours: true,
-      completedAt: true,
-      deletedAt: true,
-      coverImage: true,
-      archivedAt: true,
-      createdById: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  });
-}
-
 export async function archiveCard(cardId: string): Promise<void> {
   await db.card.update({
     where: {

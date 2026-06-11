@@ -121,6 +121,7 @@ export default async function BoardPage({
     title: list.title,
     boardId: list.boardId,
     isDone: list.isDone,
+    position: list.position,
     cards: list.cards.map((card) => ({
       id: card.id,
       listId: card.listId,

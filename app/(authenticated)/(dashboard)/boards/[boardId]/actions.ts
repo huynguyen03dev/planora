@@ -6,7 +6,6 @@ import type { Prisma } from "@/app/generated/prisma/client";
 import db from "@/lib/prisma";
 import { getBoardById } from "@/lib/board";
 import {
-  updateCardTitle,
   updateCardDetails,
   getCardWithListAndBoard,
   reorderCardWithinListByNeighbors,
@@ -30,6 +29,13 @@ import { verifySession } from "@/lib/dal";
 import {
   emitAnalyticsRefresh,
   emitCardMoved,
+  emitListMoved,
+  emitListCreated,
+  emitListUpdated,
+  emitListDeleted,
+  emitCardCreated,
+  emitCardUpdated,
+  emitCardArchived,
   emitCommentCreated,
 } from "@/lib/realtime/server";
 import { notifyCardAssigned, notifyCommentOnCard } from "@/lib/notification";
@@ -39,7 +45,6 @@ import {
   deleteListSchema,
   reorderListSchema,
   createCardSchema,
-  updateCardSchema,
   archiveCardSchema,
   reorderCardSchema,
   moveCardSchema,
@@ -191,10 +196,6 @@ type CreateCardResult =
   | { success: true; cardId: string }
   | { success: false; error: string };
 
-type UpdateCardResult =
-  | { success: true }
-  | { success: false; error: string };
-
 type ArchiveCardResult =
   | { success: true }
   | { success: false; error: string };
@@ -254,6 +255,15 @@ export async function createListAction(
   try {
     const list = await createList({ boardId, title, isDone });
     revalidatePath(`/boards/${boardId}`);
+    emitListCreated(list.boardId, {
+      list: {
+        id: list.id,
+        title: list.title,
+        boardId: list.boardId,
+        isDone: list.isDone,
+        position: list.position,
+      },
+    });
     return { success: true, listId: list.id };
   } catch {
     return { success: false, error: "Failed to create list. Please try again." };
@@ -291,6 +301,7 @@ export async function updateListAction(
   try {
     await updateListTitle(listId, title);
     revalidatePath(`/boards/${result.list.boardId}`);
+    emitListUpdated(result.list.boardId, { listId, title });
     return { success: true };
   } catch {
     return { success: false, error: "Failed to update list. Please try again." };
@@ -328,6 +339,7 @@ export async function updateListIsDoneAction(
   try {
     await updateListIsDone(listId, isDone);
     revalidatePath(`/boards/${result.list.boardId}`);
+    emitListUpdated(result.list.boardId, { listId, isDone });
     emitAnalyticsRefresh(result.board.workspaceId);
     return { success: true };
   } catch {
@@ -401,6 +413,7 @@ export async function deleteListAction(
       });
     });
     revalidatePath(`/boards/${result.list.boardId}`);
+    emitListDeleted(result.list.boardId, { listId });
     emitAnalyticsRefresh(result.board.workspaceId);
     return { success: true };
   } catch {
@@ -462,6 +475,7 @@ export async function createCardAction(
           id: true,
           listId: true,
           title: true,
+          position: true,
           estimateHours: true,
           dueDate: true,
           archivedAt: true,
@@ -510,47 +524,18 @@ export async function createCardAction(
     });
 
     revalidatePath(`/boards/${result.list.boardId}`);
+    emitCardCreated(result.list.boardId, {
+      card: {
+        id: card.id,
+        listId: card.listId,
+        title: card.title,
+        position: card.position,
+      },
+    });
     emitAnalyticsRefresh(result.board.workspaceId);
     return { success: true, cardId: card.id };
   } catch {
     return { success: false, error: "Failed to create card. Please try again." };
-  }
-}
-
-export async function updateCardAction(
-  formData: FormData,
-): Promise<UpdateCardResult> {
-  const rawData = Object.fromEntries(formData);
-  const parsed = updateCardSchema.safeParse(rawData);
-
-  if (!parsed.success) {
-    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
-    return { success: false, error: firstError || "Validation failed" };
-  }
-
-  await verifySession();
-
-  const { cardId, title } = parsed.data;
-
-  const result = await getCardWithListAndBoard(cardId);
-  if (!result || result.board.archivedAt) {
-    return { success: false, error: "Card not found" };
-  }
-
-  const canUpdateCard = await hasWorkspacePermission(result.board.workspaceId, {
-    card: ["update"],
-  });
-
-  if (!canUpdateCard) {
-    return { success: false, error: "Card not found" };
-  }
-
-  try {
-    await updateCardTitle(cardId, title);
-    revalidatePath(`/boards/${result.list.boardId}`);
-    return { success: true };
-  } catch {
-    return { success: false, error: "Failed to update card. Please try again." };
   }
 }
 
@@ -614,6 +599,7 @@ export async function archiveCardAction(
       ]);
     });
     revalidatePath(`/boards/${result.list.boardId}`);
+    emitCardArchived(result.list.boardId, { cardId });
     emitAnalyticsRefresh(result.board.workspaceId);
     return { success: true };
   } catch {
@@ -649,12 +635,16 @@ export async function reorderListAction(
   }
 
   try {
-    await reorderListByNeighbors({
+    const updatedList = await reorderListByNeighbors({
       listId,
       prevListId: prevListId ?? null,
       nextListId: nextListId ?? null,
     });
     revalidatePath(`/boards/${result.list.boardId}`);
+    emitListMoved(result.list.boardId, {
+      listId: updatedList.id,
+      position: updatedList.position,
+    });
     return { success: true };
   } catch {
     return { success: false, error: "Failed to reorder list. Please try again." };
@@ -1085,6 +1075,9 @@ export async function updateCardDetailsAction(
       metadata: { title, description: description ?? null },
     });
     revalidatePath(`/boards/${result.list.boardId}`);
+    // Board view shows only the title; description is detail-modal-only (out of
+    // realtime scope), so the card:updated payload carries just the title.
+    emitCardUpdated(result.list.boardId, { cardId, title });
     return { success: true };
   } catch {
     return { success: false, error: "Failed to update card. Please try again." };

@@ -2,13 +2,24 @@
 
 import { create } from "zustand";
 
-import type { CardMovedPayload, CommentCreatedPayload } from "@/lib/realtime/types";
+import type {
+  CardArchivedPayload,
+  CardCreatedPayload,
+  CardMovedPayload,
+  CardUpdatedPayload,
+  CommentCreatedPayload,
+  ListCreatedPayload,
+  ListDeletedPayload,
+  ListMovedPayload,
+  ListUpdatedPayload,
+} from "@/lib/realtime/types";
 
 export type ListWithCards = {
   id: string;
   title: string;
   boardId: string;
   isDone: boolean;
+  position: number;
   cards: Array<{
     id: string;
     listId: string;
@@ -87,6 +98,13 @@ type BoardStore = {
   reset: () => void;
 
   applyRemoteCardMoved: (payload: CardMovedPayload) => void;
+  applyRemoteListMoved: (payload: ListMovedPayload) => void;
+  applyRemoteListCreated: (payload: ListCreatedPayload) => void;
+  applyRemoteListUpdated: (payload: ListUpdatedPayload) => void;
+  applyRemoteListDeleted: (payload: ListDeletedPayload) => void;
+  applyRemoteCardCreated: (payload: CardCreatedPayload) => void;
+  applyRemoteCardUpdated: (payload: CardUpdatedPayload) => void;
+  applyRemoteCardArchived: (payload: CardArchivedPayload) => void;
   applyRemoteCommentCreated: (payload: CommentCreatedPayload) => void;
 };
 
@@ -172,6 +190,214 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
           : state.selectedCard;
 
       return { lists: newLists, selectedCard: newSelectedCard };
+    });
+  },
+
+  applyRemoteListMoved: (payload) => {
+    const { boardId } = get();
+
+    if (boardId !== payload.boardId) {
+      return;
+    }
+
+    const { listId, position } = payload;
+
+    set((state) => {
+      const targetList = state.lists.find((list) => list.id === listId);
+
+      if (!targetList) {
+        return state;
+      }
+
+      const newLists = state.lists
+        .map((list) => (list.id === listId ? { ...list, position } : list))
+        .sort((a, b) => a.position - b.position);
+
+      return { lists: newLists };
+    });
+  },
+
+  applyRemoteListCreated: (payload) => {
+    const { boardId } = get();
+
+    if (boardId !== payload.boardId) {
+      return;
+    }
+
+    set((state) => {
+      // Self-echo dedupe: the creator receives their own emit on top of the
+      // revalidate reseed. If the list already exists, leave state unchanged.
+      if (state.lists.some((list) => list.id === payload.list.id)) {
+        return state;
+      }
+
+      const newLists = [...state.lists, { ...payload.list, cards: [] }].sort(
+        (a, b) => a.position - b.position,
+      );
+
+      return { lists: newLists };
+    });
+  },
+
+  applyRemoteListUpdated: (payload) => {
+    const { boardId } = get();
+
+    if (boardId !== payload.boardId) {
+      return;
+    }
+
+    set((state) => {
+      const targetList = state.lists.find((list) => list.id === payload.listId);
+
+      if (!targetList) {
+        return state;
+      }
+
+      const newLists = state.lists.map((list) => {
+        if (list.id !== payload.listId) {
+          return list;
+        }
+
+        return {
+          ...list,
+          ...(payload.title !== undefined ? { title: payload.title } : {}),
+          ...(payload.isDone !== undefined ? { isDone: payload.isDone } : {}),
+        };
+      });
+
+      return { lists: newLists };
+    });
+  },
+
+  applyRemoteListDeleted: (payload) => {
+    const { boardId } = get();
+
+    if (boardId !== payload.boardId) {
+      return;
+    }
+
+    set((state) => {
+      const exists = state.lists.some((list) => list.id === payload.listId);
+
+      if (!exists) {
+        return state;
+      }
+
+      return {
+        lists: state.lists.filter((list) => list.id !== payload.listId),
+      };
+    });
+  },
+
+  applyRemoteCardCreated: (payload) => {
+    const { boardId } = get();
+
+    if (boardId !== payload.boardId) {
+      return;
+    }
+
+    set((state) => {
+      // Self-echo dedupe: the creator receives their own emit on top of the
+      // revalidate reseed. If the card already exists in any list, no-op.
+      if (state.lists.some((list) => list.cards.some((card) => card.id === payload.card.id))) {
+        return state;
+      }
+
+      const targetListExists = state.lists.some((list) => list.id === payload.card.listId);
+
+      if (!targetListExists) {
+        return state;
+      }
+
+      const newLists = state.lists.map((list) => {
+        if (list.id !== payload.card.listId) {
+          return list;
+        }
+
+        return {
+          ...list,
+          cards: [...list.cards, payload.card].sort((a, b) => a.position - b.position),
+        };
+      });
+
+      return { lists: newLists };
+    });
+  },
+
+  applyRemoteCardUpdated: (payload) => {
+    const { boardId } = get();
+
+    if (boardId !== payload.boardId) {
+      return;
+    }
+
+    set((state) => {
+      const exists = state.lists.some((list) =>
+        list.cards.some((card) => card.id === payload.cardId),
+      );
+
+      if (!exists) {
+        return state;
+      }
+
+      const newLists = state.lists.map((list) => {
+        if (!list.cards.some((card) => card.id === payload.cardId)) {
+          return list;
+        }
+
+        return {
+          ...list,
+          cards: list.cards.map((card) =>
+            card.id === payload.cardId ? { ...card, title: payload.title } : card,
+          ),
+        };
+      });
+
+      const newSelectedCard =
+        state.selectedCardId === payload.cardId && state.selectedCard
+          ? { ...state.selectedCard, card: { ...state.selectedCard.card, title: payload.title } }
+          : state.selectedCard;
+
+      return { lists: newLists, selectedCard: newSelectedCard };
+    });
+  },
+
+  applyRemoteCardArchived: (payload) => {
+    const { boardId } = get();
+
+    if (boardId !== payload.boardId) {
+      return;
+    }
+
+    set((state) => {
+      const exists = state.lists.some((list) =>
+        list.cards.some((card) => card.id === payload.cardId),
+      );
+
+      const isSelected = state.selectedCardId === payload.cardId;
+
+      if (!exists && !isSelected) {
+        return state;
+      }
+
+      const newLists = exists
+        ? state.lists.map((list) => {
+            if (!list.cards.some((card) => card.id === payload.cardId)) {
+              return list;
+            }
+
+            return {
+              ...list,
+              cards: list.cards.filter((card) => card.id !== payload.cardId),
+            };
+          })
+        : state.lists;
+
+      if (isSelected) {
+        return { lists: newLists, selectedCardId: null, selectedCard: null };
+      }
+
+      return { lists: newLists };
     });
   },
 

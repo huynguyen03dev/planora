@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 import { Notification02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 import { initSocket } from "@/lib/realtime/client";
-import type { NotificationNewPayload } from "@/lib/realtime/types";
 
 type NotificationBellProps = {
   initialUnreadCount: number;
@@ -20,46 +19,24 @@ export function NotificationBell({
   isOpen,
 }: NotificationBellProps) {
   const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
-  const handlerRef = useRef<((payload: NotificationNewPayload) => void) | null>(null);
 
   useEffect(() => {
     setUnreadCount(initialUnreadCount);
   }, [initialUnreadCount]);
 
-  // Re-register listener on every socket (re)connect to survive disconnectSocket()
+  // The socket is owned by SocketLifecycleProvider and stays alive for the whole
+  // authenticated session, so a single subscribe-on-mount is sufficient.
   useEffect(() => {
-    handlerRef.current = () => {
-      setUnreadCount((prev) => prev + 1);
-    };
+    const socket = initSocket();
 
-    function attachListener() {
-      const socket = initSocket();
-      if (!socket || !handlerRef.current) return;
-      socket.on("notification:new", handlerRef.current);
+    function handleNotificationNew() {
+      setUnreadCount((prev) => prev + 1);
     }
 
-    // Attach on mount
-    attachListener();
-
-    // Poll for socket changes — the board store calls disconnectSocket() which
-    // nullifies the module variable. The next initSocket() creates a fresh socket,
-    // but our old listener is gone. We detect this via the socket's active flag.
-    const interval = setInterval(() => {
-      const socket = initSocket();
-      if (socket && handlerRef.current) {
-        const listeners = socket.listeners("notification:new");
-        if (listeners.length === 0) {
-          socket.on("notification:new", handlerRef.current);
-        }
-      }
-    }, 2000);
+    socket.on("notification:new", handleNotificationNew);
 
     return () => {
-      clearInterval(interval);
-      const socket = initSocket();
-      if (socket && handlerRef.current) {
-        socket.off("notification:new", handlerRef.current);
-      }
+      socket.off("notification:new", handleNotificationNew);
     };
   }, []);
 

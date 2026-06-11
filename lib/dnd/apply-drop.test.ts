@@ -11,6 +11,7 @@ function makeLists(): ListWithCards[] {
       title: "To Do",
       boardId: "board-1",
       isDone: false,
+      position: 16384,
       cards: [
         { id: "card-A", listId: "list-1", title: "A", position: 16384 },
         { id: "card-B", listId: "list-1", title: "B", position: 32768 },
@@ -22,6 +23,7 @@ function makeLists(): ListWithCards[] {
       title: "Doing",
       boardId: "board-1",
       isDone: false,
+      position: 32768,
       cards: [
         { id: "card-D", listId: "list-2", title: "D", position: 16384 },
         { id: "card-E", listId: "list-2", title: "E", position: 32768 },
@@ -32,6 +34,7 @@ function makeLists(): ListWithCards[] {
       title: "Done",
       boardId: "board-1",
       isDone: true,
+      position: 49152,
       cards: [],
     },
   ];

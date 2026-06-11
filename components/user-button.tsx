@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { signOut, useSession } from "@/lib/auth-client";
+import { disconnectSocket } from "@/lib/realtime/client";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,6 +35,8 @@ export function UserButton({
     : "U";
 
   async function handleSignOut() {
+    // Defensive cleanup: close the session-long socket on explicit logout.
+    disconnectSocket();
     await signOut({
       fetchOptions: {
         onSuccess() {
