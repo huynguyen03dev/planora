@@ -107,16 +107,32 @@ export function BoardStoreProvider({
       console.error("[realtime] connect_error:", err.message);
     }
 
+    // While a local drag is in flight, applying a structural board mutation
+    // (reorder / create / delete / archive) would reorder the list array under
+    // @hello-pangea/dnd mid-drag — corrupting the drop position or breaking the
+    // drag outright. Defer those events and flag a resync; BoardContent pulls
+    // canonical state via router.refresh() when the drag ends. In-place patches
+    // (list/card title, isDone, comments) don't change list structure, so they
+    // stay live.
+    function applyOrDefer<T>(apply: (payload: T) => void, payload: T) {
+      const store = useBoardStore.getState();
+      if (store.isDragging) {
+        store.markResyncPending();
+        return;
+      }
+      apply(payload);
+    }
+
     function handleCardMoved(payload: CardMovedPayload) {
-      applyRemoteCardMoved(payload);
+      applyOrDefer(applyRemoteCardMoved, payload);
     }
 
     function handleListMoved(payload: ListMovedPayload) {
-      applyRemoteListMoved(payload);
+      applyOrDefer(applyRemoteListMoved, payload);
     }
 
     function handleListCreated(payload: ListCreatedPayload) {
-      applyRemoteListCreated(payload);
+      applyOrDefer(applyRemoteListCreated, payload);
     }
 
     function handleListUpdated(payload: ListUpdatedPayload) {
@@ -124,11 +140,11 @@ export function BoardStoreProvider({
     }
 
     function handleListDeleted(payload: ListDeletedPayload) {
-      applyRemoteListDeleted(payload);
+      applyOrDefer(applyRemoteListDeleted, payload);
     }
 
     function handleCardCreated(payload: CardCreatedPayload) {
-      applyRemoteCardCreated(payload);
+      applyOrDefer(applyRemoteCardCreated, payload);
     }
 
     function handleCardUpdated(payload: CardUpdatedPayload) {
@@ -136,6 +152,14 @@ export function BoardStoreProvider({
     }
 
     function handleCardArchived(payload: CardArchivedPayload) {
+      // Defer while dragging (see applyOrDefer) — the drop-time resync pulls the
+      // archival from the server; an open sheet then closes via its
+      // server-fetched prop on refresh.
+      if (useBoardStore.getState().isDragging) {
+        useBoardStore.getState().markResyncPending();
+        return;
+      }
+
       // Capture whether this is the card whose detail sheet is currently open
       // BEFORE clearing the store. The sheet's `open` state derives from the
       // URL `?cardId` param + a server-fetched prop (page.tsx), not the store,

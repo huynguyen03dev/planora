@@ -38,6 +38,45 @@ function listOrder(): string[] {
   return useBoardStore.getState().lists.map((list) => list.id);
 }
 
+describe("drag-defer reconciliation", () => {
+  beforeEach(() => {
+    useBoardStore.getState().reset();
+  });
+
+  it("starts with isDragging false and no pending resync", () => {
+    expect(useBoardStore.getState().isDragging).toBe(false);
+    expect(useBoardStore.getState().pendingResync).toBe(false);
+  });
+
+  it("setDragging toggles the drag flag", () => {
+    useBoardStore.getState().setDragging(true);
+    expect(useBoardStore.getState().isDragging).toBe(true);
+    useBoardStore.getState().setDragging(false);
+    expect(useBoardStore.getState().isDragging).toBe(false);
+  });
+
+  it("consumeResync returns false and stays clear when nothing was deferred", () => {
+    expect(useBoardStore.getState().consumeResync()).toBe(false);
+    expect(useBoardStore.getState().pendingResync).toBe(false);
+  });
+
+  it("markResyncPending then consumeResync returns true once, then resets", () => {
+    useBoardStore.getState().markResyncPending();
+    expect(useBoardStore.getState().pendingResync).toBe(true);
+    expect(useBoardStore.getState().consumeResync()).toBe(true);
+    // Second consume returns false — the flag was cleared.
+    expect(useBoardStore.getState().consumeResync()).toBe(false);
+  });
+
+  it("reset clears drag state", () => {
+    useBoardStore.getState().setDragging(true);
+    useBoardStore.getState().markResyncPending();
+    useBoardStore.getState().reset();
+    expect(useBoardStore.getState().isDragging).toBe(false);
+    expect(useBoardStore.getState().pendingResync).toBe(false);
+  });
+});
+
 describe("applyRemoteListMoved", () => {
   beforeEach(() => {
     useBoardStore.getState().reset();

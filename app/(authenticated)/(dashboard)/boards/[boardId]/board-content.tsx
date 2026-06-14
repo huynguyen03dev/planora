@@ -71,9 +71,29 @@ export function BoardContent({
     router.push(query ? `${pathname}?${query}` : pathname, { scroll: false });
   }
 
+  function onDragStart() {
+    // Mark a drag as active so the store provider defers structural remote board
+    // updates — reordering the list array mid-drag corrupts the drop or breaks
+    // @hello-pangea/dnd. Deferred events are reconciled in onDragEnd.
+    useBoardStore.getState().setDragging(true);
+  }
+
   function onDragEnd(result: DropResult) {
+    // Drag finished (including cancel) — let deferred remote updates flow again,
+    // and find out whether any were skipped while this drag was in flight.
+    useBoardStore.getState().setDragging(false);
+    const needsResync = useBoardStore.getState().consumeResync();
+    const reconcile = () => {
+      if (needsResync) {
+        // Remote board events were deferred during the drag; pull canonical
+        // server state so the board folds them in (along with our own move).
+        router.refresh();
+      }
+    };
+
     const { source, destination, type, draggableId } = result;
     if (!destination) {
+      reconcile();
       return;
     }
 
@@ -83,18 +103,21 @@ export function BoardContent({
         : translateCardDrop(boardLists, draggableId, source, destination);
 
     if (translation.action === "none") {
+      reconcile();
       return;
     }
 
     // Defensive permission re-check (drag is already gated by isDragDisabled /
     // isDropDisabled, but never trust the client-side gate alone).
     if (translation.action === "reorderList" && !canEdit) {
+      reconcile();
       return;
     }
     if (
       (translation.action === "reorderCard" || translation.action === "moveCard") &&
       !canEditCard
     ) {
+      reconcile();
       return;
     }
 
@@ -153,13 +176,14 @@ export function BoardContent({
         setLists(snapshot); // roll back optimistic move
         setError(res.error);
       }
-      // On success: keep optimistic state. Cross-user card moves sync via the
-      // card:moved socket event, so no router.refresh() is needed here.
+      // Cross-user card moves normally sync via the card:moved socket event, so
+      // no refresh is needed — unless we deferred remote events during the drag.
+      reconcile();
     });
   }
 
   return (
-    <DragDropContext onDragEnd={onDragEnd}>
+    <DragDropContext onDragStart={onDragStart} onDragEnd={onDragEnd}>
       <ScrollArea className="flex-1" showHorizontalScrollbar>
         {error ? (
           <p className="px-4 pt-4 text-sm text-destructive">{error}</p>

@@ -89,12 +89,17 @@ type BoardStore = {
   selectedCardId: string | null;
   selectedCard: SelectedCardData | null;
   socketConnected: boolean;
+  isDragging: boolean;
+  pendingResync: boolean;
 
   setBoardId: (boardId: string) => void;
   setLists: (lists: ListWithCards[]) => void;
   setSelectedCardId: (cardId: string | null) => void;
   setSelectedCard: (card: SelectedCardData | null) => void;
   setSocketConnected: (connected: boolean) => void;
+  setDragging: (dragging: boolean) => void;
+  markResyncPending: () => void;
+  consumeResync: () => boolean;
   reset: () => void;
 
   applyRemoteCardMoved: (payload: CardMovedPayload) => void;
@@ -114,6 +119,8 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
   selectedCardId: null,
   selectedCard: null,
   socketConnected: false,
+  isDragging: false,
+  pendingResync: false,
 
   setBoardId: (boardId) => set({ boardId }),
 
@@ -125,12 +132,32 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
 
   setSocketConnected: (connected) => set({ socketConnected: connected }),
 
+  setDragging: (dragging) => set({ isDragging: dragging }),
+
+  // A structural remote board event (reorder/create/delete/archive) arrived
+  // while a local drag was in flight and was skipped to keep the list array
+  // stable under @hello-pangea/dnd. Flag that the board is now behind the
+  // server so BoardContent can reconcile via router.refresh() on drop.
+  markResyncPending: () => set({ pendingResync: true }),
+
+  // Read the pending-resync flag and clear it in a single step. Returns whether
+  // at least one remote event was deferred during the drag just completed.
+  consumeResync: () => {
+    const pending = get().pendingResync;
+    if (pending) {
+      set({ pendingResync: false });
+    }
+    return pending;
+  },
+
   reset: () => set({
     boardId: null,
     lists: [],
     selectedCardId: null,
     selectedCard: null,
     socketConnected: false,
+    isDragging: false,
+    pendingResync: false,
   }),
 
   applyRemoteCardMoved: (payload) => {
