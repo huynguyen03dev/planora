@@ -11,7 +11,21 @@ import { ac, admin, editor, viewer } from "./permissions";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
+// Origins allowed to send auth requests (CSRF allowlist), in addition to
+// `baseURL` (which Better Auth always trusts). Comma-separated, set per
+// environment; defaults to localhost for dev. Server-side only — do NOT prefix
+// with NEXT_PUBLIC_ (the allowlist need not ship to the client).
+const trustedOrigins = (
+  process.env.BETTER_AUTH_TRUSTED_ORIGINS ?? "http://localhost:3000"
+)
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 export const auth = betterAuth({
+  baseURL: process.env.BETTER_AUTH_URL ?? APP_URL,
+  trustedOrigins,
+
   database: prismaAdapter(db, { provider: "postgresql" }),
 
   emailAndPassword: {
