@@ -38,14 +38,23 @@ Config: `prisma.config.ts` (schema at `prisma/schema.prisma`, migrations at
 
 ### Tests
 
-No test framework is configured yet. When adding tests, use the conventions from
-the Next.js ecosystem (Vitest or Jest + React Testing Library). Run a single
-test with:
+**Vitest 2** (node env) is configured (`vitest.config.ts`). It includes
+`lib/**/*.test.ts` and `tests/**/*.test.ts`. There is **no** React Testing
+Library, **no** E2E (Playwright), and **no** CI test step yet — component and
+browser flows are currently unverified. See `docs/TEST_MATRIX.md` for the
+contract-to-proof map.
 
 ```bash
-npx vitest run path/to/file.test.ts          # single file
-npx vitest run -t "test name"                # single test by name
+npm test                                      # run all tests once
+npm run test:watch                            # watch mode
+npx vitest run path/to/file.test.ts           # single file
+npx vitest run -t "test name"                 # single test by name
 ```
+
+Proven today: `lib/dnd/apply-drop.test.ts`, `lib/card-history.test.ts`,
+`lib/analytics/engine.test.ts`, `tests/board-store.test.ts`,
+`tests/analytics-export.test.ts`. Server Actions, auth/RBAC, realtime, and
+React components are untested (the largest gaps).
 
 ---
 
