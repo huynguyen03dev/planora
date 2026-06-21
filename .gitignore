@@ -60,3 +60,6 @@ scripts/bin/harness-cli.exe
 # Harness local artifacts (per-developer, not shared)
 .harness-backup/
 .pi/
+
+# Beads issue tracker (no longer used)
+.beads/
