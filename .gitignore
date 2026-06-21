@@ -63,3 +63,6 @@ scripts/bin/harness-cli.exe
 
 # Beads issue tracker (no longer used)
 .beads/
+
+# Superpowers brainstorm artifacts (no longer used)
+.superpowers/
