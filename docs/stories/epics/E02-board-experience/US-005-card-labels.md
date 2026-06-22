@@ -2,12 +2,14 @@
 
 ## Status
 
-in_progress
+implemented
 
-Slice 1 (this change): full label CRUD + attach/detach, role-gated, with label
-management UI in the card detail sheet. Slice 2 (follow-up): card-face chips in
-the board view + realtime broadcast (threads `labels` through the Zustand store /
-`apply-drop` / card payloads — kept with the perf path, see US-004).
+Slice 1: full label CRUD + attach/detach, role-gated, with label management UI in
+the card detail sheet. Slice 2: card-face chips in the board view + realtime
+broadcast — labels thread through the query → page → Zustand store → ListColumn →
+ListCardItem; `apply-drop` preserves the card object (labels ride along on
+reorder/move); attach/detach emit the in-place/live `card:labels-updated` event
+(label-set CRUD propagates via `revalidatePath`).
 
 ## Lane
 
@@ -105,4 +107,16 @@ Slice 1 (commit on `feat/card-labels-US-005`):
 - `npx tsc --noEmit` clean; `npm run lint` clean; `npm run build` clean.
 - Action permission gating (verifySession → `hasWorkspacePermission` →
   Prisma) is NOT yet covered by an integration test — tracked gap.
-- Slice 2 pending: card-face chips screenshot + realtime.
+- **Manual browser verification (dev server, Chrome DevTools MCP):** opened a
+  card → created label "Bug" (blue) → attached it (blue chip rendered,
+  `rgb(0,121,191)`, toggle flipped to On) → deleted it (cascade removed it from
+  both the card and the board label set, empty states returned). All three
+  Server Action POSTs returned 200 with no console or server errors.
+- **Slice 2 verified (dev server, Chrome DevTools MCP):** created red "Urgent"
+  label, attached it, closed the sheet → the red chip renders on the card face in
+  the board view (exactly one colored chip on the board, `rgb(176,70,50)`), all
+  other cards untouched; reopened sheet showed persisted attached state; deleted
+  the label → chip cascaded off the card and board. `card:labels-updated` emitted
+  with no server error. Store handler covered by `tests/board-store.test.ts` (5
+  label cases incl. reference-preservation + self-echo dedupe). `tsc`/`lint`/
+  `build` clean, 102 tests pass.

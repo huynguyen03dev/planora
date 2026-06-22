@@ -329,7 +329,7 @@ describe("applyRemoteListDeleted", () => {
   it("removes the list and its cards", () => {
     const lists = makeLists();
     lists[0].cards = [
-      { id: "card-1", listId: "list-1", title: "A", position: 16384 },
+      { id: "card-1", listId: "list-1", title: "A", position: 16384, labels: [] },
     ];
     useBoardStore.setState({ boardId: "board-1", lists });
 
@@ -370,11 +370,11 @@ describe("applyRemoteListDeleted", () => {
 function makeListsWithCards(): ListWithCards[] {
   const lists = makeLists();
   lists[0].cards = [
-    { id: "card-a", listId: "list-1", title: "Alpha", position: 16384 },
-    { id: "card-c", listId: "list-1", title: "Charlie", position: 49152 },
+    { id: "card-a", listId: "list-1", title: "Alpha", position: 16384, labels: [] },
+    { id: "card-c", listId: "list-1", title: "Charlie", position: 49152, labels: [] },
   ];
   lists[1].cards = [
-    { id: "card-b", listId: "list-2", title: "Bravo", position: 16384 },
+    { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, labels: [] },
   ];
   return lists;
 }
@@ -449,10 +449,10 @@ describe("applyRemoteCardMoved", () => {
     // canonical float-gap position and MUST apply to correct it — otherwise a
     // later remote re-sort would misorder the board.
     const lists = makeListsWithCards();
-    lists[0].cards = [{ id: "card-c", listId: "list-1", title: "Charlie", position: 49152 }];
+    lists[0].cards = [{ id: "card-c", listId: "list-1", title: "Charlie", position: 49152, labels: [] }];
     lists[1].cards = [
-      { id: "card-b", listId: "list-2", title: "Bravo", position: 16384 },
-      { id: "card-a", listId: "list-2", title: "Alpha", position: 99999 },
+      { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, labels: [] },
+      { id: "card-a", listId: "list-2", title: "Alpha", position: 99999, labels: [] },
     ];
     useBoardStore.setState({ boardId: "board-1", lists });
 
@@ -665,6 +665,83 @@ describe("applyRemoteCardArchived", () => {
     useBoardStore.getState().applyRemoteCardArchived({
       boardId: "board-2",
       cardId: "card-a",
+    });
+
+    expect(cardsIn("list-1").map((card) => card.id)).toEqual(["card-a", "card-c"]);
+  });
+});
+
+describe("applyRemoteCardLabelsUpdated", () => {
+  const RED = { id: "label-red", name: "Bug", color: "#B04632" };
+  const BLUE = { id: "label-blue", name: "UX", color: "#0079BF" };
+
+  beforeEach(() => {
+    useBoardStore.getState().reset();
+  });
+
+  it("replaces a card's label set in place without moving it", () => {
+    useBoardStore.setState({ boardId: "board-1", lists: makeListsWithCards() });
+
+    useBoardStore.getState().applyRemoteCardLabelsUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      labels: [RED, BLUE],
+    });
+
+    expect(cardsIn("list-1").map((card) => card.id)).toEqual(["card-a", "card-c"]);
+    expect(cardsIn("list-1").find((card) => card.id === "card-a")!.labels).toEqual([RED, BLUE]);
+    // Untouched card keeps its (empty) label set.
+    expect(cardsIn("list-1").find((card) => card.id === "card-c")!.labels).toEqual([]);
+  });
+
+  it("preserves the reference of cards it does not touch", () => {
+    useBoardStore.setState({ boardId: "board-1", lists: makeListsWithCards() });
+    const cardCBefore = cardsIn("list-1").find((card) => card.id === "card-c");
+
+    useBoardStore.getState().applyRemoteCardLabelsUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      labels: [RED],
+    });
+
+    expect(cardsIn("list-1").find((card) => card.id === "card-c")).toBe(cardCBefore);
+  });
+
+  it("self-echo dedupe: no-op when the label set already matches (same refs kept)", () => {
+    const lists = makeListsWithCards();
+    lists[0].cards[0].labels = [RED];
+    useBoardStore.setState({ boardId: "board-1", lists });
+    const listsBefore = useBoardStore.getState().lists;
+
+    useBoardStore.getState().applyRemoteCardLabelsUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      labels: [RED],
+    });
+
+    // Identical id set → state object unchanged (no re-render).
+    expect(useBoardStore.getState().lists).toBe(listsBefore);
+  });
+
+  it("is a no-op when the payload boardId does not match", () => {
+    useBoardStore.setState({ boardId: "board-1", lists: makeListsWithCards() });
+
+    useBoardStore.getState().applyRemoteCardLabelsUpdated({
+      boardId: "board-2",
+      cardId: "card-a",
+      labels: [RED],
+    });
+
+    expect(cardsIn("list-1").find((card) => card.id === "card-a")!.labels).toEqual([]);
+  });
+
+  it("is a safe no-op when the card id is not on the board", () => {
+    useBoardStore.setState({ boardId: "board-1", lists: makeListsWithCards() });
+
+    useBoardStore.getState().applyRemoteCardLabelsUpdated({
+      boardId: "board-1",
+      cardId: "card-missing",
+      labels: [RED],
     });
 
     expect(cardsIn("list-1").map((card) => card.id)).toEqual(["card-a", "card-c"]);

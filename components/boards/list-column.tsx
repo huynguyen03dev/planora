@@ -47,6 +47,7 @@ type ListColumnProps = {
       listId: string;
       title: string;
       position: number;
+      labels: Array<{ id: string; name: string; color: string }>;
     }>;
   };
   index: number;

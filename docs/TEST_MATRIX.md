@@ -33,7 +33,8 @@ browser flows are currently unverified.
 | List CRUD + reorder + isDone toggle | no | no | no | planned | `lib/list.ts`, `boards/[boardId]/actions.ts` untested |
 | Card CRUD / move / archive / details / estimate / due date | no | no | no | planned | `lib/card.ts` (679 lines) untested |
 | Card members assign/remove | no | no | no | planned | `lib/card-member.ts` untested |
-| Card labels: schema + data layer (CRUD, attach dedupe, detach) | yes | partial | no | implemented | `lib/schemas/label.test.ts` (8), `lib/label.test.ts` (6). Action permission gating (US-005) not yet integration-tested; card-face chips + realtime are slice 2. |
+| Card labels: schema + data layer (CRUD, attach dedupe, detach) | yes | partial | no | implemented | `lib/schemas/label.test.ts` (8), `lib/label.test.ts` (6). Action permission gating (US-005) not yet integration-tested. |
+| Card labels: board-store `card:labels-updated` (apply / ref-preserve / self-echo dedupe / scope) | yes | partial | manual | implemented | `tests/board-store.test.ts` (5 label cases). Card-face chips + attach/detach realtime verified manually in browser (US-005 slice 2). |
 | Comments | no | no | no | planned | `lib/comment.ts` untested |
 | Attachments (Cloudinary upload/cleanup) | no | no | no | planned | `lib/attachment.ts` untested |
 | Auth / session / RBAC (admin/editor/viewer) | no | no | no | planned | `lib/auth.ts`, `lib/permissions.ts`, `lib/authorization.ts` untested |

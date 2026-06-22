@@ -136,6 +136,7 @@ export default async function BoardPage({
       listId: card.listId,
       title: card.title,
       position: card.position,
+      labels: card.labels,
     })),
   }));
 

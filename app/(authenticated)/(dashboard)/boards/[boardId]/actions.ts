@@ -21,6 +21,7 @@ import {
   addCardLabel,
   removeCardLabel,
   getLabelWithBoard,
+  getCardLabels,
 } from "@/lib/label";
 import {
   createList,
@@ -45,6 +46,7 @@ import {
   emitCardCreated,
   emitCardUpdated,
   emitCardArchived,
+  emitCardLabelsUpdated,
   emitCommentCreated,
 } from "@/lib/realtime/server";
 import { notifyCardAssigned, notifyCommentOnCard } from "@/lib/notification";
@@ -1770,6 +1772,13 @@ export async function addCardLabelAction(
 
   try {
     const { changed } = await addCardLabel(cardId, labelId);
+    if (changed) {
+      const labels = await getCardLabels(cardId);
+      emitCardLabelsUpdated(cardResult.list.boardId, {
+        cardId,
+        labels: labels.map((label) => ({ id: label.id, name: label.name, color: label.color })),
+      });
+    }
     revalidatePath(`/boards/${cardResult.list.boardId}`);
     return { success: true, changed };
   } catch (error) {
@@ -1803,6 +1812,13 @@ export async function removeCardLabelAction(
 
   try {
     const { changed } = await removeCardLabel(cardId, labelId);
+    if (changed) {
+      const labels = await getCardLabels(cardId);
+      emitCardLabelsUpdated(cardResult.list.boardId, {
+        cardId,
+        labels: labels.map((label) => ({ id: label.id, name: label.name, color: label.color })),
+      });
+    }
     revalidatePath(`/boards/${cardResult.list.boardId}`);
     return { success: true, changed };
   } catch (error) {

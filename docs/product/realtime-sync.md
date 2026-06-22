@@ -33,6 +33,7 @@ Typed via `ServerToClientEvents` / `ClientToServerEvents` in
 | `card:moved` | board | cardId, listId, position | **deferred** (structural) |
 | `card:created` | board | card snapshot | **deferred** |
 | `card:updated` | board | card changes | live (in-place) |
+| `card:labels-updated` | board | cardId, labels[] | live (in-place) |
 | `card:archived` | board | cardId | **deferred** |
 | `list:moved` | board | listId, position | **deferred** |
 | `list:created` | board | list snapshot | **deferred** |
@@ -59,7 +60,9 @@ drop completes -> consumeResync()
 
 - **Deferred while dragging:** card/list moved, created, deleted, archived.
 - **Applied live (safe mid-drag):** comments, title edits, `isDone` toggles,
-  notifications, analytics refresh.
+  card label changes (`card:labels-updated` — replaces a card's label set in
+  place; emitted on attach/detach. Label rename/recolor/delete propagate via
+  `revalidatePath`, not this event), notifications, analytics refresh.
 
 This is the fix behind commit `7706b6d` ("pause remote board updates during drag
 to prevent drop corruption") and is covered by `tests/board-store.test.ts`. When

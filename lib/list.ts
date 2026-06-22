@@ -26,11 +26,18 @@ export type ListRecord = {
   updatedAt: Date;
 };
 
+export type CardLabelRecord = {
+  id: string;
+  name: string;
+  color: string;
+};
+
 export type ListCardRecord = {
   id: string;
   listId: string;
   title: string;
   position: number;
+  labels: CardLabelRecord[];
 };
 
 export type ListWithCardsRecord = ListRecord & {
@@ -40,7 +47,7 @@ export type ListWithCardsRecord = ListRecord & {
 export async function getListsByBoardId(
   boardId: string,
 ): Promise<ListWithCardsRecord[]> {
-  return db.list.findMany({
+  const lists = await db.list.findMany({
     where: { boardId },
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
     select: {
@@ -61,10 +68,26 @@ export async function getListsByBoardId(
           listId: true,
           title: true,
           position: true,
+          labels: {
+            select: {
+              label: { select: { id: true, name: true, color: true } },
+            },
+          },
         },
       },
     },
   });
+
+  return lists.map((list) => ({
+    ...list,
+    cards: list.cards.map((card) => ({
+      id: card.id,
+      listId: card.listId,
+      title: card.title,
+      position: card.position,
+      labels: card.labels.map((cardLabel) => cardLabel.label),
+    })),
+  }));
 }
 
 export async function createList(data: {
