@@ -42,7 +42,7 @@ carry rich metadata. All mutations are Server Actions under
 | Feature | Model | Action(s) | Notes |
 | --- | --- | --- | --- |
 | Assignees | `CardMember` | `assignCardMemberAction`, `removeCardMemberAction` | Workspace members only; assignment notifies + emails |
-| Labels | `Label` / `CardLabel` | (board-scoped) | Named + colored, attached per card |
+| Labels | `Label` / `CardLabel` | `createLabelAction`, `updateLabelAction`, `deleteLabelAction`, `addCardLabelAction`, `removeCardLabelAction` | Board-scoped, named + colored (palette from `BOARD_COLORS`); attached per card. Label-set CRUD reuses `board:["update"]`, attach/detach reuse `card:["update"]` — no dedicated `label` permission statement (US-005). Managed in the card detail sheet; card-face chips + realtime are slice 2. |
 | Checklists | `Checklist` / `ChecklistItem` | — | Ordered items with `isCompleted` |
 | Comments | `Comment` | `createCommentAction` | Notifies + emails; applied live over socket |
 | Attachments | `Attachment` | `uploadAttachmentAction` | Cloudinary-hosted; orphan cleanup on failure |

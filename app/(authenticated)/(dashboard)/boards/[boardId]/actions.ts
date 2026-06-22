@@ -14,6 +14,15 @@ import {
 import { createComment } from "@/lib/comment";
 import { createAttachment } from "@/lib/attachment";
 import {
+  type LabelRecord,
+  createLabel,
+  updateLabel,
+  deleteLabel,
+  addCardLabel,
+  removeCardLabel,
+  getLabelWithBoard,
+} from "@/lib/label";
+import {
   createList,
   updateListTitle,
   updateListIsDone,
@@ -56,6 +65,11 @@ import {
   updateListIsDoneSchema,
   updateCardEstimateSchema,
   updateCardDueDateSchema,
+  createLabelSchema,
+  updateLabelSchema,
+  deleteLabelSchema,
+  addCardLabelSchema,
+  removeCardLabelSchema,
 } from "@/lib/schemas";
 import {
   buildCardArchivedEvent,
@@ -1590,5 +1604,209 @@ export async function uploadAttachmentAction(
       console.error("Failed to clean up Cloudinary file:", cleanupError);
     }
     return { success: false, error: "Failed to save attachment. Please try again." };
+  }
+}
+
+/* ── Labels ──────────────────────────────────────────────────────────────
+ *
+ * Board-scoped labels and their card attachments. Label-set CRUD reuses the
+ * `board:["update"]` permission (managing a board's configuration);
+ * attach/detach reuse `card:["update"]` (editing a card), mirroring
+ * assignCardMemberAction. No dedicated `label` access-control statement — see
+ * story US-005. Realtime broadcast of label changes lands in slice 2 alongside
+ * card-face chips. */
+
+type CreateLabelResult =
+  | { success: true; label: LabelRecord }
+  | { success: false; error: string };
+
+type UpdateLabelResult =
+  | { success: true; label: LabelRecord }
+  | { success: false; error: string };
+
+type DeleteLabelResult =
+  | { success: true }
+  | { success: false; error: string };
+
+type AddCardLabelResult =
+  | { success: true; changed: boolean }
+  | { success: false; error: string };
+
+type RemoveCardLabelResult =
+  | { success: true; changed: boolean }
+  | { success: false; error: string };
+
+function firstFieldError(error: { flatten: () => { fieldErrors: Record<string, string[] | undefined> } }): string {
+  return Object.values(error.flatten().fieldErrors)[0]?.[0] ?? "Validation failed";
+}
+
+export async function createLabelAction(
+  formData: FormData,
+): Promise<CreateLabelResult> {
+  const parsed = createLabelSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { success: false, error: firstFieldError(parsed.error) };
+  }
+
+  await verifySession();
+  const { boardId, name, color } = parsed.data;
+
+  const board = await getBoardById(boardId);
+  if (!board) {
+    return { success: false, error: "Board not found" };
+  }
+
+  const canManage = await hasWorkspacePermission(board.workspaceId, {
+    board: ["update"],
+  });
+  if (!canManage) {
+    return { success: false, error: "Board not found" };
+  }
+
+  try {
+    const label = await createLabel({ boardId, name, color });
+    revalidatePath(`/boards/${boardId}`);
+    return { success: true, label };
+  } catch (error) {
+    console.error("Failed to create label:", error);
+    return { success: false, error: "Failed to create label. Please try again." };
+  }
+}
+
+export async function updateLabelAction(
+  formData: FormData,
+): Promise<UpdateLabelResult> {
+  const parsed = updateLabelSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { success: false, error: firstFieldError(parsed.error) };
+  }
+
+  await verifySession();
+  const { labelId, name, color } = parsed.data;
+
+  const label = await getLabelWithBoard(labelId);
+  if (!label || label.board.archivedAt) {
+    return { success: false, error: "Label not found" };
+  }
+
+  const canManage = await hasWorkspacePermission(label.board.workspaceId, {
+    board: ["update"],
+  });
+  if (!canManage) {
+    return { success: false, error: "Label not found" };
+  }
+
+  try {
+    const updated = await updateLabel(labelId, { name, color });
+    revalidatePath(`/boards/${label.boardId}`);
+    return { success: true, label: updated };
+  } catch (error) {
+    console.error("Failed to update label:", error);
+    return { success: false, error: "Failed to update label. Please try again." };
+  }
+}
+
+export async function deleteLabelAction(
+  formData: FormData,
+): Promise<DeleteLabelResult> {
+  const parsed = deleteLabelSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { success: false, error: firstFieldError(parsed.error) };
+  }
+
+  await verifySession();
+  const { labelId } = parsed.data;
+
+  const label = await getLabelWithBoard(labelId);
+  if (!label || label.board.archivedAt) {
+    return { success: false, error: "Label not found" };
+  }
+
+  const canManage = await hasWorkspacePermission(label.board.workspaceId, {
+    board: ["update"],
+  });
+  if (!canManage) {
+    return { success: false, error: "Label not found" };
+  }
+
+  try {
+    await deleteLabel(labelId);
+    revalidatePath(`/boards/${label.boardId}`);
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to delete label:", error);
+    return { success: false, error: "Failed to delete label. Please try again." };
+  }
+}
+
+export async function addCardLabelAction(
+  formData: FormData,
+): Promise<AddCardLabelResult> {
+  const parsed = addCardLabelSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { success: false, error: firstFieldError(parsed.error) };
+  }
+
+  await verifySession();
+  const { cardId, labelId } = parsed.data;
+
+  const cardResult = await getCardWithListAndBoard(cardId);
+  if (!cardResult || cardResult.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(cardResult.board.workspaceId, {
+    card: ["update"],
+  });
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  // The label must belong to the card's board (no cross-board attach).
+  const label = await getLabelWithBoard(labelId);
+  if (!label || label.boardId !== cardResult.list.boardId) {
+    return { success: false, error: "Label not found" };
+  }
+
+  try {
+    const { changed } = await addCardLabel(cardId, labelId);
+    revalidatePath(`/boards/${cardResult.list.boardId}`);
+    return { success: true, changed };
+  } catch (error) {
+    console.error("Failed to add label to card:", error);
+    return { success: false, error: "Failed to add label. Please try again." };
+  }
+}
+
+export async function removeCardLabelAction(
+  formData: FormData,
+): Promise<RemoveCardLabelResult> {
+  const parsed = removeCardLabelSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { success: false, error: firstFieldError(parsed.error) };
+  }
+
+  await verifySession();
+  const { cardId, labelId } = parsed.data;
+
+  const cardResult = await getCardWithListAndBoard(cardId);
+  if (!cardResult || cardResult.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(cardResult.board.workspaceId, {
+    card: ["update"],
+  });
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  try {
+    const { changed } = await removeCardLabel(cardId, labelId);
+    revalidatePath(`/boards/${cardResult.list.boardId}`);
+    return { success: true, changed };
+  } catch (error) {
+    console.error("Failed to remove label from card:", error);
+    return { success: false, error: "Failed to remove label. Please try again." };
   }
 }

@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { CardAttachments } from "@/components/boards/card-attachments";
+import { CardLabelsSection, type LabelChip } from "@/components/boards/card-labels-section";
 import type { CardDetailRecord } from "@/lib/card";
 import type { CommentRecord } from "@/lib/comment";
 import type { ActivityRecord } from "@/lib/activity";
@@ -59,6 +60,9 @@ type CardDetailSheetProps = {
   attachments: AttachmentRecord[];
   assignees: CardMemberRecord[];
   assignableMembers: AssignableWorkspaceMemberRecord[];
+  boardId: string;
+  boardLabels: LabelChip[];
+  cardLabelIds: string[];
   canEdit: boolean;
   canComment: boolean;
 };
@@ -71,6 +75,9 @@ export function CardDetailSheet({
   attachments,
   assignees,
   assignableMembers,
+  boardId,
+  boardLabels,
+  cardLabelIds,
   canEdit,
   canComment,
 }: CardDetailSheetProps) {
@@ -125,6 +132,9 @@ export function CardDetailSheet({
           attachments={attachments}
           assignees={assignees}
           assignableMembers={assignableMembers}
+          boardId={boardId}
+          boardLabels={boardLabels}
+          cardLabelIds={cardLabelIds}
           canEdit={canEdit}
           canComment={canComment}
         />
@@ -140,6 +150,9 @@ type CardDetailDialogBodyProps = {
   attachments: AttachmentRecord[];
   assignees: CardMemberRecord[];
   assignableMembers: AssignableWorkspaceMemberRecord[];
+  boardId: string;
+  boardLabels: LabelChip[];
+  cardLabelIds: string[];
   canEdit: boolean;
   canComment: boolean;
 };
@@ -151,6 +164,9 @@ function CardDetailDialogBody({
   attachments,
   assignees,
   assignableMembers,
+  boardId,
+  boardLabels,
+  cardLabelIds,
   canEdit,
   canComment,
 }: CardDetailDialogBodyProps) {
@@ -348,11 +364,18 @@ function CardDetailDialogBody({
 
               <div className="flex flex-wrap gap-2">
                 <ActionChip label="Add" />
-                <ActionChip label="Labels" />
                 <ActionChip label="Checklist" />
                 <ActionChip label="Members" />
               </div>
             </section>
+
+            <CardLabelsSection
+              cardId={card.id}
+              boardId={boardId}
+              boardLabels={boardLabels}
+              cardLabelIds={cardLabelIds}
+              canEdit={canEdit}
+            />
 
             <section className="grid gap-3 rounded-lg border bg-muted/20 p-4 sm:grid-cols-2">
               <div className="space-y-2">
