@@ -37,7 +37,7 @@ jobs:
           OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          model: oc/mimo-v2.5-pro
+          model: zaio/glm-5.2
           use_github_token: true
           share: false
           prompt: |
