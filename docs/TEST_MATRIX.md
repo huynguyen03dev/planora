@@ -25,8 +25,8 @@ browser flows are currently unverified.
 | Contract | Unit | Integration | E2E | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
 | Card history events (created/moved/completed/reopened/estimate) | yes | yes | no | implemented | `lib/card-history.test.ts` (16 cases) |
-| Board store: remote list/card apply + drag-defer reconciliation | yes | partial | no | implemented | `tests/board-store.test.ts` (26 cases) |
-| DnD position math (`translateCardDrop` / `translateListDrop`) | yes | n/a | no | implemented | `lib/dnd/apply-drop.test.ts` (13 cases) |
+| Board store: remote apply + drag-defer + self-echo dedupe (0008) | yes | partial | no | implemented | `tests/board-store.test.ts` (37 cases) |
+| DnD position math + reference preservation (`translate*Drop`) | yes | n/a | no | implemented | `lib/dnd/apply-drop.test.ts` (15 cases) |
 | Analytics engine (burndown, lead time, overdue, reopen, coverage) | no | yes | no | implemented | `lib/analytics/engine.test.ts` (3 cases) |
 | Analytics CSV export + escaping | no | yes | no | implemented | `tests/analytics-export.test.ts` (2 cases) |
 | Board CRUD (create/update/delete/archive) | no | no | no | planned | actions in `boards/actions.ts` untested |

@@ -640,7 +640,10 @@ export async function reorderListAction(
       prevListId: prevListId ?? null,
       nextListId: nextListId ?? null,
     });
-    revalidatePath(`/boards/${result.list.boardId}`);
+    // No revalidatePath for pure reorder (decision 0008): the actor already
+    // committed the move optimistically, and the list:moved emit below carries
+    // the canonical position to every client (the actor included). Revalidating
+    // here only forced a redundant full-board reseed on the actor.
     emitListMoved(result.list.boardId, {
       listId: updatedList.id,
       position: updatedList.position,
@@ -685,13 +688,15 @@ export async function reorderCardAction(
       nextCardId: nextCardId ?? null,
     });
 
+    // No revalidatePath for pure reorder (decision 0008): the actor committed
+    // optimistically and the card:moved emit carries the canonical position to
+    // all clients. Revalidating only forced a redundant full-board reseed.
     emitCardMoved(result.list.boardId, {
       cardId: reorderedCard.id,
       listId: reorderedCard.listId,
       position: reorderedCard.position,
     });
 
-    revalidatePath(`/boards/${result.list.boardId}`);
     return { success: true };
   } catch {
     return { success: false, error: "Failed to reorder card. Please try again." };
@@ -1005,13 +1010,16 @@ export async function moveCardAction(
       throw new Error("Failed to move card after retries");
     }
 
+    // No revalidatePath for cross-list move (decision 0008): the actor committed
+    // optimistically and the card:moved emit carries the canonical position to
+    // all clients. Revalidating only forced a redundant full-board reseed. The
+    // analytics refresh emit below is unrelated and stays.
     emitCardMoved(cardResult.list.boardId, {
       cardId: movedCard.id,
       listId: movedCard.listId,
       position: movedCard.position,
     });
 
-    revalidatePath(`/boards/${cardResult.list.boardId}`);
     emitAnalyticsRefresh(cardResult.board.workspaceId);
     return { success: true };
   } catch {
