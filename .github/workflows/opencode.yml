@@ -43,24 +43,28 @@ jobs:
           prompt: |
             Review this pull request as a senior engineer reviewing a teammate's code.
 
-            Focus on real, actionable issues in:
-            - Security vulnerabilities (XSS, injection, auth/authorization issues, secret exposure)
-            - Performance problems that are likely to matter in this diff
-            - Next.js/React correctness and best practices, especially hooks and server/client boundaries
-            - Prisma query efficiency, data integrity, and server action correctness
-            - TypeScript type safety and runtime edge cases
+            Flag only issues genuinely worth fixing before merge. Look for:
+            - Security: XSS, injection, auth/authorization gaps, secret exposure.
+            - Workspace isolation (high priority in this codebase): any Prisma query missing a workspaceId scope is a data leak. Also flag mutations that skip the Server Action contract — session check, then permission check, then workspace scoping, then Zod validation, then Prisma.
+            - Next.js/React correctness: rules of hooks, server/client component boundaries, "use client" misuse.
+            - Prisma: N+1 queries, missing indexes on filtered foreign keys, data integrity, server-action correctness.
+            - TypeScript: type-safety holes and runtime edge cases.
+            - Tests: risky logic (auth, ordering/position math, data writes) shipping with no test — this repo has no CI test gate, so call it out.
 
-            Review style:
-            - Write like a thoughtful human reviewer: professional, clear, and natural.
-            - Only comment on issues that are worth fixing before merge. Skip speculative concerns and low-value nits.
-            - Do not use headings, issue counts, severity sections, or rigid templates.
-            - Do not repeat file names or line numbers in the comment text unless it adds useful clarity; GitHub already shows the location.
-            - For each finding, briefly say what is wrong, why it matters here, and the smallest reasonable fix.
-            - Lead with the issue or impact rather than restating the changed line.
-            - Mention only the smallest relevant symbol or function name; avoid pasting full code snippets from the diff unless needed for clarity.
-            - Keep each finding concise, usually 1 short paragraph (2-4 sentences).
-            - If there are multiple findings in one review comment, keep them as separate short paragraphs.
-            - Be specific to the diff. Avoid generic advice, filler, and canned praise.
-            - If a point is minor or optional, say that plainly instead of overstating it.
-            - Prefer a few high-signal comments over many shallow ones.
-            - If no material issues are found, say so briefly and do not invent suggestions.
+            Format the review to be scannable:
+            - Open with a one-line summary: total findings and a severity tally, e.g. "3 findings — 1 critical, 2 medium". If nothing material, reply exactly "No material issues found." and stop.
+            - Emit one block per finding, ordered most to least severe, using this exact shape:
+
+              **<emoji> <Severity> — <short title>**
+              - What: one sentence on the problem.
+              - Why it matters: one sentence on the concrete impact in this diff.
+              - Fix: the smallest reasonable fix.
+
+            - Severity and emoji: 🔴 Critical, 🟠 High, 🟡 Medium, 🔵 Low/Nit. Mark optional polish as 🔵 Low.
+            - Anchor findings as inline comments where possible; GitHub shows the location, so don't restate file or line in the text unless it adds clarity.
+
+            Rules:
+            - Be specific to this diff — no generic advice, filler, or canned praise.
+            - Keep each field to one tight sentence; don't paste large code snippets.
+            - If you are not confident something is a real bug, leave it out rather than guess.
+            - Prefer a few high-signal findings over many shallow ones.
