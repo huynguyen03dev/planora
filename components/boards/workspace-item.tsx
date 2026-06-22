@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { Analytics01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 
 import { workspaceBadgeGradient } from "./styles";
 
@@ -16,8 +18,10 @@ type WorkspaceItemProps = {
 
 export function WorkspaceItem({ workspace }: WorkspaceItemProps) {
   const searchParams = useSearchParams();
+  const pathname = usePathname();
   const selectedWorkspaceId = searchParams.get("workspace");
   const isActive = selectedWorkspaceId === workspace.id;
+  const isAnalyticsActive = pathname.startsWith(`/workspace/${workspace.slug}`);
   const [isManuallyExpanded, setManuallyExpanded] = useState(isActive);
   const expanded = isActive || isManuallyExpanded;
 
@@ -50,6 +54,15 @@ export function WorkspaceItem({ workspace }: WorkspaceItemProps) {
             }`}
           >
             Boards
+          </Link>
+          <Link
+            href={`/workspace/${workspace.slug}/dashboard`}
+            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-sm transition-colors hover:bg-sidebar-accent ${
+              isAnalyticsActive ? "bg-sidebar-accent font-medium" : "text-muted-foreground"
+            }`}
+          >
+            <HugeiconsIcon icon={Analytics01Icon} className="size-3.5" />
+            <span>Analytics</span>
           </Link>
         </div>
       ) : null}
