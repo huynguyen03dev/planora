@@ -42,6 +42,6 @@ jobs:
           OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          model: openai/glm-5.2
+          model: openai/zaio/glm-5.2
           use_github_token: true
           share: false
