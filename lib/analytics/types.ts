@@ -21,6 +21,14 @@ export type BurndownPoint = {
   idealHours: number | null; // null for days before range start
 };
 
+// Flow data point: cards created vs first-completed on a given day. Unlike
+// burndown this needs no estimates, so it stays meaningful at any coverage.
+export type FlowPoint = {
+  date: string; // YYYY-MM-DD
+  created: number; // cards created that day (filtered)
+  completed: number; // cards first-completed that day (filtered)
+};
+
 // Lead time detail row
 export type LeadTimeRow = {
   cardId: string;
@@ -28,7 +36,8 @@ export type LeadTimeRow = {
   createdAt: Date;
   completedAt: Date;
   leadTimeHours: number;
-  wasLate: boolean; // completed after due date
+  dueDate: Date | null; // due date at completion; null if the card never had one
+  wasLate: boolean; // completed after due date (false when there was no due date)
 };
 
 // KPI values with comparison
@@ -58,10 +67,16 @@ export type WorkspaceAnalyticsPayload = {
     workspaceTimezone: string;
   };
   burndown: BurndownPoint[];
+  flow: {
+    points: FlowPoint[];
+    createdTotal: number;
+    completedTotal: number;
+  };
   leadTime: {
     median: KPIValue;
     average: KPIValue;
-    rows: LeadTimeRow[];
+    rows: LeadTimeRow[]; // capped at MAX_LEAD_TIME_ROWS; see totalCompleted
+    totalCompleted: number; // total cards first-completed in range (>= rows.length)
   };
   remainingHours: KPIValue;
   overdue: KPIValue;

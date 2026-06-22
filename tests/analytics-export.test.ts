@@ -61,6 +61,14 @@ describe("analytics export actions", () => {
         { date: "2026-01-01", remainingHours: 8, idealHours: 8 },
         { date: "2026-01-02", remainingHours: 4, idealHours: 6 },
       ],
+      flow: {
+        points: [
+          { date: "2026-01-01", created: 1, completed: 0 },
+          { date: "2026-01-02", created: 0, completed: 1 },
+        ],
+        createdTotal: 1,
+        completedTotal: 1,
+      },
       leadTime: {
         median: { current: 72, previous: 24, change: 200, lowConfidence: false },
         average: { current: 72, previous: 24, change: 200, lowConfidence: false },
@@ -71,9 +79,11 @@ describe("analytics export actions", () => {
             createdAt: new Date("2026-01-01T09:00:00.000Z"),
             completedAt: new Date("2026-01-04T09:00:00.000Z"),
             leadTimeHours: 72,
+            dueDate: new Date("2026-01-03T00:00:00.000Z"),
             wasLate: true,
           },
         ],
+        totalCompleted: 1,
       },
       remainingHours: { current: 4, previous: 8, change: -50, lowConfidence: false },
       overdue: { current: 1, previous: 0, change: 100, lowConfidence: false },

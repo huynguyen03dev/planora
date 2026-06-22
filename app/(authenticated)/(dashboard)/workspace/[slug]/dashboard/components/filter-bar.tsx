@@ -145,7 +145,9 @@ export function FilterBar({
           type="date"
           value={currentFilters.from ?? ""}
           onChange={(e) => updateFilters({ from: e.target.value || undefined })}
-          className="rounded border bg-background px-2 py-1 text-sm"
+          className={`rounded border bg-background px-2 py-1 text-sm ${
+            currentFilters.from ? "text-foreground" : "text-muted-foreground"
+          }`}
         />
       </div>
 
@@ -158,7 +160,9 @@ export function FilterBar({
           type="date"
           value={currentFilters.to ?? ""}
           onChange={(e) => updateFilters({ to: e.target.value || undefined })}
-          className="rounded border bg-background px-2 py-1 text-sm"
+          className={`rounded border bg-background px-2 py-1 text-sm ${
+            currentFilters.to ? "text-foreground" : "text-muted-foreground"
+          }`}
         />
       </div>
     </div>

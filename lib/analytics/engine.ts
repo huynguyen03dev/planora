@@ -8,6 +8,7 @@ import type {
   WorkspaceAnalyticsQuery,
   WorkspaceAnalyticsPayload,
   BurndownPoint,
+  FlowPoint,
   LeadTimeRow,
   KPIValue,
   CardStateAtTime,
@@ -577,6 +578,7 @@ function computeCompletedMetrics(
         createdAt: createdEvent.occurredAt,
         completedAt: completionEvent.occurredAt,
         leadTimeHours,
+        dueDate: dueDate ?? null,
         wasLate,
       });
     }
@@ -636,6 +638,52 @@ function computeCoverage(
     percentage: totalCount > 0 ? (estimatedCount / totalCount) * 100 : 0,
     estimatedCount,
     unestimatedCount: totalCount - estimatedCount,
+  };
+}
+
+function computeFlowSeries(
+  context: CardHistoryContext,
+  range: AnalyticsRange,
+  timezone: string,
+  memberId?: string,
+): { points: FlowPoint[]; createdTotal: number; completedTotal: number } {
+  const created = new Array<number>(range.days).fill(0);
+  const completed = new Array<number>(range.days).fill(0);
+
+  const indexFor = (date: Date): number => {
+    const key = formatDateKeyInTimezone(date, timezone);
+    return daysBetweenDateKeys(range.fromKey, key) - 1;
+  };
+
+  for (const cardId of context.cardIds) {
+    const cardEvents = context.eventsByCardId.get(cardId) ?? [];
+
+    const createdEvent = findCreatedEvent(cardEvents);
+    if (createdEvent && eventMatchesMemberFilter(createdEvent, memberId)) {
+      const i = indexFor(createdEvent.occurredAt);
+      if (i >= 0 && i < range.days) created[i] += 1;
+    }
+
+    const completionEvent = findFirstCompletionEvent(cardEvents);
+    if (completionEvent && eventMatchesMemberFilter(completionEvent, memberId)) {
+      const i = indexFor(completionEvent.occurredAt);
+      if (i >= 0 && i < range.days) completed[i] += 1;
+    }
+  }
+
+  const points: FlowPoint[] = [];
+  for (let i = 0; i < range.days; i += 1) {
+    points.push({
+      date: addDaysToDateKey(range.fromKey, i),
+      created: created[i],
+      completed: completed[i],
+    });
+  }
+
+  return {
+    points,
+    createdTotal: created.reduce((sum, value) => sum + value, 0),
+    completedTotal: completed.reduce((sum, value) => sum + value, 0),
   };
 }
 
@@ -760,6 +808,7 @@ export async function getWorkspaceAnalytics(
       workspaceTimezone: timezone,
     },
     burndown,
+    flow: computeFlowSeries(context, range, timezone, filters.memberId),
     leadTime: {
       median: buildKPI(
         median(currentCompleted.leadTimes),
@@ -772,6 +821,7 @@ export async function getWorkspaceAnalytics(
         comparisonLowConfidence,
       ),
       rows: currentCompleted.rows,
+      totalCompleted: currentCompleted.completedCardIds.size,
     },
     remainingHours: buildKPI(
       remainingHoursCurrent,

@@ -1,4 +1,9 @@
-import type { WorkspaceAnalyticsPayload } from "@/lib/analytics/types";
+import {
+  formatHourTotal,
+  resolveTrend,
+  type Polarity,
+} from "@/lib/analytics/presentation";
+import type { KPIValue, WorkspaceAnalyticsPayload } from "@/lib/analytics/types";
 
 interface KPICardsProps {
   analytics: WorkspaceAnalyticsPayload;
@@ -15,34 +20,51 @@ function formatPercent(value: number): string {
   return `${value.toFixed(1)}%`;
 }
 
-function ChangeIndicator({ change }: { change: number }) {
-  const isPositive = change >= 0;
+function Trend({
+  value,
+  polarity,
+}: {
+  value: KPIValue;
+  polarity: Polarity;
+}) {
+  const trend = resolveTrend(value, polarity);
+
+  if (trend.kind === "new") {
+    return <span className="text-sm text-muted-foreground">New</span>;
+  }
+
+  if (trend.kind === "flat") {
+    return <span className="text-sm text-muted-foreground">→ 0.0%</span>;
+  }
+
   return (
     <span
-      className={`text-sm ${
-        isPositive ? "text-green-600" : "text-red-600"
-      }`}
+      className={`text-sm ${trend.isImprovement ? "text-green-600" : "text-red-600"}`}
     >
-      {isPositive ? "↑" : "↓"} {Math.abs(change).toFixed(1)}%
+      {trend.rising ? "↑" : "↓"} {trend.magnitude.toFixed(1)}%
     </span>
   );
+}
+
+function NoDataTrend() {
+  return <span className="text-sm text-muted-foreground">No data</span>;
 }
 
 interface CardProps {
   title: string;
   value: string;
-  change: number;
+  trend: React.ReactNode;
   lowConfidence?: boolean;
   subtitle?: string;
 }
 
-function Card({ title, value, change, lowConfidence, subtitle }: CardProps) {
+function Card({ title, value, trend, lowConfidence, subtitle }: CardProps) {
   return (
     <div className="rounded-lg border bg-card p-4">
       <h3 className="text-sm font-medium text-muted-foreground">{title}</h3>
       <div className="mt-2 flex items-baseline gap-2">
         <span className="text-2xl font-bold">{value}</span>
-        <ChangeIndicator change={change} />
+        {trend}
       </div>
       {subtitle && (
         <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
@@ -66,47 +88,73 @@ export function KPICards({ analytics }: KPICardsProps) {
     estimationCoverage,
   } = analytics;
 
+  // Lead time and reopen rate are only meaningful when something completed in
+  // the range; otherwise a literal 0 reads as a real (excellent) result.
+  const hasCompletions = leadTime.totalCompleted > 0;
+
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
       <Card
         title="Median Lead Time"
-        value={formatHours(leadTime.median.current)}
-        change={leadTime.median.change}
+        value={hasCompletions ? formatHours(leadTime.median.current) : "—"}
+        trend={
+          hasCompletions ? (
+            <Trend value={leadTime.median} polarity="higherIsWorse" />
+          ) : (
+            <NoDataTrend />
+          )
+        }
         lowConfidence={leadTime.median.lowConfidence}
       />
 
       <Card
         title="Remaining Hours"
-        value={remainingHours.current.toString()}
-        change={remainingHours.change}
+        value={formatHourTotal(remainingHours.current)}
+        trend={<Trend value={remainingHours} polarity="higherIsWorse" />}
         lowConfidence={remainingHours.lowConfidence}
       />
 
       <Card
         title="Overdue Cards"
         value={overdue.current.toString()}
-        change={overdue.change}
+        trend={<Trend value={overdue} polarity="higherIsWorse" />}
         lowConfidence={overdue.lowConfidence}
       />
 
       <Card
         title="Completed Late"
         value={completedLate.current.toString()}
-        change={completedLate.change}
+        trend={<Trend value={completedLate} polarity="higherIsWorse" />}
         lowConfidence={completedLate.lowConfidence}
       />
 
       <Card
         title="Reopen Rate"
-        value={formatPercent(reopenRate.current)}
-        change={reopenRate.change}
+        value={hasCompletions ? formatPercent(reopenRate.current) : "—"}
+        trend={
+          hasCompletions ? (
+            <Trend value={reopenRate} polarity="higherIsWorse" />
+          ) : (
+            <NoDataTrend />
+          )
+        }
         lowConfidence={reopenRate.lowConfidence}
       />
 
       <Card
         title="Estimation Coverage"
         value={formatPercent(estimationCoverage.current)}
-        change={estimationCoverage.change}
+        trend={
+          <Trend
+            value={{
+              current: estimationCoverage.current,
+              previous: estimationCoverage.previous,
+              change: estimationCoverage.change,
+              lowConfidence: estimationCoverage.lowConfidence,
+            }}
+            polarity="higherIsBetter"
+          />
+        }
         lowConfidence={estimationCoverage.lowConfidence}
         subtitle={`${estimationCoverage.estimatedCount} estimated, ${estimationCoverage.unestimatedCount} unestimated`}
       />
