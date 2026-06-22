@@ -68,6 +68,31 @@ adding or changing board events, classify each as structural (defer) or in-place
 `applyRemoteCardMoved`, `applyRemoteListCreated`, `applyRemoteListDeleted`,
 `applyRemoteCommentCreated`, etc.
 
+## Optimistic reorder/move & self-echo dedupe (decision 0008)
+
+Card/list **reorder and move** are optimistic: `board-content.tsx` commits the
+new order to the store before the Server Action runs. For these three actions
+(`reorderCardAction`, `reorderListAction`, `moveCardAction`) the server **does
+not** call `revalidatePath` — the optimistic commit is authoritative on the
+actor's client, and every client (the actor included) converges via the
+`card:moved` / `list:moved` socket event. (Create/update/delete/archive actions
+still revalidate.)
+
+Because the actor receives their **own** echo, `applyRemoteCardMoved` and
+`applyRemoteListMoved` carry a **position-aware self-echo dedupe**: if the card /
+list is already at the **canonical position** the payload carries, the handler
+no-ops (no re-render). The optimistic commit is index-based and leaves a *stale*
+position, so the actor's first echo still applies and corrects it — that echo,
+not `revalidatePath`, is now what delivers canonical float-gap positions to the
+actor. Deduping by id alone would leave stale positions that a later remote
+re-sort could scramble; the position check prevents that. Genuine cross-user
+moves always apply. Mirrors the existing id-based dedupe in
+`applyRemoteCardCreated` / `applyRemoteListCreated`. Covered by
+`tests/board-store.test.ts`.
+
+The drag-aware deferral invariant above is unchanged: `card:moved` / `list:moved`
+remain structural and are deferred during a local drag.
+
 ## Notification & analytics signals
 
 - `emitNotificationNew(userId, payload)` pushes to the user's room — the bell

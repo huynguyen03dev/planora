@@ -2,7 +2,7 @@
 
 import { DragDropVerticalIcon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useState, useTransition } from "react";
+import { memo, useState, useTransition } from "react";
 import { Draggable } from "@hello-pangea/dnd";
 
 import { archiveCardAction } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
@@ -39,7 +39,7 @@ type ListCardItemProps = {
   onOpenCard: (cardId: string) => void;
 };
 
-export function ListCardItem({
+function ListCardItemComponent({
   card,
   index,
   canEdit,
@@ -195,3 +195,9 @@ export function ListCardItem({
     </>
   );
 }
+
+// Memoized: a single drag lifecycle event re-renders BoardContent and every
+// ListColumn; without this, all ~90 cards re-render per tick. With stable `card`
+// and `onOpenCard` references (preserved by apply-drop + useCallback), only cards
+// whose props actually changed re-render.
+export const ListCardItem = memo(ListCardItemComponent);

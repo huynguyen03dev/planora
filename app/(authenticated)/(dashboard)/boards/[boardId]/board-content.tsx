@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useCallback, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   DragDropContext,
@@ -61,15 +61,24 @@ export function BoardContent({
   const boardLists = storeBoardId === boardId ? storeLists : lists;
 
   const [error, setError] = useState("");
-  const [isPersisting, startPersistTransition] = useTransition();
+  // Kept only to mark the server-action call as a non-blocking transition. It
+  // must NOT gate board-wide draggability (the old isPersisting lock froze the
+  // whole board until the action resolved); correctness is held by the
+  // optimistic store commit + per-action rollback below.
+  const [, startPersistTransition] = useTransition();
 
-  function openCard(cardId: string) {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("cardId", cardId);
+  // Stable across renders so memoized ListColumn / ListCardItem don't re-render
+  // every drag tick from a fresh callback reference.
+  const openCard = useCallback(
+    (cardId: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("cardId", cardId);
 
-    const query = params.toString();
-    router.push(query ? `${pathname}?${query}` : pathname, { scroll: false });
-  }
+      const query = params.toString();
+      router.push(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [router, pathname, searchParams],
+  );
 
   function onDragStart() {
     // Mark a drag as active so the store provider defers structural remote board
@@ -193,7 +202,7 @@ export function BoardContent({
           droppableId="board"
           type="list"
           direction="horizontal"
-          isDropDisabled={!canEdit || isPersisting}
+          isDropDisabled={!canEdit}
         >
           {(provided) => (
             <div
@@ -211,8 +220,8 @@ export function BoardContent({
                   canCreateCard={canCreateCard}
                   canEditCard={canEditCard}
                   canArchiveCard={canArchiveCard}
-                  canSortList={canEdit && !isPersisting}
-                  canSortCards={canEditCard && !isPersisting}
+                  canSortList={canEdit}
+                  canSortCards={canEditCard}
                   onOpenCard={openCard}
                 />
               ))}

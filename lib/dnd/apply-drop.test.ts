@@ -250,3 +250,82 @@ describe("immutability", () => {
     expect(JSON.stringify(lists)).toBe(before);
   });
 });
+
+// These assertions are the contract memoization relies on: lists (and cards)
+// that did not change must be returned by the SAME reference, so memoized
+// ListColumn / ListCardItem skip re-render. Lists that did change must be new
+// references so React still re-renders them.
+describe("reference preservation", () => {
+  function byId(lists: ListWithCards[], id: string): ListWithCards {
+    return lists.find((list) => list.id === id)!;
+  }
+
+  it("same-list move: only the mutated list is a new reference", () => {
+    const lists = makeLists();
+    const result = translateCardDrop(
+      lists,
+      "card-A",
+      { droppableId: "list-1", index: 0 },
+      { droppableId: "list-1", index: 2 },
+    );
+    if (result.action !== "reorderCard") throw new Error("expected reorderCard");
+
+    // Untouched lists: same reference.
+    expect(byId(result.nextLists, "list-2")).toBe(byId(lists, "list-2"));
+    expect(byId(result.nextLists, "list-3")).toBe(byId(lists, "list-3"));
+    // Mutated list: new reference (and a new cards array).
+    expect(byId(result.nextLists, "list-1")).not.toBe(byId(lists, "list-1"));
+    expect(byId(result.nextLists, "list-1").cards).not.toBe(byId(lists, "list-1").cards);
+    // Same-list move does not rewrite listId, so the moved card keeps its ref.
+    const movedBefore = byId(lists, "list-1").cards[0];
+    const movedAfter = byId(result.nextLists, "list-1").cards.find((c) => c.id === "card-A")!;
+    expect(movedAfter).toBe(movedBefore);
+  });
+
+  it("cross-list move: only source and destination are new references", () => {
+    const lists = makeLists();
+    const result = translateCardDrop(
+      lists,
+      "card-A",
+      { droppableId: "list-1", index: 0 },
+      { droppableId: "list-2", index: 1 },
+    );
+    if (result.action !== "moveCard") throw new Error("expected moveCard");
+
+    // Untouched list: same reference.
+    expect(byId(result.nextLists, "list-3")).toBe(byId(lists, "list-3"));
+    // Source + destination: new references.
+    expect(byId(result.nextLists, "list-1")).not.toBe(byId(lists, "list-1"));
+    expect(byId(result.nextLists, "list-2")).not.toBe(byId(lists, "list-2"));
+    // Cards that did not move keep their references.
+    const cardBBefore = byId(lists, "list-1").cards.find((c) => c.id === "card-B")!;
+    const cardBAfter = byId(result.nextLists, "list-1").cards.find((c) => c.id === "card-B")!;
+    expect(cardBAfter).toBe(cardBBefore);
+    const cardDBefore = byId(lists, "list-2").cards.find((c) => c.id === "card-D")!;
+    const cardDAfter = byId(result.nextLists, "list-2").cards.find((c) => c.id === "card-D")!;
+    expect(cardDAfter).toBe(cardDBefore);
+    // The moved card is a new reference (listId rewritten to the destination).
+    const movedBefore = byId(lists, "list-1").cards.find((c) => c.id === "card-A")!;
+    const movedAfter = byId(result.nextLists, "list-2").cards.find((c) => c.id === "card-A")!;
+    expect(movedAfter).not.toBe(movedBefore);
+    expect(movedAfter.listId).toBe("list-2");
+  });
+
+  it("list reorder: list objects are preserved, only array order changes", () => {
+    const lists = makeLists();
+    const result = translateListDrop(
+      lists,
+      "list-1",
+      { droppableId: "board", index: 0 },
+      { droppableId: "board", index: 2 },
+    );
+    if (result.action !== "reorderList") throw new Error("expected reorderList");
+
+    // Reorder shuffles the array but reuses every list object reference.
+    expect(byId(result.nextLists, "list-1")).toBe(byId(lists, "list-1"));
+    expect(byId(result.nextLists, "list-2")).toBe(byId(lists, "list-2"));
+    expect(byId(result.nextLists, "list-3")).toBe(byId(lists, "list-3"));
+    // The array itself is a new reference.
+    expect(result.nextLists).not.toBe(lists);
+  });
+});

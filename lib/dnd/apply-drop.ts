@@ -79,29 +79,34 @@ export function translateCardDrop(
     return { action: "none" };
   }
 
-  const next = lists.map((list) => ({ ...list, cards: [...list.cards] }));
-  const srcList = next.find((list) => list.id === source.droppableId);
-  const dstList = next.find((list) => list.id === destination.droppableId);
-  if (!srcList || !dstList) {
+  const srcIndex = lists.findIndex((list) => list.id === source.droppableId);
+  const dstIndex = lists.findIndex((list) => list.id === destination.droppableId);
+  if (srcIndex === -1 || dstIndex === -1) {
     return { action: "none" };
   }
 
-  if (srcList.cards[source.index]?.id !== cardId) {
+  if (lists[srcIndex].cards[source.index]?.id !== cardId) {
     return { action: "none" };
   }
 
-  const [moved] = srcList.cards.splice(source.index, 1);
-  if (!moved) {
-    return { action: "none" };
-  }
-  dstList.cards.splice(destination.index, 0, { ...moved, listId: dstList.id });
-
-  const i = destination.index;
-  const cards = dstList.cards;
-  const prevCardId = i > 0 ? cards[i - 1].id : null;
-  const nextCardId = i < cards.length - 1 ? cards[i + 1].id : null;
+  // Clone only the lists actually mutated; keep every untouched list (and its
+  // cards array) by reference so memoized ListColumns skip re-render. The array
+  // identity changes, but unchanged list objects do not.
+  const next = [...lists];
 
   if (sameList) {
+    const cards = [...lists[srcIndex].cards];
+    const [moved] = cards.splice(source.index, 1);
+    if (!moved) {
+      return { action: "none" };
+    }
+    // Same list: listId is unchanged, so preserve the moved card's reference.
+    cards.splice(destination.index, 0, moved);
+    next[srcIndex] = { ...lists[srcIndex], cards };
+
+    const i = destination.index;
+    const prevCardId = i > 0 ? cards[i - 1].id : null;
+    const nextCardId = i < cards.length - 1 ? cards[i + 1].id : null;
     return {
       action: "reorderCard",
       nextLists: next,
@@ -109,9 +114,23 @@ export function translateCardDrop(
     };
   }
 
+  const srcCards = [...lists[srcIndex].cards];
+  const dstCards = [...lists[dstIndex].cards];
+  const [moved] = srcCards.splice(source.index, 1);
+  if (!moved) {
+    return { action: "none" };
+  }
+  dstCards.splice(destination.index, 0, { ...moved, listId: lists[dstIndex].id });
+  next[srcIndex] = { ...lists[srcIndex], cards: srcCards };
+  next[dstIndex] = { ...lists[dstIndex], cards: dstCards };
+
+  const i = destination.index;
+  const prevCardId = i > 0 ? dstCards[i - 1].id : null;
+  const nextCardId = i < dstCards.length - 1 ? dstCards[i + 1].id : null;
+
   return {
     action: "moveCard",
     nextLists: next,
-    fields: { cardId, targetListId: dstList.id, prevCardId, nextCardId },
+    fields: { cardId, targetListId: lists[dstIndex].id, prevCardId, nextCardId },
   };
 }

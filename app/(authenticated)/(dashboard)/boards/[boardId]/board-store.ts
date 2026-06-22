@@ -170,6 +170,21 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     const { cardId, listId, position } = payload;
 
     set((state) => {
+      // Self-echo dedupe: if the card already sits in the target list at the
+      // canonical position this payload carries, the store already reflects the
+      // move (the actor's own echo after a prior position-correcting apply, or a
+      // duplicate echo). No-op to avoid a redundant re-render. A genuine
+      // cross-user move (card elsewhere, or a stale optimistic position) still
+      // applies — applying is what now delivers canonical float-gap positions to
+      // the actor, since reorder/move no longer revalidate (decision 0008).
+      const reflectingList = state.lists.find((list) => list.id === listId);
+      if (
+        reflectingList &&
+        reflectingList.cards.some((card) => card.id === cardId && card.position === position)
+      ) {
+        return state;
+      }
+
       const sourceList = state.lists.find((list) => list.cards.some((card) => card.id === cardId));
       const targetListExists = state.lists.some((list) => list.id === listId);
 
@@ -233,6 +248,13 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       const targetList = state.lists.find((list) => list.id === listId);
 
       if (!targetList) {
+        return state;
+      }
+
+      // Self-echo dedupe: already at the canonical position → no-op (the actor's
+      // own echo after the position was applied, or a duplicate). A real move
+      // (stale optimistic position, or cross-user) still applies and re-sorts.
+      if (targetList.position === position) {
         return state;
       }
 

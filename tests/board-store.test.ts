@@ -145,6 +145,22 @@ describe("applyRemoteListMoved", () => {
       useBoardStore.getState().lists.find((list) => list.id === "list-3")!.position,
     ).toBe(8192);
   });
+
+  it("self-echo dedupe: a move to the already-reflected position is a true no-op", () => {
+    useBoardStore.setState({ boardId: "board-1", lists: makeLists() });
+    const before = useBoardStore.getState().lists;
+
+    // list-1 is already at position 16384 — the actor's own echo after the
+    // position was applied. No-op, and the lists reference is unchanged so no
+    // re-render is triggered.
+    useBoardStore.getState().applyRemoteListMoved({
+      boardId: "board-1",
+      listId: "list-1",
+      position: 16384,
+    });
+
+    expect(useBoardStore.getState().lists).toBe(before);
+  });
 });
 
 describe("applyRemoteListCreated", () => {
@@ -386,6 +402,85 @@ const selectedCardFor = (cardId: string, title: string) => ({
   attachments: [],
   assignees: [],
   assignableMembers: [],
+});
+
+describe("applyRemoteCardMoved", () => {
+  beforeEach(() => {
+    useBoardStore.getState().reset();
+  });
+
+  it("moves a card to another list and sorts the destination by position", () => {
+    useBoardStore.setState({ boardId: "board-1", lists: makeListsWithCards() });
+
+    // card-a (list-1) → list-2 at position 24576, after card-b (16384).
+    useBoardStore.getState().applyRemoteCardMoved({
+      boardId: "board-1",
+      cardId: "card-a",
+      listId: "list-2",
+      position: 24576,
+    });
+
+    expect(cardsIn("list-1").map((c) => c.id)).toEqual(["card-c"]);
+    expect(cardsIn("list-2").map((c) => c.id)).toEqual(["card-b", "card-a"]);
+    const moved = cardsIn("list-2").find((c) => c.id === "card-a")!;
+    expect(moved.listId).toBe("list-2");
+    expect(moved.position).toBe(24576);
+  });
+
+  it("self-echo dedupe: a move already reflected at the canonical position is a true no-op", () => {
+    useBoardStore.setState({ boardId: "board-1", lists: makeListsWithCards() });
+    const before = useBoardStore.getState().lists;
+
+    // card-b already sits in list-2 at position 16384 — the actor's own echo.
+    // No-op, and the lists reference is unchanged (no re-render).
+    useBoardStore.getState().applyRemoteCardMoved({
+      boardId: "board-1",
+      cardId: "card-b",
+      listId: "list-2",
+      position: 16384,
+    });
+
+    expect(useBoardStore.getState().lists).toBe(before);
+  });
+
+  it("still applies when the card is in the target list but at a stale position", () => {
+    // Simulates the actor's optimistic cross-list commit: card-a was placed in
+    // list-2 by index but kept its old position (99999). The echo carries the
+    // canonical float-gap position and MUST apply to correct it — otherwise a
+    // later remote re-sort would misorder the board.
+    const lists = makeListsWithCards();
+    lists[0].cards = [{ id: "card-c", listId: "list-1", title: "Charlie", position: 49152 }];
+    lists[1].cards = [
+      { id: "card-b", listId: "list-2", title: "Bravo", position: 16384 },
+      { id: "card-a", listId: "list-2", title: "Alpha", position: 99999 },
+    ];
+    useBoardStore.setState({ boardId: "board-1", lists });
+
+    useBoardStore.getState().applyRemoteCardMoved({
+      boardId: "board-1",
+      cardId: "card-a",
+      listId: "list-2",
+      position: 8192,
+    });
+
+    // Position corrected to 8192 → card-a now sorts ahead of card-b.
+    expect(cardsIn("list-2").map((c) => c.id)).toEqual(["card-a", "card-b"]);
+    expect(cardsIn("list-2").find((c) => c.id === "card-a")!.position).toBe(8192);
+  });
+
+  it("is a no-op when the payload boardId does not match", () => {
+    useBoardStore.setState({ boardId: "board-1", lists: makeListsWithCards() });
+    const before = useBoardStore.getState().lists;
+
+    useBoardStore.getState().applyRemoteCardMoved({
+      boardId: "board-2",
+      cardId: "card-a",
+      listId: "list-2",
+      position: 24576,
+    });
+
+    expect(useBoardStore.getState().lists).toBe(before);
+  });
 });
 
 describe("applyRemoteCardCreated", () => {

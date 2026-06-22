@@ -62,6 +62,14 @@ normalizes positions on overflow. The neighbour math is pure and unit-tested in
   Server Action persists the new position and emits a socket event.
 - Remote structural events are **deferred during an active drag** and resynced
   on drop — see `realtime-sync.md`. This is a load-bearing invariant.
+- The board does **not** lock during persistence: `ListColumn` / `ListCardItem`
+  are memoized and `apply-drop` preserves untouched-list references, so a drop
+  re-renders only the affected columns, and dragging stays available while the
+  Server Action is in flight (correctness held by the optimistic commit +
+  rollback). Pure reorder/move skip `revalidatePath`; see decision 0008 and
+  story `US-004`. On very large columns (~90+ cards) the residual cost is DOM
+  layout / `@hello-pangea/dnd` measurement, not React re-renders — windowing is
+  a tracked follow-up, not done here.
 
 ## Activity
 

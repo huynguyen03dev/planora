@@ -2,7 +2,7 @@
 
 import { DragDropVerticalIcon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useState, useTransition } from "react";
+import { memo, useState, useTransition } from "react";
 import { Draggable, Droppable } from "@hello-pangea/dnd";
 
 import {
@@ -60,7 +60,7 @@ type ListColumnProps = {
   onOpenCard: (cardId: string) => void;
 };
 
-export function ListColumn({
+function ListColumnComponent({
   list,
   index,
   canEdit,
@@ -321,11 +321,7 @@ export function ListColumn({
                     {list.cards.map((card, cardIndex) => (
                       <ListCardItem
                         key={card.id}
-                        card={{
-                          id: card.id,
-                          title: card.title,
-                          listId: card.listId,
-                        }}
+                        card={card}
                         index={cardIndex}
                         canEdit={canEditCard}
                         canArchive={canArchiveCard}
@@ -432,3 +428,9 @@ export function ListColumn({
     </>
   );
 }
+
+// Memoized: each drag tick re-renders BoardContent, which would otherwise
+// re-render every column. With apply-drop preserving untouched-list references
+// and a stable `onOpenCard`, only the source/destination columns re-render on a
+// drop; the rest skip.
+export const ListColumn = memo(ListColumnComponent);
