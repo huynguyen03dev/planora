@@ -2,6 +2,7 @@ import type { LeadTimeRow } from "@/lib/analytics/types";
 
 type LeadTimeTableProps = {
   rows: LeadTimeRow[];
+  totalCompleted: number;
 };
 
 function formatHours(hours: number): string {
@@ -17,7 +18,33 @@ function formatDate(date: Date): string {
   }).format(date);
 }
 
-export function LeadTimeTable({ rows }: LeadTimeTableProps) {
+function DueDateBadge({ row }: { row: LeadTimeRow }) {
+  if (!row.dueDate) {
+    return (
+      <span className="rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
+        No due date
+      </span>
+    );
+  }
+
+  if (row.wasLate) {
+    return (
+      <span className="rounded-full bg-red-500/10 px-2 py-1 text-xs font-medium text-red-700">
+        Late
+      </span>
+    );
+  }
+
+  return (
+    <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700">
+      On time
+    </span>
+  );
+}
+
+export function LeadTimeTable({ rows, totalCompleted }: LeadTimeTableProps) {
+  const isTruncated = totalCompleted > rows.length;
+
   return (
     <section className="rounded-lg border bg-card">
       <div className="border-b p-5">
@@ -53,20 +80,19 @@ export function LeadTimeTable({ rows }: LeadTimeTableProps) {
                   <td className="px-4 py-3">{formatDate(row.completedAt)}</td>
                   <td className="px-4 py-3">{formatHours(row.leadTimeHours)}</td>
                   <td className="px-4 py-3">
-                    {row.wasLate ? (
-                      <span className="rounded-full bg-red-500/10 px-2 py-1 text-xs font-medium text-red-700">
-                        Late
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700">
-                        On time
-                      </span>
-                    )}
+                    <DueDateBadge row={row} />
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {isTruncated && (
+        <div className="border-t p-3 text-xs text-muted-foreground">
+          Showing {rows.length} of {totalCompleted} completed cards. Narrow the
+          date range or filters to see the rest.
         </div>
       )}
     </section>

@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { getWorkspaceAnalyticsAction } from "./actions";
 import { DashboardShell } from "./components/dashboard-shell";
 import { BurndownChart } from "./components/burndown-chart";
+import { FlowChart } from "./components/flow-chart";
 import { KPICards } from "./components/kpi-cards";
 import { FilterBar } from "./components/filter-bar";
 import { LaunchBoundaryBanner } from "./components/launch-boundary-banner";
@@ -172,12 +173,23 @@ export default async function DashboardPage({
       </Suspense>
 
       <Suspense fallback={<BurndownChartSkeleton />}>
+        <FlowChart
+          data={analytics.flow.points}
+          createdTotal={analytics.flow.createdTotal}
+          completedTotal={analytics.flow.completedTotal}
+        />
+      </Suspense>
+
+      <Suspense fallback={<BurndownChartSkeleton />}>
         <BurndownChart data={analytics.burndown} />
       </Suspense>
 
       <DataQualitySection analytics={analytics} workspaceSlug={slug} />
 
-      <LeadTimeTable rows={analytics.leadTime.rows} />
+      <LeadTimeTable
+        rows={analytics.leadTime.rows}
+        totalCompleted={analytics.leadTime.totalCompleted}
+      />
     </DashboardShell>
   );
 }

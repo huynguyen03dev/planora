@@ -205,6 +205,11 @@ describe("getWorkspaceAnalytics", () => {
     expect(analytics.estimationCoverage.unestimatedCount).toBe(1);
     expect(analytics.launchBoundary.selectedRangeCrossesBoundary).toBe(false);
     expect(analytics.remainingHours.lowConfidence).toBe(false);
+    // Flow: card-1 created Jan 1, card-2 created Jan 2; card-1 first-completed Jan 4.
+    expect(analytics.flow.points.map((p) => p.created)).toEqual([1, 1, 0, 0, 0]);
+    expect(analytics.flow.points.map((p) => p.completed)).toEqual([0, 0, 0, 1, 0]);
+    expect(analytics.flow.createdTotal).toBe(2);
+    expect(analytics.flow.completedTotal).toBe(1);
   });
 
   it("uses historical member assignment state for member filters", async () => {

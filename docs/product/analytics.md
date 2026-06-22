@@ -23,7 +23,14 @@ by replaying events, which is why member filtering is accurate over time.
 
 `getWorkspaceAnalytics()` computes, over the selected range:
 
-- **Burndown** — remaining estimated hours over time, with an ideal projection.
+- **Created vs completed** — cumulative cards created and first-completed over
+  the range; the gap is net open work. Counts only (no estimates required), so it
+  stays meaningful regardless of estimation coverage. This is the primary
+  delivery-flow signal for an open-ended board.
+- **Remaining estimated work** ("burndown") — remaining estimated hours of open
+  cards over time, with a linear projection line. Depends on estimate coverage
+  and is *not* a sprint burndown (no committed scope / fixed end date); the
+  projection is a reference line, not a target. Treat as secondary to flow.
 - **Lead time** — median and average time from creation to completion
   (detail table per card).
 - **Overdue count** — cards past `dueDate` and not done.

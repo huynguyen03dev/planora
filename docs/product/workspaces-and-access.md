@@ -43,8 +43,14 @@ is a data-leak bug and must be treated as high-risk.
 - **Invite by email:** `inviteMemberAction` creates an `Invitation` (role +
   expiry, `status` pending) and sends a React Email template
   (`emails/invite-email.tsx`) via Resend.
-- The invitee sees pending offers at `/invitations` and accepts to become a
-  `WorkspaceMember`.
+- The invite email links to the **public** `/invite?invitationId=…` landing
+  (`app/(public)/invite/page.tsx`), which works for recipients who have no
+  account yet: it shows workspace/inviter context and routes through
+  sign-up/sign-in carrying a return URL + the invited email (pre-filled), so the
+  invitee returns to the invitation and accepts in one flow. Acceptance still
+  requires the signed-in email to match the invited email.
+- Signed-in members also see pending offers at `/invitations`. Accepting makes
+  the user a `WorkspaceMember`.
 
 ## Workspace settings (admin)
 
