@@ -23,7 +23,10 @@ function SignInForm() {
     redirect && redirect.startsWith("/") && !redirect.startsWith("//")
       ? redirect
       : "/boards";
-  const [email, setEmail] = useState("");
+  const invitedEmail = searchParams.get("email") ?? "";
+  // Preserve invite context when bouncing to the sign-up link.
+  const signUpHref = `/sign-up${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
+  const [email, setEmail] = useState(invitedEmail);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -92,7 +95,7 @@ function SignInForm() {
             <p className="text-sm text-muted-foreground">
               Don&apos;t have an account?{" "}
               <Link
-                href="/sign-up"
+                href={signUpHref}
                 className="text-primary underline-offset-4 hover:underline"
               >
                 Sign up

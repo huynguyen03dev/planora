@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { signUp } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,10 +16,20 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-export default function SignUpPage() {
+function SignUpForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirect = searchParams.get("redirect");
+  const redirectTo =
+    redirect && redirect.startsWith("/") && !redirect.startsWith("//")
+      ? redirect
+      : "/boards";
+  const invitedEmail = searchParams.get("email") ?? "";
+  // Preserve invite context when bouncing to the sign-in link.
+  const signInHref = `/sign-in${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
+
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(invitedEmail);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -33,7 +43,7 @@ export default function SignUpPage() {
       { name, email, password },
       {
         onSuccess() {
-          router.push("/boards");
+          router.push(redirectTo);
         },
         onError(ctx) {
           setError(ctx.error.message);
@@ -99,7 +109,7 @@ export default function SignUpPage() {
             <p className="text-sm text-muted-foreground">
               Already have an account?{" "}
               <Link
-                href="/sign-in"
+                href={signInHref}
                 className="text-primary underline-offset-4 hover:underline"
               >
                 Sign in
@@ -109,5 +119,24 @@ export default function SignUpPage() {
         </form>
       </Card>
     </div>
+  );
+}
+
+export default function SignUpPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex flex-1 items-center justify-center px-4">
+          <Card className="w-full max-w-sm">
+            <CardHeader>
+              <CardTitle className="text-2xl">Create an account</CardTitle>
+              <CardDescription>Loading sign up form...</CardDescription>
+            </CardHeader>
+          </Card>
+        </div>
+      }
+    >
+      <SignUpForm />
+    </Suspense>
   );
 }

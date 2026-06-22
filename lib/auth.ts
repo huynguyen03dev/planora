@@ -47,7 +47,7 @@ export const auth = betterAuth({
         organization: org,
         inviter,
       }) {
-        const inviteLink = `${APP_URL}/invitations?invitationId=${id}`;
+        const inviteLink = `${APP_URL}/invite?invitationId=${id}`;
 
         await sendEmail({
           to: email,
