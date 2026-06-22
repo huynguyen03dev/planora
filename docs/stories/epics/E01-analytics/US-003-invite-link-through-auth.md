@@ -35,6 +35,11 @@ signed-in email to match the invited email.
   `email` param; cross-links between them preserve the params.
 - After sign-up (auto sign-in), the user returns to `/invite` and can accept;
   acceptance creates the `WorkspaceMember` and routes into the workspace.
+- An already-authenticated user visiting `/sign-in` or `/sign-up` is redirected
+  to the `redirect` target (or `/boards`) instead of being shown a redundant
+  auth form. The public header reflects auth state ("Open app" when signed in,
+  Sign In / Sign Up otherwise). `/invite` itself already serves authed users the
+  Accept panel (or a wrong-email explanation) — it never bounces them to auth.
 
 ## Design Notes
 
@@ -80,8 +85,9 @@ public landing + auth context carry.
 
 ## Follow-ups (not in this story)
 
-- Public-layout header still shows generic Sign In / Sign Up regardless of
-  session (cosmetic).
 - No in-app notification is created for an invitee who has no account yet
   (`notifyInvited` returns early); could be created on signup if a pending invite
   matches.
+
+(Resolved here: the public-layout header now reflects auth state, and the
+sign-in/sign-up pages redirect already-authenticated users away from the form.)
