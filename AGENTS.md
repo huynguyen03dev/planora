@@ -252,20 +252,9 @@ port 5432).
 
 ### Branching & pull requests
 
-`main` is protected by a GitHub ruleset (`protect-main`) with **no bypass actors**,
-so it applies to everyone — humans and any agent acting via `gh`:
-
-- **No direct pushes to `main`** — all changes land through a pull request.
-- **No force-push, no deletion** of `main`.
-- **0 required approvals** — you may open a PR and self-merge it; a second human
-  is not required.
-
-So the workflow for any change is: branch off `main` → commit → push the branch →
-open a PR (`gh pr create`) → merge it (`gh pr merge`). Never `git push origin main`
-directly; it will be rejected. (CI config and docs follow the same path.)
-
-A failing OpenCode review check does **not** block merges — it is not a required
-status check.
+`main` is PR-only — ruleset `protect-main` (no bypass) blocks direct pushes,
+force-pushes, and deletions for everyone, agents included. Land every change via a
+PR: branch → push → `gh pr create` → `gh pr merge` (0 approvals, self-merge OK).
 
 ### Adding a model
 
