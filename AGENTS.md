@@ -252,9 +252,18 @@ port 5432).
 
 ### Branching & pull requests
 
-`main` is PR-only — ruleset `protect-main` (no bypass) blocks direct pushes,
-force-pushes, and deletions for everyone, agents included. Land every change via a
-PR: branch → push → `gh pr create` → `gh pr merge` (0 approvals, self-merge OK).
+Two long-lived branches:
+
+- **`dev`** — the integration line. All work lands here. Per story: feature
+  branch → push → `gh pr create --base dev` → `gh pr merge` (0 approvals,
+  self-merge OK). Agents work against `dev`, never `main`.
+- **`main`** — release line, promoted by a human only. `main` is PR-only —
+  ruleset `protect-main` (no bypass) blocks direct pushes, force-pushes, and
+  deletions for everyone, agents included. Promotion is a `dev → main` PR that
+  **the human reviews and merges**; agents do not self-merge into `main`.
+
+So: per-story PRs into `dev` give a per-change diff; the `dev → main` PR is the
+human's approval gate before anything reaches the release line.
 
 ### Adding a model
 
