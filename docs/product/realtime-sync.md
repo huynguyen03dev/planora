@@ -96,6 +96,19 @@ moves always apply. Mirrors the existing id-based dedupe in
 The drag-aware deferral invariant above is unchanged: `card:moved` / `list:moved`
 remain structural and are deferred during a local drag.
 
+## Proof
+
+The store reducer (remote-apply, drag-defer, self-echo dedupe) is unit-proven
+against synthetic events in `tests/board-store.test.ts`. The **wire itself** —
+socket connect → `board:join` room → Server Action emit → broadcast → client
+apply — is proven end-to-end for card creation by US-009
+(`e2e/realtime-card-create.spec.ts`): two real users on one board, a card created
+by one appears live for the other with no reload, run against the real
+`server.ts` (Next + Socket.io) and Postgres. Sabotage-verified — neutralizing
+`emitCardCreated` turns it red. Remaining slices (DnD/`card:moved` with the
+drag-defer invariant, label/comment propagation) still have single-client unit
+proof only.
+
 ## Notification & analytics signals
 
 - `emitNotificationNew(userId, payload)` pushes to the user's room — the bell
