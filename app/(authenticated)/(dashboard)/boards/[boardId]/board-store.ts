@@ -5,6 +5,7 @@ import { create } from "zustand";
 import type {
   CardArchivedPayload,
   CardCreatedPayload,
+  CardLabelsUpdatedPayload,
   CardMovedPayload,
   CardUpdatedPayload,
   CommentCreatedPayload,
@@ -13,6 +14,12 @@ import type {
   ListMovedPayload,
   ListUpdatedPayload,
 } from "@/lib/realtime/types";
+
+export type CardLabel = {
+  id: string;
+  name: string;
+  color: string;
+};
 
 export type ListWithCards = {
   id: string;
@@ -25,6 +32,7 @@ export type ListWithCards = {
     listId: string;
     title: string;
     position: number;
+    labels: CardLabel[];
   }>;
 };
 
@@ -110,6 +118,7 @@ type BoardStore = {
   applyRemoteCardCreated: (payload: CardCreatedPayload) => void;
   applyRemoteCardUpdated: (payload: CardUpdatedPayload) => void;
   applyRemoteCardArchived: (payload: CardArchivedPayload) => void;
+  applyRemoteCardLabelsUpdated: (payload: CardLabelsUpdatedPayload) => void;
   applyRemoteCommentCreated: (payload: CommentCreatedPayload) => void;
 };
 
@@ -365,7 +374,9 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
 
         return {
           ...list,
-          cards: [...list.cards, payload.card].sort((a, b) => a.position - b.position),
+          cards: [...list.cards, { ...payload.card, labels: [] }].sort(
+            (a, b) => a.position - b.position,
+          ),
         };
       });
 
@@ -445,6 +456,51 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       if (isSelected) {
         return { lists: newLists, selectedCardId: null, selectedCard: null };
       }
+
+      return { lists: newLists };
+    });
+  },
+
+  applyRemoteCardLabelsUpdated: (payload) => {
+    const { boardId } = get();
+
+    if (boardId !== payload.boardId) {
+      return;
+    }
+
+    set((state) => {
+      const owningList = state.lists.find((list) =>
+        list.cards.some((card) => card.id === payload.cardId),
+      );
+
+      if (!owningList) {
+        return state;
+      }
+
+      // Self-echo dedupe: if the card already carries this exact label set (same
+      // ids, same order), the store is current (the actor's own echo after
+      // router.refresh already reseeded it). No-op to skip a redundant re-render.
+      const current = owningList.cards.find((card) => card.id === payload.cardId);
+      if (
+        current &&
+        current.labels.length === payload.labels.length &&
+        current.labels.every((label, index) => label.id === payload.labels[index].id)
+      ) {
+        return state;
+      }
+
+      const newLists = state.lists.map((list) => {
+        if (!list.cards.some((card) => card.id === payload.cardId)) {
+          return list;
+        }
+
+        return {
+          ...list,
+          cards: list.cards.map((card) =>
+            card.id === payload.cardId ? { ...card, labels: payload.labels } : card,
+          ),
+        };
+      });
 
       return { lists: newLists };
     });

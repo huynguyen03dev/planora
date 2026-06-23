@@ -55,6 +55,17 @@ export interface CardArchivedPayload extends BoardEventPayload {
   cardId: string;
 }
 
+export interface CardLabelSnapshot {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export interface CardLabelsUpdatedPayload extends BoardEventPayload {
+  cardId: string;
+  labels: CardLabelSnapshot[];
+}
+
 export interface CommentCreatedPayload extends BoardEventPayload {
   cardId: string;
   comment: {
@@ -108,6 +119,7 @@ export type ServerToClientEvents = {
   "card:created": (payload: CardCreatedPayload) => void;
   "card:updated": (payload: CardUpdatedPayload) => void;
   "card:archived": (payload: CardArchivedPayload) => void;
+  "card:labels-updated": (payload: CardLabelsUpdatedPayload) => void;
   "comment:created": (payload: CommentCreatedPayload) => void;
   "notification:new": (payload: NotificationNewPayload) => void;
   "analytics:refresh": (payload: AnalyticsRefreshPayload) => void;

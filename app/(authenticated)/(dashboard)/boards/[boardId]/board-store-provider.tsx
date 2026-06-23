@@ -7,6 +7,7 @@ import { initSocket, joinBoard, leaveBoard } from "@/lib/realtime/client";
 import type {
   CardArchivedPayload,
   CardCreatedPayload,
+  CardLabelsUpdatedPayload,
   CardMovedPayload,
   CardUpdatedPayload,
   CommentCreatedPayload,
@@ -57,6 +58,7 @@ export function BoardStoreProvider({
   const applyRemoteCardCreated = useBoardStore((s) => s.applyRemoteCardCreated);
   const applyRemoteCardUpdated = useBoardStore((s) => s.applyRemoteCardUpdated);
   const applyRemoteCardArchived = useBoardStore((s) => s.applyRemoteCardArchived);
+  const applyRemoteCardLabelsUpdated = useBoardStore((s) => s.applyRemoteCardLabelsUpdated);
   const applyRemoteCommentCreated = useBoardStore((s) => s.applyRemoteCommentCreated);
 
   const normalizedLists = useMemo(() => {
@@ -176,6 +178,11 @@ export function BoardStoreProvider({
       }
     }
 
+    function handleCardLabelsUpdated(payload: CardLabelsUpdatedPayload) {
+      // In-place patch (label chips); safe mid-drag, applied live like card:updated.
+      applyRemoteCardLabelsUpdated(payload);
+    }
+
     function handleCommentCreated(payload: CommentCreatedPayload) {
       applyRemoteCommentCreated(payload);
     }
@@ -191,6 +198,7 @@ export function BoardStoreProvider({
     socket.on("card:created", handleCardCreated);
     socket.on("card:updated", handleCardUpdated);
     socket.on("card:archived", handleCardArchived);
+    socket.on("card:labels-updated", handleCardLabelsUpdated);
     socket.on("comment:created", handleCommentCreated);
 
     return () => {
@@ -205,6 +213,7 @@ export function BoardStoreProvider({
       socket.off("card:created", handleCardCreated);
       socket.off("card:updated", handleCardUpdated);
       socket.off("card:archived", handleCardArchived);
+      socket.off("card:labels-updated", handleCardLabelsUpdated);
       socket.off("comment:created", handleCommentCreated);
     };
   }, [
@@ -217,6 +226,7 @@ export function BoardStoreProvider({
     applyRemoteCardCreated,
     applyRemoteCardUpdated,
     applyRemoteCardArchived,
+    applyRemoteCardLabelsUpdated,
     applyRemoteCommentCreated,
     router,
     pathname,

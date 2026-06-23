@@ -65,3 +65,18 @@ export {
   uploadAttachmentSchema,
   type UploadAttachmentInput,
 } from "./attachment";
+
+export {
+  createLabelSchema,
+  updateLabelSchema,
+  deleteLabelSchema,
+  addCardLabelSchema,
+  removeCardLabelSchema,
+  MIN_LABEL_NAME_LENGTH,
+  MAX_LABEL_NAME_LENGTH,
+  type CreateLabelInput,
+  type UpdateLabelInput,
+  type DeleteLabelInput,
+  type AddCardLabelInput,
+  type RemoveCardLabelInput,
+} from "./label";

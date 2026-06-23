@@ -1,6 +1,6 @@
 import { Server } from "socket.io";
 
-import type { CardSnapshot, ListSnapshot, NotificationNewPayload, ServerToClientEvents, ClientToServerEvents } from "./types";
+import type { CardLabelSnapshot, CardSnapshot, ListSnapshot, NotificationNewPayload, ServerToClientEvents, ClientToServerEvents } from "./types";
 import { ROOMS } from "./events";
 
 declare global {
@@ -182,6 +182,28 @@ export function emitCardArchived(boardId: string, payload: {
     });
   } catch (error) {
     console.error("[realtime] Failed to emit card:archived:", error);
+  }
+}
+
+// In-place / live (not structural): a card's label set changed. Safe to apply
+// mid-drag — it never reorders the list array. Mirrors card:updated.
+export function emitCardLabelsUpdated(boardId: string, payload: {
+  cardId: string;
+  labels: CardLabelSnapshot[];
+}) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.board(boardId)).emit("card:labels-updated", {
+      boardId,
+      ...payload,
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit card:labels-updated:", error);
   }
 }
 

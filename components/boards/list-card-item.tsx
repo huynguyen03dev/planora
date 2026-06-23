@@ -31,6 +31,7 @@ type ListCardItemProps = {
     id: string;
     title: string;
     listId: string;
+    labels: Array<{ id: string; name: string; color: string }>;
   };
   index: number;
   canEdit: boolean;
@@ -85,6 +86,21 @@ function ListCardItemComponent({
               className={cn("gap-2 py-3 shadow-sm", snapshot.isDragging && "shadow-lg")}
             >
               <CardContent className="space-y-2 px-3">
+                {card.labels.length > 0 ? (
+                  <div className="flex flex-wrap gap-1">
+                    {card.labels.map((label) => (
+                      <span
+                        key={label.id}
+                        className="max-w-full truncate rounded px-2 py-0.5 text-xs font-medium text-white"
+                        style={{ backgroundColor: label.color }}
+                        title={label.name}
+                      >
+                        {label.name}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+
                 <div className="flex items-start justify-between gap-2">
                   <Button
                     type="button"

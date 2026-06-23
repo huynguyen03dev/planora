@@ -21,6 +21,8 @@ import { verifySession } from "@/lib/dal";
 import { getListsByBoardId } from "@/lib/list";
 import { getCardMembers, getAssignableWorkspaceMembers } from "@/lib/card-member";
 import type { CardMemberRecord, AssignableWorkspaceMemberRecord } from "@/lib/card-member";
+import { getBoardLabels, getCardLabels } from "@/lib/label";
+import type { LabelRecord } from "@/lib/label";
 
 type BoardPageProps = {
   params: Promise<{ boardId: string }>;
@@ -68,9 +70,12 @@ export default async function BoardPage({
       ? rawCardId
       : null;
 
-  // Load lists first (needed regardless of card selection)
-  const lists = await getListsByBoardId(boardId);
-  
+  // Load lists + board labels first (needed regardless of card selection)
+  const [lists, boardLabels] = await Promise.all([
+    getListsByBoardId(boardId),
+    getBoardLabels(boardId),
+  ]);
+
   // Initialize data variables
   let selectedCard = null;
   let comments: CommentRecord[] = [];
@@ -78,6 +83,7 @@ export default async function BoardPage({
   let activity: ActivityRecord[] = [];
   let assignees: CardMemberRecord[] = [];
   let assignableMembers: AssignableWorkspaceMemberRecord[] = [];
+  let cardLabels: LabelRecord[] = [];
 
   // If a card ID is provided, load card details and related data
   if (selectedCardId) {
@@ -95,17 +101,20 @@ export default async function BoardPage({
         cardAttachments,
         cardActivity,
         cardAssignees,
+        cardLabelRecords,
       ] = await Promise.all([
         getCommentsByCardId(selectedCard.id),
         getAttachmentsByCardId(selectedCard.id),
         getActivityByCardId(selectedCard.id),
         getCardMembers(selectedCard.id),
+        getCardLabels(selectedCard.id),
       ]);
-      
+
       comments = cardComments;
       attachments = cardAttachments;
       activity = cardActivity;
       assignees = cardAssignees;
+      cardLabels = cardLabelRecords;
       
       // Load assignable members only if the current user can edit cards
       if (canEditCard) {
@@ -127,6 +136,7 @@ export default async function BoardPage({
       listId: card.listId,
       title: card.title,
       position: card.position,
+      labels: card.labels,
     })),
   }));
 
@@ -228,6 +238,9 @@ export default async function BoardPage({
           attachments={attachments}
           assignees={assignees}
           assignableMembers={assignableMembers}
+          boardId={board.id}
+          boardLabels={boardLabels}
+          cardLabelIds={cardLabels.map((label) => label.id)}
           canEdit={canEditCard}
           canComment={canComment}
         />

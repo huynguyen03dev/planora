@@ -32,6 +32,7 @@ type BoardContentProps = {
       listId: string;
       title: string;
       position: number;
+      labels: Array<{ id: string; name: string; color: string }>;
     }>;
   }>;
   canEdit: boolean;
