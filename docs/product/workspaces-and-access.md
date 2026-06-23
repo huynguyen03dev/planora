@@ -37,6 +37,15 @@ Authorization is checked **server-side before every mutation**. Workspace
 isolation (`where: { workspaceId }`) is applied on every query; a missing scope
 is a data-leak bug and must be treated as high-risk.
 
+**Proof (US-006):** the security boundary — `verifySession()` → permission check
+against the *resource-derived* workspace → write — is unit-proven for every
+mutating Server Action (and analytics read isolation) in
+`tests/server-actions/`. Each action asserts: an unauthenticated caller and a
+permission-denied caller never reach a write, and a member of another workspace
+cannot mutate this one's data (`moveCardAction` cross-workspace relocation is
+rejected by the same-board invariant before any write). The full role-by-role
+allow/deny matrix is tracked separately as US-007.
+
 ## Members & invitations
 
 - Members are listed and managed under `/workspace`.
