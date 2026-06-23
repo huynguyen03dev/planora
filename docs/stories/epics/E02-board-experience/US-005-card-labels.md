@@ -120,3 +120,26 @@ Slice 1 (commit on `feat/card-labels-US-005`):
   with no server error. Store handler covered by `tests/board-store.test.ts` (5
   label cases incl. reference-preservation + self-echo dedupe). `tsc`/`lint`/
   `build` clean, 102 tests pass.
+
+Full re-verification (2026-06-23, dev server, Chrome DevTools MCP, two tabs on
+the same board, fresh clean board):
+
+- **Slice 1:** opened Card 1.8 → the disabled "Labels" ActionChip is replaced by
+  a real Labels section. Created label "Verify-QA" (Red), attached it via the
+  board-labels toggle (toggle → On, attached chip + "Remove" control rendered,
+  `rgb(176,70,50)`). Both Server Action POSTs returned **200** (each followed by
+  an RSC GET 200); **no console errors/warnings**.
+- **Slice 2:** closed the sheet → exactly **one** card-face chip "Verify-QA"
+  renders on Card 1.8 (`rgb(176,70,50)`, white text); screenshot captured; all
+  other cards untouched.
+- **Realtime (two-tab, no reload):** with Tab B observing the board, detaching on
+  Tab A removed Tab B's chip live (count 1→0); re-attaching on Tab A brought it
+  back live (count 0→1, instant); Tab B's URL never changed and it never
+  reloaded. Tab B console clean. Confirms the `card:labels-updated` in-place/live
+  event end-to-end across clients.
+- **Documented limitation confirmed (not a bug):** deleting the label on Tab A
+  did **not** update Tab B live (chip persisted after 1.5s) — label-set CRUD
+  propagates via `revalidatePath`, not the socket event. After a Tab B refresh
+  the chip cleared (count→0), DB being source of truth.
+- **Cascade:** deleting the label removed it from both the card and the board
+  label set (empty states returned) on the acting client. Board left clean.
