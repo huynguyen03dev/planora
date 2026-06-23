@@ -255,15 +255,17 @@ port 5432).
 Two long-lived branches:
 
 - **`dev`** — the integration line. All work lands here. Per story: feature
-  branch → push → `gh pr create --base dev` → `gh pr merge` (0 approvals,
-  self-merge OK). Agents work against `dev`, never `main`.
-- **`main`** — release line, promoted by a human only. `main` is PR-only —
-  ruleset `protect-main` (no bypass) blocks direct pushes, force-pushes, and
-  deletions for everyone, agents included. Promotion is a `dev → main` PR that
-  **the human reviews and merges**; agents do not self-merge into `main`.
+  branch → push → `gh pr create --base dev`. Agents work against `dev`, never
+  `main`.
+- **`main`** — release line. `main` is PR-only — ruleset `protect-main` (no
+  bypass) blocks direct pushes, force-pushes, and deletions for everyone, agents
+  included. Reached only via a `dev → main` PR.
 
-So: per-story PRs into `dev` give a per-change diff; the `dev → main` PR is the
-human's approval gate before anything reaches the release line.
+**Agents never merge a PR unprompted.** After opening any PR, ask the human
+whether to merge it; only run `gh pr merge` once they say yes (then the agent
+runs it). This applies to every PR — both per-story PRs into `dev` and the
+`dev → main` promotion. The ask is the approval gate; merging is mechanical and
+the agent does it on the human's go-ahead.
 
 ### Adding a model
 
