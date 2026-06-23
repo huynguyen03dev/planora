@@ -30,7 +30,7 @@ statements in `lib/permissions.ts` and enforced via
 | Role | Can | Cannot |
 | --- | --- | --- |
 | `admin` | Everything: board/list/card/comment CRUD, member & org management | — |
-| `editor` | Create/update boards; full list/card/comment CRUD | Delete boards, manage members |
+| `editor` | Update boards; full list/card/comment CRUD | Create or delete boards, manage members |
 | `viewer` | Read everything, create comments | Mutate board structure or cards |
 
 Authorization is checked **server-side before every mutation**. Workspace
@@ -43,8 +43,17 @@ mutating Server Action (and analytics read isolation) in
 `tests/server-actions/`. Each action asserts: an unauthenticated caller and a
 permission-denied caller never reach a write, and a member of another workspace
 cannot mutate this one's data (`moveCardAction` cross-workspace relocation is
-rejected by the same-board invariant before any write). The full role-by-role
-allow/deny matrix is tracked separately as US-007.
+rejected by the same-board invariant before any write).
+
+**Proof (US-007):** the full role × action allow/deny matrix above is
+unit-proven against the **real** `admin`/`editor`/`viewer` role objects in
+`tests/server-actions/rbac-matrix.test.ts` (every entity × verb cell, plus the
+multi-verb AND semantics the gate relies on). The same suite proves the
+board-page UI permission map (`getBoardPagePermissionsForRole`) never over- or
+under-grants relative to the server matrix, and that the US-006 harness's matrix
+copy stays faithful to the real roles. (Surfaced during US-007: `editor` cannot
+*create* boards — `board:["update"]` only — and this table was corrected to
+match.)
 
 ## Members & invitations
 

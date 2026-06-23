@@ -30,6 +30,7 @@ removed). Component and browser flows are currently unverified.
 | Analytics engine (burndown, lead time, overdue, reopen, coverage) | no | yes | no | implemented | `lib/analytics/engine.test.ts` (3 cases) |
 | Analytics CSV export + escaping | no | yes | no | implemented | `tests/analytics-export.test.ts` (2 cases) |
 | Server Action security boundary: auth + permission gate + workspace isolation on every mutation (US-006) | yes | partial | no | implemented | `tests/server-actions/{board,list-card,workspace,analytics-read}.test.ts` — 118 cases (A1 auth / A2 permission / A3 isolation + positive control) over 26 mutating + 2 read actions, incl. `moveCardAction` cross-workspace rejection. Sabotage-verified: removing a gate turns A2/A3 red. |
+| RBAC role × action allow/deny matrix (US-007) | yes | n/a | no | implemented | `tests/server-actions/rbac-matrix.test.ts` — 142 cases. L1: every role × (entity,verb) cell of the real `admin`/`editor`/`viewer` roles (`lib/permissions.ts`) + AND semantics. L2: board-page UI map (`getBoardPagePermissionsForRole`) agrees with the server matrix. L3: US-006 `roleGrants` copy matches the real matrix. Sabotage-verified per layer. |
 | Board CRUD (create/update/delete/archive) | no | partial | no | planned | Security boundary proven (US-006, `board.test.ts`); business logic still unit-untested. |
 | List CRUD + reorder + isDone toggle | no | partial | no | planned | Security boundary proven (US-006, `list-card.test.ts`); business logic still unit-untested. |
 | Card CRUD / move / archive / details / estimate / due date | no | partial | no | planned | Security boundary proven (US-006, `list-card.test.ts`); business logic (incl. position/lifecycle math in actions) still unit-untested. |
@@ -38,7 +39,7 @@ removed). Component and browser flows are currently unverified.
 | Card labels: board-store `card:labels-updated` (apply / ref-preserve / self-echo dedupe / scope) | yes | partial | manual | implemented | `tests/board-store.test.ts` (5 label cases). Card-face chips + attach/detach realtime verified manually in browser (US-005 slice 2). |
 | Comments | no | partial | no | planned | Security boundary proven (US-006, `list-card.test.ts`: viewer may comment, non-member cannot); `lib/comment.ts` business logic untested. |
 | Attachments (Cloudinary upload/cleanup) | no | partial | no | planned | Security boundary proven (US-006, `list-card.test.ts`: denied callers never reach upload/write); upload/cleanup logic untested. |
-| Auth / session / RBAC (admin/editor/viewer) | no | partial | no | planned | Permission gate is exercised per mutation (US-006); the full role-by-role allow/deny matrix is US-007. `lib/auth.ts` unit-untested. |
+| Auth / session / RBAC (admin/editor/viewer) | yes | partial | no | implemented | Per-mutation gate proven (US-006); full role × action allow/deny matrix proven against the real roles (US-007, `rbac-matrix.test.ts`). `lib/auth.ts` session/login plumbing still unit-untested. |
 | Workspaces + invitations (email) | no | partial | no | planned | Settings + invite security boundary proven (US-006, `workspace.test.ts`); invite/email + `lib/workspace.ts` business logic untested. |
 | Notifications (in-app + email + socket) | no | no | no | planned | `lib/notification*.ts` untested |
 | Real-time sync (socket server/client/emitters) | no | no | no | planned | `lib/realtime/*` untested |
@@ -53,9 +54,11 @@ removed). Component and browser flows are currently unverified.
   permission gate, and workspace isolation on every mutating action (+ analytics
   read isolation). What remains untested on those actions is their *business
   logic* (position math, lifecycle transitions, payload shaping).
-- **Largest gaps (highest risk first):** the full RBAC allow/deny matrix
-  (US-007), Server Action business logic, real-time emitters, notifications, and
-  every React component.
+- **Now proven (US-007):** the full RBAC role × action allow/deny matrix against
+  the real `admin`/`editor`/`viewer` roles, the board-page UI map's agreement
+  with it, and the US-006 harness copy's fidelity to it.
+- **Largest gaps (highest risk first):** Server Action business logic, real-time
+  emitters, notifications, and every React component.
 
 ## Evidence Rules
 
