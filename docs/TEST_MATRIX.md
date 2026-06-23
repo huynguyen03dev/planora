@@ -29,16 +29,17 @@ removed). Component and browser flows are currently unverified.
 | DnD position math + reference preservation (`translate*Drop`) | yes | n/a | no | implemented | `lib/dnd/apply-drop.test.ts` (15 cases) |
 | Analytics engine (burndown, lead time, overdue, reopen, coverage) | no | yes | no | implemented | `lib/analytics/engine.test.ts` (3 cases) |
 | Analytics CSV export + escaping | no | yes | no | implemented | `tests/analytics-export.test.ts` (2 cases) |
-| Board CRUD (create/update/delete/archive) | no | no | no | planned | actions in `boards/actions.ts` untested |
-| List CRUD + reorder + isDone toggle | no | no | no | planned | `lib/list.ts`, `boards/[boardId]/actions.ts` untested |
-| Card CRUD / move / archive / details / estimate / due date | no | no | no | planned | `lib/card.ts` (679 lines) untested |
-| Card members assign/remove | no | no | no | planned | `lib/card-member.ts` untested |
+| Server Action security boundary: auth + permission gate + workspace isolation on every mutation (US-006) | yes | partial | no | implemented | `tests/server-actions/{board,list-card,workspace,analytics-read}.test.ts` — 118 cases (A1 auth / A2 permission / A3 isolation + positive control) over 26 mutating + 2 read actions, incl. `moveCardAction` cross-workspace rejection. Sabotage-verified: removing a gate turns A2/A3 red. |
+| Board CRUD (create/update/delete/archive) | no | partial | no | planned | Security boundary proven (US-006, `board.test.ts`); business logic still unit-untested. |
+| List CRUD + reorder + isDone toggle | no | partial | no | planned | Security boundary proven (US-006, `list-card.test.ts`); business logic still unit-untested. |
+| Card CRUD / move / archive / details / estimate / due date | no | partial | no | planned | Security boundary proven (US-006, `list-card.test.ts`); business logic (incl. position/lifecycle math in actions) still unit-untested. |
+| Card members assign/remove | no | partial | no | planned | Security boundary proven (US-006, `list-card.test.ts`); business logic still unit-untested. |
 | Card labels: schema + data layer (CRUD, attach dedupe, detach) | yes | partial | no | implemented | `lib/schemas/label.test.ts` (8), `lib/label.test.ts` (6). Action permission gating (US-005) not yet integration-tested. |
 | Card labels: board-store `card:labels-updated` (apply / ref-preserve / self-echo dedupe / scope) | yes | partial | manual | implemented | `tests/board-store.test.ts` (5 label cases). Card-face chips + attach/detach realtime verified manually in browser (US-005 slice 2). |
-| Comments | no | no | no | planned | `lib/comment.ts` untested |
-| Attachments (Cloudinary upload/cleanup) | no | no | no | planned | `lib/attachment.ts` untested |
-| Auth / session / RBAC (admin/editor/viewer) | no | no | no | planned | `lib/auth.ts`, `lib/permissions.ts`, `lib/authorization.ts` untested |
-| Workspaces + invitations (email) | no | no | no | planned | `lib/workspace.ts`, `lib/invitation*.ts` untested |
+| Comments | no | partial | no | planned | Security boundary proven (US-006, `list-card.test.ts`: viewer may comment, non-member cannot); `lib/comment.ts` business logic untested. |
+| Attachments (Cloudinary upload/cleanup) | no | partial | no | planned | Security boundary proven (US-006, `list-card.test.ts`: denied callers never reach upload/write); upload/cleanup logic untested. |
+| Auth / session / RBAC (admin/editor/viewer) | no | partial | no | planned | Permission gate is exercised per mutation (US-006); the full role-by-role allow/deny matrix is US-007. `lib/auth.ts` unit-untested. |
+| Workspaces + invitations (email) | no | partial | no | planned | Settings + invite security boundary proven (US-006, `workspace.test.ts`); invite/email + `lib/workspace.ts` business logic untested. |
 | Notifications (in-app + email + socket) | no | no | no | planned | `lib/notification*.ts` untested |
 | Real-time sync (socket server/client/emitters) | no | no | no | planned | `lib/realtime/*` untested |
 | Activity audit log | no | no | no | planned | `lib/activity.ts` untested |
@@ -48,9 +49,13 @@ removed). Component and browser flows are currently unverified.
 
 - **Well-proven:** the pure/computational core — card-history event derivation,
   DnD position math, Zustand reconciliation, analytics computation + export.
-- **Largest gaps (highest risk first):** Server Actions for board/list/card CRUD
-  (the mutation boundary, ~2,800 lines), auth/RBAC, real-time emitters,
-  notifications, and every React component.
+- **Now proven (US-006):** the Server Action *security boundary* — auth,
+  permission gate, and workspace isolation on every mutating action (+ analytics
+  read isolation). What remains untested on those actions is their *business
+  logic* (position math, lifecycle transitions, payload shaping).
+- **Largest gaps (highest risk first):** the full RBAC allow/deny matrix
+  (US-007), Server Action business logic, real-time emitters, notifications, and
+  every React component.
 
 ## Evidence Rules
 
