@@ -6,9 +6,9 @@ tests or validation evidence exist.
 
 Runner: **Vitest 2** (node env). Commands: `npm test` (run once),
 `npm run test:watch`. Includes `lib/**/*.test.ts` and `tests/**/*.test.ts`.
-There is **no** React Testing Library, no E2E (Playwright), and **no CI test
-step** yet (`.github/workflows/` only runs OpenCode review). Component and
-browser flows are currently unverified.
+There is **no** React Testing Library, no E2E (Playwright), and **no CI at all**
+yet (`.github/workflows/` has no jobs — the OpenCode review/agent workflows were
+removed). Component and browser flows are currently unverified.
 
 ## Status Values
 
