@@ -71,3 +71,7 @@ removed). Component and browser flows are currently unverified.
 - New Server Actions are the priority for new tests: they enforce auth,
   permission, workspace isolation, and Zod validation — the security-critical
   boundary.
+- **CI gate (US-008):** `.github/workflows/ci.yml` runs `lint → tsc --noEmit →
+  npm test` on every PR/push into `dev`/`main`, so the proofs in this matrix run
+  automatically. The gate is advisory until added to branch protection as a
+  required status check.

@@ -1,0 +1,52 @@
+name: CI
+
+# Quality gate for the dev integration line and main release line.
+# Runs on every PR into dev/main and on pushes that land there, so a PR that
+# breaks lint, types, or tests cannot stay green. Pairs with the US-006/US-007
+# security + RBAC suites — this is what gives them teeth on every change.
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+
+# A newer push to the same branch/PR cancels the in-flight run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: lint · typecheck · test
+    runs-on: ubuntu-latest
+    env:
+      # No real database is needed: lib/prisma builds its adapter lazily and
+      # every DB-touching test mocks @/lib/prisma. A syntactically valid URL is
+      # enough for `prisma generate` and for module load at test time.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The Prisma client is generated to app/generated/prisma/ (gitignored), so
+      # typecheck and tests need it present before they run.
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npm test
