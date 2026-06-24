@@ -100,6 +100,8 @@ type BoardStore = {
   socketConnected: boolean;
   isDragging: boolean;
   pendingResync: boolean;
+  /** Client-only view filter: card label ids to keep visible (OR). Empty = show all. */
+  filterLabelIds: string[];
 
   setBoardId: (boardId: string) => void;
   setLists: (lists: ListWithCards[]) => void;
@@ -109,6 +111,8 @@ type BoardStore = {
   setDragging: (dragging: boolean) => void;
   markResyncPending: () => void;
   consumeResync: () => boolean;
+  toggleLabelFilter: (labelId: string) => void;
+  clearFilters: () => void;
   reset: () => void;
 
   applyRemoteCardMoved: (payload: CardMovedPayload) => void;
@@ -132,6 +136,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
   socketConnected: false,
   isDragging: false,
   pendingResync: false,
+  filterLabelIds: [],
 
   setBoardId: (boardId) => set({ boardId }),
 
@@ -161,6 +166,16 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     return pending;
   },
 
+  // View-only label filter (no server round-trip). Toggling a label adds/removes
+  // it from the keep-visible set; the board hides non-matching cards via CSS.
+  toggleLabelFilter: (labelId) => set((state) => ({
+    filterLabelIds: state.filterLabelIds.includes(labelId)
+      ? state.filterLabelIds.filter((id) => id !== labelId)
+      : [...state.filterLabelIds, labelId],
+  })),
+
+  clearFilters: () => set({ filterLabelIds: [] }),
+
   reset: () => set({
     boardId: null,
     lists: [],
@@ -169,6 +184,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     socketConnected: false,
     isDragging: false,
     pendingResync: false,
+    filterLabelIds: [],
   }),
 
   applyRemoteCardMoved: (payload) => {

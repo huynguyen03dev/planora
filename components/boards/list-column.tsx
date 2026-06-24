@@ -11,6 +11,7 @@ import {
   updateListIsDoneAction,
   deleteListAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
+import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
 import { ListCardItem } from "@/components/boards/list-card-item";
 import { useInlineTitleEditor } from "@/components/boards/use-inline-title-editor";
 import {
@@ -34,6 +35,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
+import { cardMatchesFilter } from "@/lib/board-filter";
 import { cn } from "@/lib/utils";
 
 type ListColumnProps = {
@@ -73,6 +75,16 @@ function ListColumnComponent({
   canSortCards,
   onOpenCard,
 }: ListColumnProps) {
+  // Client-only label filter. Cards are HIDDEN (not removed) when they don't
+  // match, so @hello-pangea/dnd's index space stays aligned with the store's
+  // `cards` array and drop positions are never corrupted (see lib/dnd/apply-drop).
+  const filterLabelIds = useBoardStore((s) => s.filterLabelIds);
+  const filter = { labelIds: filterLabelIds };
+  const filterActive = filterLabelIds.length > 0;
+  const visibleCount = filterActive
+    ? list.cards.filter((card) => cardMatchesFilter(card, filter)).length
+    : list.cards.length;
+
   const [newCardTitle, setNewCardTitle] = useState("");
   const [addCardExpanded, setAddCardExpanded] = useState(false);
   const [addCardError, setAddCardError] = useState("");
@@ -327,10 +339,16 @@ function ListColumnComponent({
                         canEdit={canEditCard}
                         canArchive={canArchiveCard}
                         canDrag={canSortCards}
+                        hidden={filterActive && !cardMatchesFilter(card, filter)}
                         onOpenCard={onOpenCard}
                       />
                     ))}
                   </div>
+                  {filterActive && list.cards.length > 0 && visibleCount === 0 ? (
+                    <p className="px-1 py-2 text-xs text-muted-foreground">
+                      No cards match the filter
+                    </p>
+                  ) : null}
                   {dropProvided.placeholder}
                 </div>
               )}

@@ -37,6 +37,9 @@ type ListCardItemProps = {
   canEdit: boolean;
   canArchive: boolean;
   canDrag: boolean;
+  /** Hidden by the board filter. Stays mounted (CSS display:none) so the
+   *  Draggable keeps its index — removing it would corrupt drop positions. */
+  hidden?: boolean;
   onOpenCard: (cardId: string) => void;
 };
 
@@ -46,6 +49,7 @@ function ListCardItemComponent({
   canEdit,
   canArchive,
   canDrag,
+  hidden = false,
   onOpenCard,
 }: ListCardItemProps) {
   const [error, setError] = useState("");
@@ -79,7 +83,11 @@ function ListCardItemComponent({
           <div
             ref={provided.innerRef}
             {...provided.draggableProps}
-            style={provided.draggableProps.style}
+            style={{
+              ...provided.draggableProps.style,
+              ...(hidden ? { display: "none" } : null),
+            }}
+            aria-hidden={hidden || undefined}
           >
             <Card
               size="sm"

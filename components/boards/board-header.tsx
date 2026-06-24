@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { updateBoardAction } from "@/app/(authenticated)/(dashboard)/boards/actions";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
+import { BoardFilter } from "@/components/boards/board-filter";
 import { BoardMenu } from "@/components/boards/board-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -168,6 +169,8 @@ export function BoardHeader({ board, canEdit, canDelete }: BoardHeaderProps) {
           >
             *
           </Button>
+
+          <BoardFilter />
 
           <BoardMenu board={board} canEdit={canEdit} canDelete={canDelete} />
         </div>
