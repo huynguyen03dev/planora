@@ -22,6 +22,7 @@ import {
   removeCardLabel,
   getLabelWithBoard,
   getCardLabels,
+  getCardIdsWithLabel,
 } from "@/lib/label";
 import {
   createList,
@@ -1642,6 +1643,26 @@ function firstFieldError(error: { flatten: () => { fieldErrors: Record<string, s
   return Object.values(error.flatten().fieldErrors)[0]?.[0] ?? "Validation failed";
 }
 
+/**
+ * Broadcast a label-set change to every affected card on a board. A label
+ * rename/recolor/delete touches the denormalized label snapshot on each card
+ * carrying it, so we re-emit the existing in-place `card:labels-updated` event
+ * (the same one attach/detach uses) once per affected card with its current
+ * label set. O(N) in the cards carrying the label — fine at board scale, and it
+ * reuses the proven live-apply reducer rather than introducing a new event type
+ * (US-010). For a delete, pass the card ids captured BEFORE the row cascade and
+ * call after the delete commits, so each re-read reflects the removed label.
+ */
+async function broadcastLabelChange(boardId: string, cardIds: string[]): Promise<void> {
+  for (const cardId of cardIds) {
+    const labels = await getCardLabels(cardId);
+    emitCardLabelsUpdated(boardId, {
+      cardId,
+      labels: labels.map((label) => ({ id: label.id, name: label.name, color: label.color })),
+    });
+  }
+}
+
 export async function createLabelAction(
   formData: FormData,
 ): Promise<CreateLabelResult> {
@@ -1700,6 +1721,10 @@ export async function updateLabelAction(
 
   try {
     const updated = await updateLabel(labelId, { name, color });
+    // The renamed/recolored label is still attached to the same cards; refresh
+    // each card's chip snapshot live on every observer (US-010).
+    const affectedCardIds = await getCardIdsWithLabel(labelId);
+    await broadcastLabelChange(label.boardId, affectedCardIds);
     revalidatePath(`/boards/${label.boardId}`);
     return { success: true, label: updated };
   } catch (error) {
@@ -1732,7 +1757,13 @@ export async function deleteLabelAction(
   }
 
   try {
+    // Capture affected cards BEFORE the delete — the CardLabel rows cascade away
+    // with the label, so afterwards we could not learn which cards to refresh.
+    const affectedCardIds = await getCardIdsWithLabel(labelId);
     await deleteLabel(labelId);
+    // Each re-read now returns the card's label set minus the deleted label, so
+    // the chip disappears live on every observer (US-010).
+    await broadcastLabelChange(label.boardId, affectedCardIds);
     revalidatePath(`/boards/${label.boardId}`);
     return { success: true };
   } catch (error) {

@@ -83,6 +83,34 @@ export async function getCardListId(cardId: string): Promise<string | undefined>
   return rows[0]?.listId;
 }
 
+/**
+ * Seed a board label directly (arrange step, not under test) and return its id.
+ * The label-CRUD *realtime* propagation is what the spec proves; getting a label
+ * onto the board is a precondition, so we insert it rather than drive the create
+ * UI. Mirrors the `label` @@map columns in prisma/schema.prisma.
+ */
+export async function addLabel(
+  boardId: string,
+  name: string,
+  color: string,
+): Promise<string> {
+  const id = randomUUID();
+  await pool().query(
+    `INSERT INTO "label" (id, "boardId", name, color, "createdAt")
+     VALUES ($1, $2, $3, $4, now())`,
+    [id, boardId, name, color],
+  );
+  return id;
+}
+
+/** Attach a seeded label to a card directly (arrange step, not under test). */
+export async function attachLabel(cardId: string, labelId: string): Promise<void> {
+  await pool().query(
+    `INSERT INTO "cardLabel" ("cardId", "labelId") VALUES ($1, $2)`,
+    [cardId, labelId],
+  );
+}
+
 /** Insert a workspace membership directly (arrange step, not under test). */
 export async function addWorkspaceMember(
   organizationId: string,

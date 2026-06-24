@@ -166,6 +166,43 @@ export async function renameOpenCard(page: Page, newTitle: string): Promise<void
   await expect(save).toBeDisabled();
 }
 
+// ── Label management (in the open card detail sheet) ──────────────────────
+// Label-set CRUD lives in the card detail sheet's "Board labels" list
+// (card-labels-section.tsx): each label is an <li> with Edit / Delete controls.
+// Driving rename/delete here exercises the real updateLabelAction /
+// deleteLabelAction — the Server Actions whose realtime emit US-010 adds.
+
+/** The board-labels list row for a label, scoped by its current name. */
+function boardLabelRow(page: Page, labelName: string) {
+  return page.locator("li").filter({ hasText: labelName });
+}
+
+/**
+ * Rename a board label via the open card detail sheet: Edit → fill name → Save.
+ * Resolves once the editor has closed (the action resolved and router.refresh
+ * reseeded the sheet), i.e. the `card:labels-updated` fan-out has been emitted.
+ */
+export async function renameBoardLabel(
+  page: Page,
+  currentName: string,
+  newName: string,
+): Promise<void> {
+  await boardLabelRow(page, currentName).getByRole("button", { name: /^edit$/i }).click();
+  const nameInput = page.getByPlaceholder("Label name");
+  await nameInput.fill(newName);
+  await page.getByRole("button", { name: /^save$/i }).click();
+  await expect(nameInput).toHaveCount(0);
+}
+
+/**
+ * Delete a board label via the open card detail sheet. Resolves once the label
+ * row is gone (the delete resolved), i.e. the fan-out has been emitted.
+ */
+export async function deleteBoardLabel(page: Page, name: string): Promise<void> {
+  await boardLabelRow(page, name).getByRole("button", { name: /^delete$/i }).click();
+  await expect(boardLabelRow(page, name)).toHaveCount(0);
+}
+
 // ── List/card scoping locators (strict, id-based) ─────────────────────────
 
 /** A list column root, scoped by list id (the column is draggable under that id). */
