@@ -4,11 +4,13 @@ This file maps Planora product behavior to proof. It reflects the **actual**
 state of the test suite, not aspiration. Do not mark a row `implemented` until
 tests or validation evidence exist.
 
-Runner: **Vitest 2** (node env). Commands: `npm test` (run once),
-`npm run test:watch`. Includes `lib/**/*.test.ts` and `tests/**/*.test.ts`.
-There is **no** React Testing Library, no E2E (Playwright), and **no CI at all**
-yet (`.github/workflows/` has no jobs — the OpenCode review/agent workflows were
-removed). Component and browser flows are currently unverified.
+Unit/integration runner: **Vitest 2** (node env). Commands: `npm test` (run
+once), `npm run test:watch`. Includes `lib/**/*.test.ts` and `tests/**/*.test.ts`
+(excludes `e2e/**`). E2E runner: **Playwright** (`npm run test:e2e`, `e2e/**`),
+added in US-009 — a two-client realtime harness, chromium. **CI** runs the
+unit/integration gate (`ci.yml`, US-008, required-eligible) and the E2E suite
+(`e2e.yml`, US-009, separate non-blocking). There is still **no** React Testing
+Library; most React component internals remain unverified.
 
 ## Status Values
 
@@ -42,7 +44,7 @@ removed). Component and browser flows are currently unverified.
 | Auth / session / RBAC (admin/editor/viewer) | yes | partial | no | implemented | Per-mutation gate proven (US-006); full role × action allow/deny matrix proven against the real roles (US-007, `rbac-matrix.test.ts`). `lib/auth.ts` session/login plumbing still unit-untested. |
 | Workspaces + invitations (email) | no | partial | no | planned | Settings + invite security boundary proven (US-006, `workspace.test.ts`); invite/email + `lib/workspace.ts` business logic untested. |
 | Notifications (in-app + email + socket) | no | no | no | planned | `lib/notification*.ts` untested |
-| Real-time sync (socket server/client/emitters) | no | no | no | planned | `lib/realtime/*` untested |
+| Real-time sync (socket server/client/emitters) | no | partial | yes | implemented | Wire proven end-to-end, two browser contexts on one board, against real `server.ts` + Postgres. US-009 slice 1 (`e2e/realtime-card-create.spec.ts`): A creates a card → B sees it live. Slice 2 (`e2e/realtime-card-move.spec.ts`): A drags a card across lists (keyboard sensor) → B sees it relocate live; and the **drag-defer invariant** — a remote structural event (archive) is deferred while B is mid-drag, then reconciled on drop (live-rename delivery barrier + socket in-order delivery make it deterministic). Each sabotage-verified (`emitCardCreated`/`emitCardMoved` off; `isDragging` guard removed). Pending: label/comment propagation, list reorder. |
 | Activity audit log | no | no | no | planned | `lib/activity.ts` untested |
 | All React components (board UI, card sheet, dashboards) | no | no | no | planned | no component tests configured |
 
@@ -65,8 +67,11 @@ removed). Component and browser flows are currently unverified.
 - Unit proof covers pure domain/application rules (`lib/dnd`, `lib/card-history`).
 - Integration proof covers Server Actions, DB writes, and provider behavior
   (use Prisma mocks via `vi.mock("@/lib/prisma")` as the existing tests do).
-- E2E proof covers user-visible browser flows — **none configured yet**; adding
-  Playwright is a high-value follow-up given the drag-and-drop UX.
+- E2E proof covers user-visible browser flows via **Playwright** (`e2e/**`,
+  `npm run test:e2e`), introduced in US-009. Proven: two-client realtime
+  card-create (slice 1), card-move across lists, and the drag-aware deferral
+  invariant (slice 2). Card drags are driven with the keyboard sensor —
+  `@hello-pangea/dnd` ignores synthetic pointer/CDP drags.
 - A story can ship without every proof column if its packet explains why.
 - New Server Actions are the priority for new tests: they enforce auth,
   permission, workspace isolation, and Zod validation — the security-critical

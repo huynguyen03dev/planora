@@ -96,6 +96,32 @@ moves always apply. Mirrors the existing id-based dedupe in
 The drag-aware deferral invariant above is unchanged: `card:moved` / `list:moved`
 remain structural and are deferred during a local drag.
 
+## Proof
+
+The store reducer (remote-apply, drag-defer, self-echo dedupe) is unit-proven
+against synthetic events in `tests/board-store.test.ts`. The **wire itself** —
+socket connect → `board:join` room → Server Action emit → broadcast → client
+apply — is proven end-to-end by US-009 against the real `server.ts` (Next +
+Socket.io) and Postgres, with two real browser users on one board:
+
+- **Card create** (`e2e/realtime-card-create.spec.ts`, slice 1): a card created
+  by one user appears live for the other with no reload. Sabotage-verified —
+  neutralizing `emitCardCreated` turns it red.
+- **Card move** (`e2e/realtime-card-move.spec.ts`, slice 2): a card dragged
+  across lists by one user (keyboard sensor — `@hello-pangea/dnd` ignores
+  synthetic pointer drags) relocates live on the other's board. Sabotage-verified
+  via `emitCardMoved`.
+- **Drag-aware deferral** (same spec, slice 2): the critical invariant — while
+  one user holds a card mid-drag, a structural remote event (an archive) is
+  *deferred* rather than applied to the list array, then reconciled on drop via
+  `router.refresh()`. A live-applied rename is used as a deterministic delivery
+  barrier (so the deferral assertion isn't timing-based), and socket in-order
+  delivery pins archive-before-rename. Sabotage-verified — removing the
+  `isDragging` guard makes the archive apply mid-drag and turns it red.
+
+Remaining slices (label/comment propagation, list reorder) still have
+single-client unit proof only.
+
 ## Notification & analytics signals
 
 - `emitNotificationNew(userId, payload)` pushes to the user's room — the bell

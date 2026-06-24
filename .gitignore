@@ -66,3 +66,9 @@ scripts/bin/harness-cli.exe
 
 # Superpowers brainstorm artifacts (no longer used)
 .superpowers/
+
+# Playwright (E2E)
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
