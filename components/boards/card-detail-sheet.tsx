@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { CardAttachments } from "@/components/boards/card-attachments";
+import { CardChecklistsSection, type ChecklistData } from "@/components/boards/card-checklists-section";
 import { CardLabelsSection, type LabelChip } from "@/components/boards/card-labels-section";
 import type { CardDetailRecord } from "@/lib/card";
 import type { CommentRecord } from "@/lib/comment";
@@ -63,6 +64,7 @@ type CardDetailSheetProps = {
   boardId: string;
   boardLabels: LabelChip[];
   cardLabelIds: string[];
+  checklists: ChecklistData[];
   canEdit: boolean;
   canComment: boolean;
 };
@@ -78,6 +80,7 @@ export function CardDetailSheet({
   boardId,
   boardLabels,
   cardLabelIds,
+  checklists,
   canEdit,
   canComment,
 }: CardDetailSheetProps) {
@@ -146,6 +149,7 @@ export function CardDetailSheet({
           boardId={boardId}
           boardLabels={boardLabels}
           cardLabelIds={cardLabelIds}
+          checklists={checklists}
           canEdit={canEdit}
           canComment={canComment}
         />
@@ -167,6 +171,7 @@ type CardDetailDialogBodyProps = {
   boardId: string;
   boardLabels: LabelChip[];
   cardLabelIds: string[];
+  checklists: ChecklistData[];
   canEdit: boolean;
   canComment: boolean;
 };
@@ -181,6 +186,7 @@ function CardDetailDialogBody({
   boardId,
   boardLabels,
   cardLabelIds,
+  checklists,
   canEdit,
   canComment,
 }: CardDetailDialogBodyProps) {
@@ -378,7 +384,6 @@ function CardDetailDialogBody({
 
               <div className="flex flex-wrap gap-2">
                 <ActionChip label="Add" />
-                <ActionChip label="Checklist" />
                 <ActionChip label="Members" />
               </div>
             </section>
@@ -388,6 +393,12 @@ function CardDetailDialogBody({
               boardId={boardId}
               boardLabels={boardLabels}
               cardLabelIds={cardLabelIds}
+              canEdit={canEdit}
+            />
+
+            <CardChecklistsSection
+              cardId={card.id}
+              checklists={checklists}
               canEdit={canEdit}
             />
 

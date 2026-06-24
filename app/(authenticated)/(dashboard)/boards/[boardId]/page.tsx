@@ -23,6 +23,8 @@ import { getCardMembers, getAssignableWorkspaceMembers } from "@/lib/card-member
 import type { CardMemberRecord, AssignableWorkspaceMemberRecord } from "@/lib/card-member";
 import { getBoardLabels, getCardLabels } from "@/lib/label";
 import type { LabelRecord } from "@/lib/label";
+import { getCardChecklists } from "@/lib/checklist";
+import type { ChecklistWithItems } from "@/lib/checklist";
 
 type BoardPageProps = {
   params: Promise<{ boardId: string }>;
@@ -84,6 +86,7 @@ export default async function BoardPage({
   let assignees: CardMemberRecord[] = [];
   let assignableMembers: AssignableWorkspaceMemberRecord[] = [];
   let cardLabels: LabelRecord[] = [];
+  let checklists: ChecklistWithItems[] = [];
 
   // If a card ID is provided, load card details and related data
   if (selectedCardId) {
@@ -102,12 +105,14 @@ export default async function BoardPage({
         cardActivity,
         cardAssignees,
         cardLabelRecords,
+        cardChecklists,
       ] = await Promise.all([
         getCommentsByCardId(selectedCard.id),
         getAttachmentsByCardId(selectedCard.id),
         getActivityByCardId(selectedCard.id),
         getCardMembers(selectedCard.id),
         getCardLabels(selectedCard.id),
+        getCardChecklists(selectedCard.id),
       ]);
 
       comments = cardComments;
@@ -115,6 +120,7 @@ export default async function BoardPage({
       activity = cardActivity;
       assignees = cardAssignees;
       cardLabels = cardLabelRecords;
+      checklists = cardChecklists;
       
       // Load assignable members only if the current user can edit cards
       if (canEditCard) {
@@ -241,6 +247,7 @@ export default async function BoardPage({
           boardId={board.id}
           boardLabels={boardLabels}
           cardLabelIds={cardLabels.map((label) => label.id)}
+          checklists={checklists}
           canEdit={canEditCard}
           canComment={canComment}
         />
