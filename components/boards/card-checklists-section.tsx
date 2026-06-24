@@ -11,6 +11,7 @@ import {
   toggleChecklistItemAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
@@ -163,46 +164,38 @@ export function CardChecklistsSection({
               <ul className="space-y-1">
                 {checklist.items.map((item) => (
                   <li key={item.id} className="flex items-center gap-1">
-                    {/* The whole row toggles: wrapping the input in a <label> makes
-                        the text a click target too, not just the 16px box. */}
-                    <label
-                      className={cn(
-                        "flex flex-1 items-center gap-2 rounded px-1 py-1",
-                        canEdit && !isPending
-                          ? "cursor-pointer hover:bg-muted/60"
-                          : "cursor-default",
-                      )}
-                    >
-                      <input
-                        type="checkbox"
+                    {/* shadcn Checkbox + an htmlFor-linked label, so clicking the
+                        item text toggles it too — not just the box. */}
+                    <div className="flex flex-1 items-center gap-2 rounded px-1 py-1 hover:bg-muted/60">
+                      <Checkbox
+                        id={`checklist-item-${item.id}`}
                         checked={item.isCompleted}
                         disabled={!canEdit || isPending}
-                        onChange={() => toggleItem(item.id, item.isCompleted)}
-                        aria-label={item.title}
-                        className={cn(
-                          "size-5 shrink-0 rounded border-input accent-primary",
-                          canEdit && !isPending && "cursor-pointer",
-                        )}
+                        onCheckedChange={() => toggleItem(item.id, item.isCompleted)}
                       />
-                      <span
+                      <label
+                        htmlFor={`checklist-item-${item.id}`}
                         className={cn(
                           "flex-1 text-sm",
+                          canEdit && !isPending ? "cursor-pointer" : "cursor-default",
                           item.isCompleted && "text-muted-foreground line-through",
                         )}
                       >
                         {item.title}
-                      </span>
-                    </label>
+                      </label>
+                    </div>
                     {canEdit ? (
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="icon-sm"
                         aria-label={`Delete ${item.title}`}
-                        className="shrink-0 rounded px-1.5 text-lg leading-none text-muted-foreground hover:text-destructive disabled:opacity-50"
+                        className="shrink-0 text-muted-foreground hover:text-destructive"
                         disabled={isPending}
                         onClick={() => removeItem(item.id)}
                       >
                         ×
-                      </button>
+                      </Button>
                     ) : null}
                   </li>
                 ))}

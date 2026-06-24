@@ -126,10 +126,9 @@ locations.
     "created this checklist"**.
   - Add item "Write unit tests" → `0/1`, checkbox + delete present.
   - Toggle complete → checkbox checked, `1/1`, line-through; **no activity spam**
-    (item toggles don't log, as designed). The whole item row is the toggle
-    target (the `<input>` is wrapped in a `<label>`), not just the 16px box, and
-    the checkbox is `size-5` with `accent-primary` — verified by toggling via a
-    click on the item *text*.
+    (item toggles don't log, as designed). The control is the shadcn `Checkbox`
+    (added via `npx shadcn add checkbox`) with an `htmlFor`-linked label, so the
+    whole row toggles — verified by toggling via a click on the item *text*.
   - Delete item → `0/0`, "No items yet."
   - Delete checklist → "No checklists yet."; activity log records "deleted this
     checklist". Each step persisted through the real Server Action → Prisma →
