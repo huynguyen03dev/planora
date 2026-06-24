@@ -101,13 +101,26 @@ remain structural and are deferred during a local drag.
 The store reducer (remote-apply, drag-defer, self-echo dedupe) is unit-proven
 against synthetic events in `tests/board-store.test.ts`. The **wire itself** —
 socket connect → `board:join` room → Server Action emit → broadcast → client
-apply — is proven end-to-end for card creation by US-009
-(`e2e/realtime-card-create.spec.ts`): two real users on one board, a card created
-by one appears live for the other with no reload, run against the real
-`server.ts` (Next + Socket.io) and Postgres. Sabotage-verified — neutralizing
-`emitCardCreated` turns it red. Remaining slices (DnD/`card:moved` with the
-drag-defer invariant, label/comment propagation) still have single-client unit
-proof only.
+apply — is proven end-to-end by US-009 against the real `server.ts` (Next +
+Socket.io) and Postgres, with two real browser users on one board:
+
+- **Card create** (`e2e/realtime-card-create.spec.ts`, slice 1): a card created
+  by one user appears live for the other with no reload. Sabotage-verified —
+  neutralizing `emitCardCreated` turns it red.
+- **Card move** (`e2e/realtime-card-move.spec.ts`, slice 2): a card dragged
+  across lists by one user (keyboard sensor — `@hello-pangea/dnd` ignores
+  synthetic pointer drags) relocates live on the other's board. Sabotage-verified
+  via `emitCardMoved`.
+- **Drag-aware deferral** (same spec, slice 2): the critical invariant — while
+  one user holds a card mid-drag, a structural remote event (an archive) is
+  *deferred* rather than applied to the list array, then reconciled on drop via
+  `router.refresh()`. A live-applied rename is used as a deterministic delivery
+  barrier (so the deferral assertion isn't timing-based), and socket in-order
+  delivery pins archive-before-rename. Sabotage-verified — removing the
+  `isDragging` guard makes the archive apply mid-drag and turns it red.
+
+Remaining slices (label/comment propagation, list reorder) still have
+single-client unit proof only.
 
 ## Notification & analytics signals
 

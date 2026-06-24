@@ -55,3 +55,125 @@ export async function addCard(page: Page, title: string): Promise<void> {
   await page.getByPlaceholder("Enter card title...").fill(title);
   await page.getByRole("button", { name: /^add card$/i }).click();
 }
+
+/**
+ * Add a card to a specific list's composer. The list is scoped by its id via
+ * the column's `data-rfd-draggable-id` (a list column is draggable under id =
+ * list.id), so this is unambiguous even with several same-named buttons around.
+ */
+export async function addCardToList(page: Page, listId: string, cardTitle: string): Promise<void> {
+  const column = listColumnById(page, listId);
+  await column.getByRole("button", { name: /add a card/i }).click();
+  await column.getByPlaceholder("Enter card title...").fill(cardTitle);
+  await column.getByRole("button", { name: /^add card$/i }).click();
+  await expect(cardInListById(page, listId, cardTitle)).toBeVisible();
+}
+
+// ── Keyboard drag-and-drop ────────────────────────────────────────────────
+// @hello-pangea/dnd's pointer/CDP drag does NOT engage the sensor; the keyboard
+// sensor does. Each step is gated on the library's own `aria-live` announcement
+// (a visually-hidden `[id^="rfd-announcement-"]` region), which is the
+// deterministic signal that the lift/move/drop actually took effect — far less
+// flaky than fixed waits.
+
+/** The board's @hello-pangea/dnd screen-reader announcement region. */
+function announcement(page: Page) {
+  return page.locator('[id^="rfd-announcement-"]').first();
+}
+
+/**
+ * Focus a card's drag handle and lift it (Space). Resolves once lifted.
+ *
+ * `bringToFront()` first: the @hello-pangea/dnd keyboard sensor only engages the
+ * Space keydown when the page is the active one. Even then, a page that has just
+ * come to the foreground can swallow its very first Space, so we retry — but
+ * only re-press while the live region shows the card is NOT yet lifted, so a
+ * lift that landed is never accidentally dropped by a second Space.
+ */
+export async function liftCard(page: Page, cardId: string): Promise<void> {
+  await page.bringToFront();
+  const handle = page.locator(`[data-rfd-drag-handle-draggable-id="${cardId}"]`);
+  const region = announcement(page);
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (/lifted an item/i.test((await region.textContent()) ?? "")) return;
+    await handle.focus();
+    await page.keyboard.press("Space");
+    try {
+      await expect(region).toContainText(/lifted an item/i, { timeout: 1500 });
+      return;
+    } catch {
+      // Foreground not settled yet — the press was swallowed; loop and retry.
+    }
+  }
+  throw new Error(`liftCard: keyboard lift never engaged for card ${cardId}`);
+}
+
+/** Move a lifted card one step in a direction (across lists with Left/Right). */
+export async function moveLifted(
+  page: Page,
+  key: "ArrowRight" | "ArrowLeft" | "ArrowUp" | "ArrowDown",
+): Promise<void> {
+  await page.keyboard.press(key);
+  await expect(announcement(page)).toContainText(/moved the item/i, { timeout: 10_000 });
+}
+
+/** Drop the currently-lifted card (Space). Resolves once dropped. */
+export async function dropCard(page: Page): Promise<void> {
+  await page.keyboard.press("Space");
+  await expect(announcement(page)).toContainText(/dropped the item/i, { timeout: 10_000 });
+}
+
+/** Lift a card, move it into the adjacent list to the right, and drop it. */
+export async function dragCardToNextList(page: Page, cardId: string): Promise<void> {
+  await liftCard(page, cardId);
+  await moveLifted(page, "ArrowRight");
+  await dropCard(page);
+}
+
+/**
+ * Archive a card via its actions menu (mouse only — no keyboard sensor, so it
+ * never disturbs another page's in-flight keyboard drag). Scoped to the card by
+ * id via the draggable wrapper. Emits a structural `card:archived`.
+ */
+export async function archiveCard(page: Page, cardId: string): Promise<void> {
+  await page
+    .locator(`[data-rfd-draggable-id="${cardId}"]`)
+    .getByRole("button", { name: "Card actions" })
+    .click();
+  await page.getByRole("menuitem", { name: /archive/i }).click();
+  await page.getByRole("button", { name: /archive card/i }).click();
+}
+
+// ── Card detail / rename ──────────────────────────────────────────────────
+
+/** Open a card's detail sheet by clicking its title button. */
+export async function openCardDetail(page: Page, title: string): Promise<void> {
+  await page.getByRole("button", { name: title, exact: true }).first().click();
+  await expect(page.locator("#card-detail-title")).toBeVisible();
+}
+
+/**
+ * Rename the card whose detail sheet is open and save. Resolves once the save
+ * action has resolved (button back to "Save changes" and disabled because the
+ * draft now matches the persisted title) — i.e. the `card:updated` emit fired.
+ */
+export async function renameOpenCard(page: Page, newTitle: string): Promise<void> {
+  await page.locator("#card-detail-title").fill(newTitle);
+  const save = page.getByRole("button", { name: /save changes/i });
+  await save.click();
+  await expect(save).toHaveText(/save changes/i);
+  await expect(save).toBeDisabled();
+}
+
+// ── List/card scoping locators (strict, id-based) ─────────────────────────
+
+/** A list column root, scoped by list id (the column is draggable under that id). */
+export function listColumnById(page: Page, listId: string) {
+  return page.locator(`[data-rfd-draggable-id="${listId}"]`);
+}
+
+/** A card by title, scoped to a specific list's droppable (by list id). */
+export function cardInListById(page: Page, listId: string, cardTitle: string) {
+  return page.locator(`[data-rfd-droppable-id="${listId}"]`).getByText(cardTitle, { exact: true });
+}
