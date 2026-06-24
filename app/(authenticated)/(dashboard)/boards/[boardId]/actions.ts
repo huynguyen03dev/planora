@@ -14,6 +14,17 @@ import {
 import { createComment } from "@/lib/comment";
 import { createAttachment } from "@/lib/attachment";
 import {
+  type ChecklistWithItems,
+  type ChecklistItemRecord,
+  getChecklistWithCard,
+  getChecklistItemWithCard,
+  createChecklist,
+  deleteChecklist,
+  createChecklistItem,
+  setChecklistItemCompleted,
+  deleteChecklistItem,
+} from "@/lib/checklist";
+import {
   type LabelRecord,
   createLabel,
   updateLabel,
@@ -75,6 +86,11 @@ import {
   deleteLabelSchema,
   addCardLabelSchema,
   removeCardLabelSchema,
+  createChecklistSchema,
+  deleteChecklistSchema,
+  createChecklistItemSchema,
+  toggleChecklistItemSchema,
+  deleteChecklistItemSchema,
 } from "@/lib/schemas";
 import {
   buildCardArchivedEvent,
@@ -1865,5 +1881,213 @@ export async function removeCardLabelAction(
   } catch (error) {
     console.error("Failed to remove label from card:", error);
     return { success: false, error: "Failed to remove label. Please try again." };
+  }
+}
+
+/* ─── Checklist actions (card content; reuse card:["update"]) ──────────────
+ *
+ * Checklists are card content, like labels — they reuse the `card:["update"]`
+ * permission (viewer denied; editor/admin allowed), so there is no dedicated
+ * `checklist` permission statement. They render only in the card detail sheet,
+ * so slice 1 revalidates the board path rather than emitting a realtime event;
+ * cross-client live sync is a tracked follow-up. Rename + reorder are deferred
+ * (positions are float-gap assigned on create so they slot in later).
+ */
+
+type CreateChecklistResult =
+  | { success: true; checklist: ChecklistWithItems }
+  | { success: false; error: string };
+
+type DeleteChecklistResult =
+  | { success: true }
+  | { success: false; error: string };
+
+type CreateChecklistItemResult =
+  | { success: true; item: ChecklistItemRecord }
+  | { success: false; error: string };
+
+type ToggleChecklistItemResult =
+  | { success: true; item: ChecklistItemRecord }
+  | { success: false; error: string };
+
+type DeleteChecklistItemResult =
+  | { success: true }
+  | { success: false; error: string };
+
+export async function createChecklistAction(
+  formData: FormData,
+): Promise<CreateChecklistResult> {
+  const parsed = createChecklistSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { success: false, error: firstFieldError(parsed.error) };
+  }
+
+  const { userId } = await verifySession();
+  const { cardId, title } = parsed.data;
+
+  const result = await getCardWithListAndBoard(cardId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(result.board.workspaceId, {
+    card: ["update"],
+  });
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  try {
+    const checklist = await createChecklist({ cardId, title });
+    await createActivityEntry({
+      workspaceId: result.board.workspaceId,
+      boardId: result.list.boardId,
+      cardId,
+      userId,
+      action: "CREATED",
+      entityType: "CHECKLIST",
+      metadata: { checklistId: checklist.id, title },
+    });
+    revalidatePath(`/boards/${result.list.boardId}`);
+    return { success: true, checklist };
+  } catch {
+    return { success: false, error: "Failed to create checklist. Please try again." };
+  }
+}
+
+export async function deleteChecklistAction(
+  formData: FormData,
+): Promise<DeleteChecklistResult> {
+  const parsed = deleteChecklistSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { success: false, error: firstFieldError(parsed.error) };
+  }
+
+  const { userId } = await verifySession();
+  const { checklistId } = parsed.data;
+
+  const scope = await getChecklistWithCard(checklistId);
+  if (!scope || scope.board.archivedAt || scope.cardArchived) {
+    return { success: false, error: "Checklist not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(scope.board.workspaceId, {
+    card: ["update"],
+  });
+  if (!canUpdateCard) {
+    return { success: false, error: "Checklist not found" };
+  }
+
+  try {
+    await deleteChecklist(checklistId);
+    await createActivityEntry({
+      workspaceId: scope.board.workspaceId,
+      boardId: scope.boardId,
+      cardId: scope.cardId,
+      userId,
+      action: "DELETED",
+      entityType: "CHECKLIST",
+      metadata: { checklistId },
+    });
+    revalidatePath(`/boards/${scope.boardId}`);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to delete checklist. Please try again." };
+  }
+}
+
+export async function createChecklistItemAction(
+  formData: FormData,
+): Promise<CreateChecklistItemResult> {
+  const parsed = createChecklistItemSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { success: false, error: firstFieldError(parsed.error) };
+  }
+
+  await verifySession();
+  const { checklistId, title } = parsed.data;
+
+  const scope = await getChecklistWithCard(checklistId);
+  if (!scope || scope.board.archivedAt || scope.cardArchived) {
+    return { success: false, error: "Checklist not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(scope.board.workspaceId, {
+    card: ["update"],
+  });
+  if (!canUpdateCard) {
+    return { success: false, error: "Checklist not found" };
+  }
+
+  try {
+    const item = await createChecklistItem({ checklistId, title });
+    revalidatePath(`/boards/${scope.boardId}`);
+    return { success: true, item };
+  } catch {
+    return { success: false, error: "Failed to add item. Please try again." };
+  }
+}
+
+export async function toggleChecklistItemAction(
+  formData: FormData,
+): Promise<ToggleChecklistItemResult> {
+  const parsed = toggleChecklistItemSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { success: false, error: firstFieldError(parsed.error) };
+  }
+
+  await verifySession();
+  const { itemId, isCompleted } = parsed.data;
+
+  const scope = await getChecklistItemWithCard(itemId);
+  if (!scope || scope.board.archivedAt || scope.cardArchived) {
+    return { success: false, error: "Item not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(scope.board.workspaceId, {
+    card: ["update"],
+  });
+  if (!canUpdateCard) {
+    return { success: false, error: "Item not found" };
+  }
+
+  try {
+    const item = await setChecklistItemCompleted(itemId, isCompleted);
+    revalidatePath(`/boards/${scope.boardId}`);
+    return { success: true, item };
+  } catch {
+    return { success: false, error: "Failed to update item. Please try again." };
+  }
+}
+
+export async function deleteChecklistItemAction(
+  formData: FormData,
+): Promise<DeleteChecklistItemResult> {
+  const parsed = deleteChecklistItemSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { success: false, error: firstFieldError(parsed.error) };
+  }
+
+  await verifySession();
+  const { itemId } = parsed.data;
+
+  const scope = await getChecklistItemWithCard(itemId);
+  if (!scope || scope.board.archivedAt || scope.cardArchived) {
+    return { success: false, error: "Item not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(scope.board.workspaceId, {
+    card: ["update"],
+  });
+  if (!canUpdateCard) {
+    return { success: false, error: "Item not found" };
+  }
+
+  try {
+    await deleteChecklistItem(itemId);
+    revalidatePath(`/boards/${scope.boardId}`);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to delete item. Please try again." };
   }
 }
