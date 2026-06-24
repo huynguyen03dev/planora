@@ -34,6 +34,7 @@ import {
 import { createActivityEntry } from "@/lib/activity";
 import {
   type CardMemberRecord,
+  getCardMembers,
 } from "@/lib/card-member";
 import { hasWorkspacePermission } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
@@ -48,6 +49,7 @@ import {
   emitCardUpdated,
   emitCardArchived,
   emitCardLabelsUpdated,
+  emitCardMembersUpdated,
   emitCommentCreated,
 } from "@/lib/realtime/server";
 import { notifyCardAssigned, notifyCommentOnCard } from "@/lib/notification";
@@ -1405,6 +1407,10 @@ export async function assignCardMemberAction(
     revalidatePath(`/boards/${cardResult.board.id}`);
     if (assignment.changed) {
       emitAnalyticsRefresh(cardResult.board.workspaceId);
+      // Live-broadcast the new assignee set so any board viewer with this card's
+      // detail sheet open updates without a reload (US-011). In-place / live.
+      const members = await getCardMembers(cardId);
+      emitCardMembersUpdated(cardResult.board.id, { cardId, members });
     }
     return {
       success: true,
@@ -1500,6 +1506,10 @@ export async function removeCardMemberAction(
     revalidatePath(`/boards/${cardResult.board.id}`);
     if (removal.changed) {
       emitAnalyticsRefresh(cardResult.board.workspaceId);
+      // Live-broadcast the trimmed assignee set so an open detail sheet on
+      // another client drops the member without a reload (US-011). In-place / live.
+      const members = await getCardMembers(cardId);
+      emitCardMembersUpdated(cardResult.board.id, { cardId, members });
     }
     return { success: true, changed: removal.changed };
   } catch (error) {

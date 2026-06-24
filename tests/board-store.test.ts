@@ -766,3 +766,109 @@ describe("applyRemoteCardLabelsUpdated", () => {
     expect(cardsIn("list-1").map((card) => card.id)).toEqual(["card-a", "card-c"]);
   });
 });
+
+describe("applyRemoteCardMembersUpdated", () => {
+  const ALICE = { id: "u-alice", name: "Alice", email: "alice@x", image: null };
+  const BOB = { id: "u-bob", name: "Bob", email: "bob@x", image: null };
+
+  beforeEach(() => {
+    useBoardStore.getState().reset();
+  });
+
+  function openCardWith(
+    assignees: Array<{ id: string; name: string; email: string; image: string | null }>,
+    assignableMembers: Array<{ id: string; name: string; email: string; image: string | null }>,
+  ) {
+    const selectedCard = { ...selectedCardFor("card-a", "Card A"), assignees, assignableMembers };
+    useBoardStore.setState({
+      boardId: "board-1",
+      lists: makeListsWithCards(),
+      selectedCardId: "card-a",
+      selectedCard,
+    });
+  }
+
+  it("adds a remotely-assigned member to the open card and drops them from the assignable pool", () => {
+    openCardWith([], [ALICE, BOB]);
+
+    useBoardStore.getState().applyRemoteCardMembersUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      members: [BOB],
+    });
+
+    const sel = useBoardStore.getState().selectedCard!;
+    expect(sel.assignees).toEqual([BOB]);
+    // BOB left the pool; ALICE remains assignable.
+    expect(sel.assignableMembers.map((m) => m.id)).toEqual(["u-alice"]);
+  });
+
+  it("returns a remotely-removed member to the assignable pool", () => {
+    openCardWith([BOB], [ALICE]);
+
+    useBoardStore.getState().applyRemoteCardMembersUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      members: [],
+    });
+
+    const sel = useBoardStore.getState().selectedCard!;
+    expect(sel.assignees).toEqual([]);
+    // BOB returns to the pool alongside ALICE (deduped, no duplicates).
+    expect(sel.assignableMembers.map((m) => m.id).sort()).toEqual(["u-alice", "u-bob"]);
+  });
+
+  it("self-echo dedupe: no-op when the assignee id set already matches (same ref kept)", () => {
+    openCardWith([BOB], [ALICE]);
+    const before = useBoardStore.getState().selectedCard;
+
+    useBoardStore.getState().applyRemoteCardMembersUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      members: [BOB],
+    });
+
+    expect(useBoardStore.getState().selectedCard).toBe(before);
+  });
+
+  it("is a no-op when the event targets a different card than the open one", () => {
+    openCardWith([], [ALICE, BOB]);
+
+    useBoardStore.getState().applyRemoteCardMembersUpdated({
+      boardId: "board-1",
+      cardId: "card-other",
+      members: [BOB],
+    });
+
+    expect(useBoardStore.getState().selectedCard!.assignees).toEqual([]);
+  });
+
+  it("is a no-op when no card detail is open", () => {
+    useBoardStore.setState({
+      boardId: "board-1",
+      lists: makeListsWithCards(),
+      selectedCardId: null,
+      selectedCard: null,
+    });
+
+    useBoardStore.getState().applyRemoteCardMembersUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      members: [BOB],
+    });
+
+    expect(useBoardStore.getState().selectedCard).toBeNull();
+  });
+
+  it("is a no-op when the payload boardId does not match", () => {
+    openCardWith([], [ALICE, BOB]);
+
+    useBoardStore.getState().applyRemoteCardMembersUpdated({
+      boardId: "board-2",
+      cardId: "card-a",
+      members: [BOB],
+    });
+
+    expect(useBoardStore.getState().selectedCard!.assignees).toEqual([]);
+  });
+});

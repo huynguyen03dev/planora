@@ -203,6 +203,39 @@ export async function deleteBoardLabel(page: Page, name: string): Promise<void> 
   await expect(boardLabelRow(page, name)).toHaveCount(0);
 }
 
+// ── Card members (in the open card detail sheet) ──────────────────────────
+// Members render ONLY in the card detail sheet (never on the card face), so the
+// realtime proof observes the open sheet. assignCardMemberAction /
+// removeCardMemberAction are the actions whose realtime emit US-011 adds.
+
+/** The "Members" section of the open card detail sheet. */
+export function cardMembersSection(page: Page) {
+  return page
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: "Members", exact: true }) });
+}
+
+/**
+ * Assigned-member "Remove" buttons in the open sheet — exactly one per assignee
+ * (editor-only; the "Add members" list uses name+email buttons, not "Remove").
+ * Count is therefore the live assignee count.
+ */
+export function assignedMemberRemoveButtons(page: Page) {
+  return cardMembersSection(page).getByRole("button", { name: /^remove$/i });
+}
+
+/** Assign a member to the open card via the "Add members" list, matched by name/email. */
+export async function assignMemberInOpenCard(page: Page, match: string | RegExp): Promise<void> {
+  await cardMembersSection(page)
+    .getByRole("button", { name: typeof match === "string" ? new RegExp(match) : match })
+    .click();
+}
+
+/** Remove the first assigned member from the open card (clicks their "Remove"). */
+export async function removeFirstMemberInOpenCard(page: Page): Promise<void> {
+  await assignedMemberRemoveButtons(page).first().click();
+}
+
 // ── List/card scoping locators (strict, id-based) ─────────────────────────
 
 /** A list column root, scoped by list id (the column is draggable under that id). */

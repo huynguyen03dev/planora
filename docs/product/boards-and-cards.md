@@ -41,7 +41,7 @@ carry rich metadata. All mutations are Server Actions under
 
 | Feature | Model | Action(s) | Notes |
 | --- | --- | --- | --- |
-| Assignees | `CardMember` | `assignCardMemberAction`, `removeCardMemberAction` | Workspace members only; assignment notifies + emails |
+| Assignees | `CardMember` | `assignCardMemberAction`, `removeCardMemberAction` | Workspace members only; assignment notifies + emails; assign/remove broadcast live via `card:members-updated` so an open card detail sheet on another client updates without reload (US-011). Members render in the detail sheet only, not the card face. |
 | Labels | `Label` / `CardLabel` | `createLabelAction`, `updateLabelAction`, `deleteLabelAction`, `addCardLabelAction`, `removeCardLabelAction` | Board-scoped, named + colored (palette from `BOARD_COLORS`); attached per card. Label-set CRUD reuses `board:["update"]`, attach/detach reuse `card:["update"]` — no dedicated `label` permission statement (US-005). Managed in the card detail sheet; colored chips render on the card face in the board view; attach/detach broadcast live via the `card:labels-updated` socket event; label rename/recolor/delete fan that same event out per affected card so chips refresh live for other viewers (US-010). |
 | Checklists | `Checklist` / `ChecklistItem` | — | Ordered items with `isCompleted` |
 | Comments | `Comment` | `createCommentAction` | Notifies + emails; applied live over socket |

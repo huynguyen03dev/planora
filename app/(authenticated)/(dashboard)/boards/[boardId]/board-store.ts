@@ -6,6 +6,7 @@ import type {
   CardArchivedPayload,
   CardCreatedPayload,
   CardLabelsUpdatedPayload,
+  CardMembersUpdatedPayload,
   CardMovedPayload,
   CardUpdatedPayload,
   CommentCreatedPayload,
@@ -119,6 +120,7 @@ type BoardStore = {
   applyRemoteCardUpdated: (payload: CardUpdatedPayload) => void;
   applyRemoteCardArchived: (payload: CardArchivedPayload) => void;
   applyRemoteCardLabelsUpdated: (payload: CardLabelsUpdatedPayload) => void;
+  applyRemoteCardMembersUpdated: (payload: CardMembersUpdatedPayload) => void;
   applyRemoteCommentCreated: (payload: CommentCreatedPayload) => void;
 };
 
@@ -511,6 +513,52 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       });
 
       return { lists: newLists };
+    });
+  },
+
+  applyRemoteCardMembersUpdated: (payload) => {
+    // Members render only in the open card detail sheet (never on the list
+    // array), so this is in-place / live and scoped to the currently-open card.
+    const { boardId, selectedCardId, selectedCard } = get();
+
+    if (boardId !== payload.boardId || selectedCardId !== payload.cardId || !selectedCard) {
+      return;
+    }
+
+    set((state) => {
+      if (!state.selectedCard || state.selectedCard.card.id !== payload.cardId) {
+        return state;
+      }
+
+      // Self-echo dedupe: identical assignee id set (same order) → no-op so the
+      // actor's own echo (after router.refresh already reseeded) skips a re-render.
+      const currentIds = state.selectedCard.assignees.map((member) => member.id);
+      const nextIds = payload.members.map((member) => member.id);
+      if (
+        currentIds.length === nextIds.length &&
+        currentIds.every((id, index) => id === nextIds[index])
+      ) {
+        return state;
+      }
+
+      // Recompute "assignable" (the Add-members pool) from everyone currently
+      // known on this card — assignees ∪ assignable — minus the new assignees, so
+      // a remotely-removed member returns to the pool and a remotely-added one
+      // leaves it, all without a server round-trip.
+      const nextAssigneeIds = new Set(nextIds);
+      const pool = new Map<string, SelectedCardData["assignableMembers"][number]>();
+      for (const member of [...state.selectedCard.assignees, ...state.selectedCard.assignableMembers]) {
+        pool.set(member.id, member);
+      }
+      const nextAssignable = [...pool.values()].filter((member) => !nextAssigneeIds.has(member.id));
+
+      return {
+        selectedCard: {
+          ...state.selectedCard,
+          assignees: payload.members,
+          assignableMembers: nextAssignable,
+        },
+      };
     });
   },
 

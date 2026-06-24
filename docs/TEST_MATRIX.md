@@ -44,7 +44,7 @@ Library; most React component internals remain unverified.
 | Auth / session / RBAC (admin/editor/viewer) | yes | partial | no | implemented | Per-mutation gate proven (US-006); full role × action allow/deny matrix proven against the real roles (US-007, `rbac-matrix.test.ts`). `lib/auth.ts` session/login plumbing still unit-untested. |
 | Workspaces + invitations (email) | no | partial | no | planned | Settings + invite security boundary proven (US-006, `workspace.test.ts`); invite/email + `lib/workspace.ts` business logic untested. |
 | Notifications (in-app + email + socket) | no | no | no | planned | `lib/notification*.ts` untested |
-| Real-time sync (socket server/client/emitters) | no | partial | yes | implemented | Wire proven end-to-end, two browser contexts on one board, against real `server.ts` + Postgres. US-009 slice 1 (`e2e/realtime-card-create.spec.ts`): A creates a card → B sees it live. Slice 2 (`e2e/realtime-card-move.spec.ts`): A drags a card across lists (keyboard sensor) → B sees it relocate live; and the **drag-defer invariant** — a remote structural event (archive) is deferred while B is mid-drag, then reconciled on drop (live-rename delivery barrier + socket in-order delivery make it deterministic). Each sabotage-verified (`emitCardCreated`/`emitCardMoved` off; `isDragging` guard removed). US-010 (`e2e/realtime-label-sync.spec.ts`): a label renamed/deleted by one user updates/removes the card-face chip live on another's board — `updateLabelAction`/`deleteLabelAction` fan `card:labels-updated` out per affected card (closes the US-005 limitation); sabotage-verified (fan-out off turns both red) + unit-covered dedupe fix (full `{id,name,color}` snapshot compare). Pending: comment propagation, list reorder. |
+| Real-time sync (socket server/client/emitters) | no | partial | yes | implemented | Wire proven end-to-end, two browser contexts on one board, against real `server.ts` + Postgres. US-009 slice 1 (`e2e/realtime-card-create.spec.ts`): A creates a card → B sees it live. Slice 2 (`e2e/realtime-card-move.spec.ts`): A drags a card across lists (keyboard sensor) → B sees it relocate live; and the **drag-defer invariant** — a remote structural event (archive) is deferred while B is mid-drag, then reconciled on drop (live-rename delivery barrier + socket in-order delivery make it deterministic). Each sabotage-verified (`emitCardCreated`/`emitCardMoved` off; `isDragging` guard removed). US-010 (`e2e/realtime-label-sync.spec.ts`): a label renamed/deleted by one user updates/removes the card-face chip live on another's board — `updateLabelAction`/`deleteLabelAction` fan `card:labels-updated` out per affected card (closes the US-005 limitation); sabotage-verified (fan-out off turns both red) + unit-covered dedupe fix (full `{id,name,color}` snapshot compare). US-011 (`e2e/realtime-card-members.spec.ts`): assign/remove member propagates live to another viewer's open card detail sheet — `assignCardMemberAction`/`removeCardMemberAction` emit `card:members-updated`, store reducer patches `selectedCard` + recomputes the assignable pool (6 unit cases); sabotage-verified (emit off turns it red). Pending: comment propagation, list reorder. |
 | Activity audit log | no | no | no | planned | `lib/activity.ts` untested |
 | All React components (board UI, card sheet, dashboards) | no | no | no | planned | no component tests configured |
 
@@ -70,9 +70,9 @@ Library; most React component internals remain unverified.
 - E2E proof covers user-visible browser flows via **Playwright** (`e2e/**`,
   `npm run test:e2e`), introduced in US-009. Proven: two-client realtime
   card-create (slice 1), card-move across lists, the drag-aware deferral
-  invariant (slice 2), and label rename/delete propagation (US-010). Card drags
-  are driven with the keyboard sensor — `@hello-pangea/dnd` ignores synthetic
-  pointer/CDP drags.
+  invariant (slice 2), label rename/delete propagation (US-010), and card-member
+  assign/remove propagation (US-011). Card drags are driven with the keyboard
+  sensor — `@hello-pangea/dnd` ignores synthetic pointer/CDP drags.
 - A story can ship without every proof column if its packet explains why.
 - New Server Actions are the priority for new tests: they enforce auth,
   permission, workspace isolation, and Zod validation — the security-critical
