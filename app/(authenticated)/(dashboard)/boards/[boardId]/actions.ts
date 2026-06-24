@@ -8,6 +8,7 @@ import { getBoardById } from "@/lib/board";
 import {
   updateCardDetails,
   getCardWithListAndBoard,
+  getArchivedCardWithListAndBoard,
   reorderCardWithinListByNeighbors,
   getCardWithListAndMembers,
 } from "@/lib/card";
@@ -71,6 +72,7 @@ import {
   reorderListSchema,
   createCardSchema,
   archiveCardSchema,
+  restoreCardSchema,
   reorderCardSchema,
   moveCardSchema,
   updateCardDetailsSchema,
@@ -94,6 +96,7 @@ import {
 } from "@/lib/schemas";
 import {
   buildCardArchivedEvent,
+  buildCardRestoredEvent,
   buildCardCompletedEvent,
   buildCardCreatedEvent,
     buildCardDeletedEvent,
@@ -232,6 +235,10 @@ type CreateCardResult =
   | { success: false; error: string };
 
 type ArchiveCardResult =
+  | { success: true }
+  | { success: false; error: string };
+
+type RestoreCardResult =
   | { success: true }
   | { success: false; error: string };
 
@@ -639,6 +646,84 @@ export async function archiveCardAction(
     return { success: true };
   } catch {
     return { success: false, error: "Failed to archive card. Please try again." };
+  }
+}
+
+export async function restoreCardAction(
+  formData: FormData,
+): Promise<RestoreCardResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = restoreCardSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const { userId } = await verifySession();
+
+  const { cardId } = parsed.data;
+
+  // Archived-aware resolver: getCardWithListAndBoard filters archivedAt:null and
+  // could never find a card to restore.
+  const result = await getArchivedCardWithListAndBoard(cardId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canRestoreCard = await hasWorkspacePermission(result.board.workspaceId, {
+    card: ["delete"],
+  });
+
+  if (!canRestoreCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  try {
+    await db.$transaction(async (tx) => {
+      const card = await tx.card.update({
+        where: {
+          id: cardId,
+          archivedAt: { not: null },
+        },
+        data: { archivedAt: null },
+        select: {
+          id: true,
+          estimateHours: true,
+          dueDate: true,
+          members: {
+            select: { userId: true },
+            orderBy: { assignedAt: "asc" },
+          },
+        },
+      });
+      await recordCardHistoryEvents(tx, [
+        buildCardRestoredEvent(
+          result.board.workspaceId,
+          result.board.id,
+          card.id,
+          {
+            memberIds: card.members.map((member) => member.userId),
+            estimateHours: card.estimateHours,
+            dueDate: toIsoOrNull(card.dueDate),
+          },
+          userId,
+        ),
+      ]);
+    });
+    revalidatePath(`/boards/${result.list.boardId}`);
+    // Reappear on other viewers' boards — reuses the tested card:created reducer.
+    emitCardCreated(result.list.boardId, {
+      card: {
+        id: result.card.id,
+        listId: result.card.listId,
+        title: result.card.title,
+        position: result.card.position,
+      },
+    });
+    emitAnalyticsRefresh(result.board.workspaceId);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to restore card. Please try again." };
   }
 }
 

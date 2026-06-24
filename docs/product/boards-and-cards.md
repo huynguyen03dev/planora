@@ -30,12 +30,24 @@ carry rich metadata. All mutations are Server Actions under
   cover image, `archivedAt` (soft delete).
 - Actions: `createCardAction`, `updateCardDetailsAction` (title/description),
   `updateCardEstimateAction`, `updateCardDueDateAction`, `archiveCardAction`,
-  `reorderCardAction`, `moveCardAction`.
+  `restoreCardAction`, `reorderCardAction`, `moveCardAction`.
 - **Estimate rule:** once a card has completed once, its estimate cannot be
   changed (audited as `ESTIMATE_CHANGED` history). Workspaces may require an
   estimate before a card can be marked done (`requireEstimateBeforeDone`).
 - **Move semantics:** `moveCardAction` relocates a card across lists and applies
   the auto-completion/reopen logic based on the target list's `isDone`.
+- **Archive & restore:** `archiveCardAction` soft-archives (sets `archivedAt`,
+  records a `CARD_ARCHIVED` history event, emits `card:archived` to remove it
+  live). `restoreCardAction` is the inverse — it clears `archivedAt`, records a
+  `CARD_RESTORED` event, and re-emits `card:created` so the card reappears live
+  for other viewers. Both reuse `card:["delete"]` (editor/admin; viewer denied).
+  Restore resolves the card through an **archived-aware** scope resolver
+  (`getArchivedCardWithListAndBoard`, requires `archivedAt: not null`) — the
+  default `getCardWithListAndBoard` filters archived cards out. The board header
+  exposes an **Archived cards** view (editor/admin only) listing the board's
+  archived cards with their original list and a Restore button (US-016).
+  Cards-only for now — list and board (closed-boards) restore are deferred
+  follow-ups; permanent (hard) delete from the archive view is not yet built.
 
 ## Card metadata
 

@@ -24,6 +24,7 @@ export {
 export {
   createCardSchema,
   archiveCardSchema,
+  restoreCardSchema,
   reorderCardSchema,
   moveCardSchema,
   updateCardDetailsSchema,
@@ -33,6 +34,7 @@ export {
   VALID_ESTIMATE_HOURS,
   type CreateCardInput,
   type ArchiveCardInput,
+  type RestoreCardInput,
   type ReorderCardInput,
   type MoveCardInput,
   type UpdateCardDetailsInput,

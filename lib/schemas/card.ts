@@ -39,6 +39,12 @@ export const archiveCardSchema = z.object({
 
 export type ArchiveCardInput = z.infer<typeof archiveCardSchema>;
 
+export const restoreCardSchema = z.object({
+  cardId: z.string().uuid({ message: "Invalid card ID" }),
+});
+
+export type RestoreCardInput = z.infer<typeof restoreCardSchema>;
+
 const maybeCardIdSchema = z
   .string({ message: "Invalid card ID" })
   .uuid({ message: "Invalid card ID" })
