@@ -132,6 +132,34 @@ export async function dragCardToNextList(page: Page, cardId: string): Promise<vo
 }
 
 /**
+ * Keyboard-reorder a LIST one slot to the left. Lists are a horizontal droppable
+ * whose drag handle ("Drag list") carries the same `data-rfd-drag-handle-draggable-id`
+ * attribute (= list.id) the card helpers use, so liftCard/moveLifted/dropCard are
+ * reused verbatim — the keyboard sensor is draggable-type agnostic. Emits the
+ * STRUCTURAL `list:moved`.
+ */
+export async function dragListLeft(page: Page, listId: string): Promise<void> {
+  await liftCard(page, listId);
+  await moveLifted(page, "ArrowLeft");
+  await dropCard(page);
+}
+
+/** Left edge (x) of a list column — used to assert relative list order. */
+export async function listColumnX(page: Page, listId: string): Promise<number> {
+  const box = await listColumnById(page, listId).boundingBox();
+  return box?.x ?? -1;
+}
+
+// ── Comments (composer in the open card detail sheet) ─────────────────────
+
+/** Post a comment in the open card detail sheet; resolves once the composer clears. */
+export async function postComment(page: Page, text: string): Promise<void> {
+  await page.getByPlaceholder("Write a comment...").fill(text);
+  await page.getByRole("button", { name: /post comment/i }).click();
+  await expect(page.getByPlaceholder("Write a comment...")).toHaveValue("");
+}
+
+/**
  * Archive a card via its actions menu (mouse only — no keyboard sensor, so it
  * never disturbs another page's in-flight keyboard drag). Scoped to the card by
  * id via the draggable wrapper. Emits a structural `card:archived`.

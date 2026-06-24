@@ -36,11 +36,11 @@ Typed via `ServerToClientEvents` / `ClientToServerEvents` in
 | `card:labels-updated` | board | cardId, labels[] | live (in-place); fanned out per affected card on label rename/recolor/delete (US-010) |
 | `card:members-updated` | board | cardId, members[] | live (in-place); emitted on assign/remove (US-011) |
 | `card:archived` | board | cardId | **deferred** |
-| `list:moved` | board | listId, position | **deferred** |
+| `list:moved` | board | listId, position | **deferred** (structural); cross-client reorder proven live on a non-dragging observer (US-012) |
 | `list:created` | board | list snapshot | **deferred** |
 | `list:updated` | board | title / isDone | live (in-place) |
 | `list:deleted` | board | listId | **deferred** |
-| `comment:created` | board | comment + activity + author | live (in-place) |
+| `comment:created` | board | comment + activity + author | live (in-place); cross-client propagation to an open detail sheet proven (US-012) |
 | `notification:new` | user | notification | live |
 | `analytics:refresh` | workspace | (signal only) | live |
 | `board:error` | board | error | live |
