@@ -33,7 +33,7 @@ Typed via `ServerToClientEvents` / `ClientToServerEvents` in
 | `card:moved` | board | cardId, listId, position | **deferred** (structural) |
 | `card:created` | board | card snapshot | **deferred** |
 | `card:updated` | board | card changes | live (in-place) |
-| `card:labels-updated` | board | cardId, labels[] | live (in-place) |
+| `card:labels-updated` | board | cardId, labels[] | live (in-place); fanned out per affected card on label rename/recolor/delete (US-010) |
 | `card:archived` | board | cardId | **deferred** |
 | `list:moved` | board | listId, position | **deferred** |
 | `list:created` | board | list snapshot | **deferred** |
@@ -61,8 +61,9 @@ drop completes -> consumeResync()
 - **Deferred while dragging:** card/list moved, created, deleted, archived.
 - **Applied live (safe mid-drag):** comments, title edits, `isDone` toggles,
   card label changes (`card:labels-updated` — replaces a card's label set in
-  place; emitted on attach/detach. Label rename/recolor/delete propagate via
-  `revalidatePath`, not this event), notifications, analytics refresh.
+  place; emitted on attach/detach, and (US-010) fanned out per affected card on
+  label rename/recolor/delete so every chip refreshes live), notifications,
+  analytics refresh.
 
 This is the fix behind commit `7706b6d` ("pause remote board updates during drag
 to prevent drop corruption") and is covered by `tests/board-store.test.ts`. When
@@ -119,8 +120,19 @@ Socket.io) and Postgres, with two real browser users on one board:
   delivery pins archive-before-rename. Sabotage-verified — removing the
   `isDragging` guard makes the archive apply mid-drag and turns it red.
 
-Remaining slices (label/comment propagation, list reorder) still have
-single-client unit proof only.
+- **Label CRUD propagation** (`e2e/realtime-label-sync.spec.ts`, US-010): a label
+  renamed or deleted by one user updates/removes the card-face chip live on
+  another user's board with no reload. `updateLabelAction`/`deleteLabelAction`
+  fan the in-place `card:labels-updated` event out to every card carrying the
+  label (delete captures the affected cards *before* the row cascade). Closes the
+  US-005 limitation where label-set CRUD only propagated via `revalidatePath`.
+  Sabotage-verified — neutralizing the fan-out leaves the other user's chip
+  stale and turns both tests red. (Also fixes a latent id-only self-echo dedupe
+  in `applyRemoteCardLabelsUpdated` that would have swallowed a recolor; now
+  compares the full `{id,name,color}` snapshot, unit-covered.)
+
+Remaining slices (comment propagation, list reorder) still have single-client
+unit proof only.
 
 ## Notification & analytics signals
 

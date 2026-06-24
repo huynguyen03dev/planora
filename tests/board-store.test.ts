@@ -723,6 +723,25 @@ describe("applyRemoteCardLabelsUpdated", () => {
     expect(useBoardStore.getState().lists).toBe(listsBefore);
   });
 
+  it("applies a rename/recolor even when the label id set is unchanged (US-010)", () => {
+    const lists = makeListsWithCards();
+    lists[0].cards[0].labels = [RED];
+    useBoardStore.setState({ boardId: "board-1", lists });
+    const listsBefore = useBoardStore.getState().lists;
+
+    // Same id, new name + color (a label rename/recolor re-emitted per card).
+    const RENAMED = { id: "label-red", name: "Critical", color: "#E2B203" };
+    useBoardStore.getState().applyRemoteCardLabelsUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      labels: [RENAMED],
+    });
+
+    // Must NOT be deduped as a self-echo: the chip snapshot updates in place.
+    expect(useBoardStore.getState().lists).not.toBe(listsBefore);
+    expect(cardsIn("list-1").find((card) => card.id === "card-a")!.labels).toEqual([RENAMED]);
+  });
+
   it("is a no-op when the payload boardId does not match", () => {
     useBoardStore.setState({ boardId: "board-1", lists: makeListsWithCards() });
 

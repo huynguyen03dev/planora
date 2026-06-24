@@ -61,6 +61,7 @@ const h = vi.hoisted(() => {
     getCardWithListAndMembers: fn(),
     getLabelWithBoard: fn(),
     getCardLabels: fn(),
+    getCardIdsWithLabel: fn(),
     // lib write seams
     createList: fn(),
     updateListTitle: fn(),
@@ -125,6 +126,7 @@ vi.mock("@/lib/card", () => ({
 vi.mock("@/lib/label", () => ({
   getLabelWithBoard: h.getLabelWithBoard,
   getCardLabels: h.getCardLabels,
+  getCardIdsWithLabel: h.getCardIdsWithLabel,
   createLabel: h.createLabel,
   updateLabel: h.updateLabel,
   deleteLabel: h.deleteLabel,
@@ -756,6 +758,7 @@ describe("updateLabelAction (board:update)", () => {
     signInAs("u", WS_A, "editor");
     h.getLabelWithBoard.mockResolvedValue(labelWithBoardFixture(WS_A, { labelId: LABEL_ID }));
     h.updateLabel.mockResolvedValue({ id: LABEL_ID, boardId: BOARD_A, name: "Bug", color: COLOR });
+    h.getCardIdsWithLabel.mockResolvedValue([]); // label-change fan-out (US-010): no cards to refresh here
     await updateLabelAction(form());
     expect(h.updateLabel).toHaveBeenCalled();
   });
@@ -783,6 +786,7 @@ describe("deleteLabelAction (board:update)", () => {
   it("allow: WS-A editor", async () => {
     signInAs("u", WS_A, "editor");
     h.getLabelWithBoard.mockResolvedValue(labelWithBoardFixture(WS_A, { labelId: LABEL_ID }));
+    h.getCardIdsWithLabel.mockResolvedValue([]); // captured before delete (US-010); none here
     h.deleteLabel.mockResolvedValue(undefined);
     await deleteLabelAction(form());
     expect(h.deleteLabel).toHaveBeenCalled();

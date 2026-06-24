@@ -478,13 +478,21 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       }
 
       // Self-echo dedupe: if the card already carries this exact label set (same
-      // ids, same order), the store is current (the actor's own echo after
-      // router.refresh already reseeded it). No-op to skip a redundant re-render.
+      // ids, names, colors, same order), the store is current (the actor's own
+      // echo after router.refresh already reseeded it). No-op to skip a redundant
+      // re-render. The name/color comparison matters: a label rename/recolor
+      // keeps the id set unchanged, so an id-only check would wrongly swallow it
+      // and leave stale chips (US-010).
       const current = owningList.cards.find((card) => card.id === payload.cardId);
       if (
         current &&
         current.labels.length === payload.labels.length &&
-        current.labels.every((label, index) => label.id === payload.labels[index].id)
+        current.labels.every(
+          (label, index) =>
+            label.id === payload.labels[index].id &&
+            label.name === payload.labels[index].name &&
+            label.color === payload.labels[index].color,
+        )
       ) {
         return state;
       }
