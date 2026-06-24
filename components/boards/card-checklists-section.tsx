@@ -162,28 +162,42 @@ export function CardChecklistsSection({
             {total > 0 ? (
               <ul className="space-y-1">
                 {checklist.items.map((item) => (
-                  <li key={item.id} className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={item.isCompleted}
-                      disabled={!canEdit || isPending}
-                      onChange={() => toggleItem(item.id, item.isCompleted)}
-                      aria-label={item.title}
-                      className="size-4 shrink-0 rounded border-input"
-                    />
-                    <span
+                  <li key={item.id} className="flex items-center gap-1">
+                    {/* The whole row toggles: wrapping the input in a <label> makes
+                        the text a click target too, not just the 16px box. */}
+                    <label
                       className={cn(
-                        "flex-1 text-sm",
-                        item.isCompleted && "text-muted-foreground line-through",
+                        "flex flex-1 items-center gap-2 rounded px-1 py-1",
+                        canEdit && !isPending
+                          ? "cursor-pointer hover:bg-muted/60"
+                          : "cursor-default",
                       )}
                     >
-                      {item.title}
-                    </span>
+                      <input
+                        type="checkbox"
+                        checked={item.isCompleted}
+                        disabled={!canEdit || isPending}
+                        onChange={() => toggleItem(item.id, item.isCompleted)}
+                        aria-label={item.title}
+                        className={cn(
+                          "size-5 shrink-0 rounded border-input accent-primary",
+                          canEdit && !isPending && "cursor-pointer",
+                        )}
+                      />
+                      <span
+                        className={cn(
+                          "flex-1 text-sm",
+                          item.isCompleted && "text-muted-foreground line-through",
+                        )}
+                      >
+                        {item.title}
+                      </span>
+                    </label>
                     {canEdit ? (
                       <button
                         type="button"
                         aria-label={`Delete ${item.title}`}
-                        className="text-muted-foreground hover:text-destructive disabled:opacity-50"
+                        className="shrink-0 rounded px-1.5 text-lg leading-none text-muted-foreground hover:text-destructive disabled:opacity-50"
                         disabled={isPending}
                         onClick={() => removeItem(item.id)}
                       >
