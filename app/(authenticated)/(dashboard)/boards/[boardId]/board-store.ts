@@ -102,6 +102,8 @@ type BoardStore = {
   pendingResync: boolean;
   /** Client-only view filter: card label ids to keep visible (OR). Empty = show all. */
   filterLabelIds: string[];
+  /** Client-only card search: title substring (case-insensitive). Empty = show all. */
+  searchQuery: string;
 
   setBoardId: (boardId: string) => void;
   setLists: (lists: ListWithCards[]) => void;
@@ -113,6 +115,7 @@ type BoardStore = {
   consumeResync: () => boolean;
   toggleLabelFilter: (labelId: string) => void;
   clearFilters: () => void;
+  setSearchQuery: (query: string) => void;
   reset: () => void;
 
   applyRemoteCardMoved: (payload: CardMovedPayload) => void;
@@ -137,6 +140,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
   isDragging: false,
   pendingResync: false,
   filterLabelIds: [],
+  searchQuery: "",
 
   setBoardId: (boardId) => set({ boardId }),
 
@@ -176,6 +180,10 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
 
   clearFilters: () => set({ filterLabelIds: [] }),
 
+  // View-only card search (no server round-trip). ListColumn hides cards whose
+  // title does not contain the query, ANDed with the label filter.
+  setSearchQuery: (query) => set({ searchQuery: query }),
+
   reset: () => set({
     boardId: null,
     lists: [],
@@ -185,6 +193,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     isDragging: false,
     pendingResync: false,
     filterLabelIds: [],
+    searchQuery: "",
   }),
 
   applyRemoteCardMoved: (payload) => {
