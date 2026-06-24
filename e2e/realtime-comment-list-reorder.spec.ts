@@ -1,6 +1,10 @@
 /**
  * US-012 — two-client realtime: comment propagation + list reorder. Closes the
- * last documented realtime slices (see docs/product/realtime-sync.md).
+ * two slices the test matrix listed as pending (see docs/product/realtime-sync.md).
+ * Several events still lack dedicated cross-client proof (card:updated,
+ * list:created/updated/deleted, notification:new, analytics:refresh) — tracked
+ * in the backlog, lower-risk (none carry the drag-corruption risk this campaign
+ * targeted).
  *
  *  1. comment:created (in-place / live) — Alice posts a comment on a card; it
  *     appears live in Bob's already-open detail sheet (no reload).

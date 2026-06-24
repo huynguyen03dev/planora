@@ -8,12 +8,19 @@ implemented
 
 normal
 
-Change request — closes the last two documented realtime slices with two-client
-E2E proof. Both events (`comment:created`, `list:moved`) were already emitted by
-the Server Actions; this story adds the cross-client proof, mirroring
-US-009/010/011. Risk flags: weak proof (comment + list-reorder propagation were
-unproven end-to-end). No hard gate — no schema/migration, no new authorization
-surface, no new socket event. Normal lane.
+Change request — closes the two realtime slices the test matrix listed as
+pending (comment propagation, list reorder) with two-client E2E proof. Both
+events (`comment:created`, `list:moved`) were already emitted by the Server
+Actions; this story adds the cross-client proof, mirroring US-009/010/011. Risk
+flags: weak proof (comment + list-reorder propagation were unproven end-to-end).
+No hard gate — no schema/migration, no new authorization surface, no new socket
+event. Normal lane.
+
+Scope honesty: this does **not** seal the entire realtime surface. Events still
+lacking dedicated cross-client proof: `card:updated` (title edit),
+`list:created` / `list:updated` / `list:deleted`, `notification:new`,
+`analytics:refresh`. These are lower-risk (none carry the drag-corruption risk
+this campaign targeted) and are left for a follow-up.
 
 ## Product Contract
 
