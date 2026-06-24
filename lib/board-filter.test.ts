@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   availableLabels,
   cardMatchesFilter,
+  cardMatchesQuery,
   EMPTY_FILTER,
   isFilterActive,
+  isSearchActive,
 } from "./board-filter";
 
 const card = (labelIds: string[]) => ({
@@ -38,6 +40,36 @@ describe("cardMatchesFilter", () => {
   it("rejects a card with none of the selected labels", () => {
     expect(cardMatchesFilter(card(["l3"]), { labelIds: ["l1", "l2"] })).toBe(false);
     expect(cardMatchesFilter(card([]), { labelIds: ["l1"] })).toBe(false);
+  });
+});
+
+describe("isSearchActive", () => {
+  it("is false for an empty or whitespace-only query", () => {
+    expect(isSearchActive("")).toBe(false);
+    expect(isSearchActive("   ")).toBe(false);
+  });
+
+  it("is true once the query has non-whitespace content", () => {
+    expect(isSearchActive("a")).toBe(true);
+    expect(isSearchActive("  bug  ")).toBe(true);
+  });
+});
+
+describe("cardMatchesQuery", () => {
+  it("matches every card for an empty or whitespace-only query", () => {
+    expect(cardMatchesQuery({ title: "Anything" }, "")).toBe(true);
+    expect(cardMatchesQuery({ title: "Anything" }, "   ")).toBe(true);
+  });
+
+  it("matches a case-insensitive substring of the title", () => {
+    expect(cardMatchesQuery({ title: "Fix login bug" }, "bug")).toBe(true);
+    expect(cardMatchesQuery({ title: "Fix Login Bug" }, "LOGIN")).toBe(true);
+    expect(cardMatchesQuery({ title: "Deploy" }, "  ploy ")).toBe(true);
+  });
+
+  it("rejects a card whose title does not contain the query", () => {
+    expect(cardMatchesQuery({ title: "Fix login bug" }, "logout")).toBe(false);
+    expect(cardMatchesQuery({ title: "" }, "x")).toBe(false);
   });
 });
 

@@ -71,18 +71,27 @@ normalizes positions on overflow. The neighbour math is pure and unit-tested in
   layout / `@hello-pangea/dnd` measurement, not React re-renders — windowing is
   a tracked follow-up, not done here.
 
-## Filtering
+## Filtering & search
 
-- A board header control narrows the visible cards by **label** (US-013). The
-  options are the labels actually in use on the board; selecting one or more
-  shows only cards carrying at least one of them (OR), live and client-side —
-  no reload, no server round-trip, no Server Action. It is a per-viewer view
-  concern: it never mutates data and is not shared with other viewers.
+- Two board-header controls narrow the visible cards, client-side and per-viewer:
+  a **label filter** (US-013) and a **title search** (US-014). Both are live with
+  no reload, no server round-trip, and no Server Action; neither mutates data nor
+  is shared with other viewers.
+- **Label filter:** options are the labels actually in use on the board; selecting
+  one or more shows only cards carrying at least one of them (OR). The control is
+  hidden when the board has no labels.
+- **Search:** a header box narrows to cards whose **title** contains the typed
+  text (case-insensitive substring), live as you type; a clear (✕) button resets
+  it. Search is **title-only** in slice 1 — the board-view card payload carries
+  `title` and `labels` but not `description` (that lives in the detail sheet), so
+  searching the description is a follow-up that first enriches the card payload.
+- **Composition:** search and the label filter combine via **AND** — a card is
+  visible only if it matches the query *and* the active label filter.
 - Non-matching cards are **hidden (CSS), not removed** from the rendered list, so
   `@hello-pangea/dnd`'s index space stays aligned with the store's `cards` array
   and drop positions are never corrupted (see `lib/dnd/apply-drop.ts`).
-- The control is hidden when the board has no labels. A list whose cards are all
-  filtered out shows a "No cards match the filter" hint.
+- A list whose cards are all narrowed out (by filter and/or search) shows a
+  "No cards match" hint instead of the empty "No cards yet" placeholder.
 - Filtering by **assignee** and **due date** is a planned follow-up slice: the
   board-view card payload carries `labels` but not `dueDate`/`assignees` yet
   (those live in the card detail sheet), so those dimensions need the card

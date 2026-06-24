@@ -23,11 +23,37 @@ export type FilterableCard = {
   labels: Array<{ id: string }>;
 };
 
+export type SearchableCard = {
+  title: string;
+};
+
 export const EMPTY_FILTER: CardFilter = { labelIds: [] };
 
 /** True when the filter constrains anything — drives the toolbar's active state. */
 export function isFilterActive(filter: CardFilter): boolean {
   return filter.labelIds.length > 0;
+}
+
+/** True when the search query constrains anything (non-whitespace). */
+export function isSearchActive(query: string): boolean {
+  return query.trim().length > 0;
+}
+
+/**
+ * Whether a card survives the search query. Case-insensitive substring match on
+ * the title; an empty / whitespace-only query matches everything.
+ *
+ * Slice 1 searches the title only — the board-view card carries `title` and
+ * `labels` but not `description` (that lives in the detail sheet), so searching
+ * the description is a follow-up slice that first enriches the card payload.
+ * Search composes with the label filter via AND at the call site (ListColumn).
+ */
+export function cardMatchesQuery(card: SearchableCard, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (q === "") {
+    return true;
+  }
+  return card.title.toLowerCase().includes(q);
 }
 
 /**
