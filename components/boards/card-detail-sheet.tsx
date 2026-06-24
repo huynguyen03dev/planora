@@ -96,6 +96,17 @@ export function CardDetailSheet({
     storeSelectedCard && card && storeSelectedCard.card.id === card.id
       ? storeSelectedCard.activity
       : initialActivity;
+  // Members render only here (not on the card face), so they live-update from
+  // the store's selectedCard when this is the open card — mirroring comments.
+  // This is what makes a remote assign/remove appear without a reload (US-011).
+  const liveAssignees =
+    storeSelectedCard && card && storeSelectedCard.card.id === card.id
+      ? storeSelectedCard.assignees
+      : assignees;
+  const liveAssignableMembers =
+    storeSelectedCard && card && storeSelectedCard.card.id === card.id
+      ? storeSelectedCard.assignableMembers
+      : assignableMembers;
 
   if (!card) {
     return null;
@@ -130,8 +141,8 @@ export function CardDetailSheet({
           comments={liveComments}
           activity={liveActivity}
           attachments={attachments}
-          assignees={assignees}
-          assignableMembers={assignableMembers}
+          assignees={liveAssignees}
+          assignableMembers={liveAssignableMembers}
           boardId={boardId}
           boardLabels={boardLabels}
           cardLabelIds={cardLabelIds}
@@ -149,7 +160,10 @@ type CardDetailDialogBodyProps = {
   activity: UIActivity[];
   attachments: AttachmentRecord[];
   assignees: CardMemberRecord[];
-  assignableMembers: AssignableWorkspaceMemberRecord[];
+  // Role-less: the dropdown renders name/email only, and the live store snapshot
+  // (selectedCard.assignableMembers) carries no role. AssignableWorkspaceMemberRecord
+  // from the server prop is structurally assignable here (US-011).
+  assignableMembers: CardMemberRecord[];
   boardId: string;
   boardLabels: LabelChip[];
   cardLabelIds: string[];

@@ -34,6 +34,7 @@ Typed via `ServerToClientEvents` / `ClientToServerEvents` in
 | `card:created` | board | card snapshot | **deferred** |
 | `card:updated` | board | card changes | live (in-place) |
 | `card:labels-updated` | board | cardId, labels[] | live (in-place); fanned out per affected card on label rename/recolor/delete (US-010) |
+| `card:members-updated` | board | cardId, members[] | live (in-place); emitted on assign/remove (US-011) |
 | `card:archived` | board | cardId | **deferred** |
 | `list:moved` | board | listId, position | **deferred** |
 | `list:created` | board | list snapshot | **deferred** |
@@ -62,8 +63,9 @@ drop completes -> consumeResync()
 - **Applied live (safe mid-drag):** comments, title edits, `isDone` toggles,
   card label changes (`card:labels-updated` — replaces a card's label set in
   place; emitted on attach/detach, and (US-010) fanned out per affected card on
-  label rename/recolor/delete so every chip refreshes live), notifications,
-  analytics refresh.
+  label rename/recolor/delete so every chip refreshes live), card member changes
+  (`card:members-updated` — replaces the open card's assignee set; emitted on
+  assign/remove, US-011), notifications, analytics refresh.
 
 This is the fix behind commit `7706b6d` ("pause remote board updates during drag
 to prevent drop corruption") and is covered by `tests/board-store.test.ts`. When
@@ -130,6 +132,16 @@ Socket.io) and Postgres, with two real browser users on one board:
   stale and turns both tests red. (Also fixes a latent id-only self-echo dedupe
   in `applyRemoteCardLabelsUpdated` that would have swallowed a recolor; now
   compares the full `{id,name,color}` snapshot, unit-covered.)
+
+- **Member propagation** (`e2e/realtime-card-members.spec.ts`, US-011): with one
+  user's card detail sheet open, another user assigning or removing a member
+  updates the open sheet's assignee list live (no reload).
+  `assignCardMemberAction`/`removeCardMemberAction` emit the in-place
+  `card:members-updated` event; the store reducer patches `selectedCard`
+  (scoped to the open card) and recomputes the assignable pool. Members render
+  only in the detail sheet (never the card face), so the proof watches the open
+  sheet. Sabotage-verified — neutralizing the emit leaves the observer's sheet
+  stale and turns the test red.
 
 Remaining slices (comment propagation, list reorder) still have single-client
 unit proof only.
