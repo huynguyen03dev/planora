@@ -197,8 +197,8 @@ function ListCardItemComponent({
           <AlertDialogHeader>
             <AlertDialogTitle>Archive this card?</AlertDialogTitle>
             <AlertDialogDescription>
-              &quot;{card.title}&quot; will be hidden from this board. This action
-              cannot be undone in the app yet.
+              &quot;{card.title}&quot; will be hidden from this board. You can
+              restore it later from the board&apos;s Archived cards view.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -6,6 +6,8 @@ import { updateBoardAction } from "@/app/(authenticated)/(dashboard)/boards/acti
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
 import { BoardFilter } from "@/components/boards/board-filter";
 import { BoardSearch } from "@/components/boards/board-search";
+import { ArchivedCardsDialog } from "@/components/boards/archived-cards-dialog";
+import type { ArchivedCardData } from "@/components/boards/archived-cards-dialog";
 import { BoardMenu } from "@/components/boards/board-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,9 +21,17 @@ type BoardHeaderProps = {
   };
   canEdit: boolean;
   canDelete: boolean;
+  canArchiveCard: boolean;
+  archivedCards: ArchivedCardData[];
 };
 
-export function BoardHeader({ board, canEdit, canDelete }: BoardHeaderProps) {
+export function BoardHeader({
+  board,
+  canEdit,
+  canDelete,
+  canArchiveCard,
+  archivedCards,
+}: BoardHeaderProps) {
   const [draftTitle, setDraftTitle] = useState(board.title);
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState("");
@@ -174,6 +184,11 @@ export function BoardHeader({ board, canEdit, canDelete }: BoardHeaderProps) {
           <BoardSearch />
 
           <BoardFilter />
+
+          <ArchivedCardsDialog
+            archivedCards={archivedCards}
+            canRestore={canArchiveCard}
+          />
 
           <BoardMenu board={board} canEdit={canEdit} canDelete={canDelete} />
         </div>

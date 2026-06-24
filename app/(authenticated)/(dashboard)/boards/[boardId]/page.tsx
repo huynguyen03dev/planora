@@ -25,6 +25,8 @@ import { getBoardLabels, getCardLabels } from "@/lib/label";
 import type { LabelRecord } from "@/lib/label";
 import { getCardChecklists } from "@/lib/checklist";
 import type { ChecklistWithItems } from "@/lib/checklist";
+import { getArchivedCards } from "@/lib/card";
+import type { ArchivedCardRecord } from "@/lib/card";
 
 type BoardPageProps = {
   params: Promise<{ boardId: string }>;
@@ -72,10 +74,14 @@ export default async function BoardPage({
       ? rawCardId
       : null;
 
-  // Load lists + board labels first (needed regardless of card selection)
-  const [lists, boardLabels] = await Promise.all([
+  // Load lists + board labels first (needed regardless of card selection).
+  // Archived cards only matter to users who can restore them (editor/admin).
+  const [lists, boardLabels, archivedCards] = await Promise.all([
     getListsByBoardId(boardId),
     getBoardLabels(boardId),
+    canArchiveCard
+      ? getArchivedCards(boardId)
+      : Promise.resolve([] as ArchivedCardRecord[]),
   ]);
 
   // Initialize data variables
@@ -217,6 +223,12 @@ export default async function BoardPage({
           }}
           canEdit={canEditBoard}
           canDelete={canDeleteBoard}
+          canArchiveCard={canArchiveCard}
+          archivedCards={archivedCards.map((card) => ({
+            id: card.id,
+            title: card.title,
+            listTitle: card.listTitle,
+          }))}
         />
 
         <div

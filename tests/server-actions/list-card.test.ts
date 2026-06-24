@@ -58,6 +58,7 @@ const h = vi.hoisted(() => {
     getBoardById: fn(),
     getListWithBoard: fn(),
     getCardWithListAndBoard: fn(),
+    getArchivedCardWithListAndBoard: fn(),
     getCardWithListAndMembers: fn(),
     getLabelWithBoard: fn(),
     getCardLabels: fn(),
@@ -119,6 +120,7 @@ vi.mock("@/lib/list", () => ({
 }));
 vi.mock("@/lib/card", () => ({
   getCardWithListAndBoard: h.getCardWithListAndBoard,
+  getArchivedCardWithListAndBoard: h.getArchivedCardWithListAndBoard,
   getCardWithListAndMembers: h.getCardWithListAndMembers,
   updateCardDetails: h.updateCardDetails,
   reorderCardWithinListByNeighbors: h.reorderCardWithinListByNeighbors,
@@ -157,6 +159,7 @@ import {
   deleteListAction,
   createCardAction,
   archiveCardAction,
+  restoreCardAction,
   reorderListAction,
   reorderCardAction,
   updateCardEstimateAction,
@@ -377,6 +380,51 @@ describe("archiveCardAction (card:delete)", () => {
     signInAs("u", WS_A, "editor");
     h.getCardWithListAndBoard.mockResolvedValue(cardWithListAndBoardFixture(WS_A));
     await archiveCardAction(form());
+    expect(h.db.$transaction).toHaveBeenCalled();
+  });
+});
+
+describe("restoreCardAction (card:delete)", () => {
+  const form = () => formData({ cardId: CARD_ID });
+  // Resolver requires an archived card; mirror cardWithListAndBoardFixture shape.
+  const archivedFixture = (ws: string) => cardWithListAndBoardFixture(ws);
+  it("A1 auth", async () => {
+    signOut();
+    await expect(restoreCardAction(form())).rejects.toThrow();
+    expectNoWrites(...writeSeams);
+  });
+  it("A2 viewer denied", async () => {
+    signInAs("u", WS_A, "viewer");
+    h.getArchivedCardWithListAndBoard.mockResolvedValue(archivedFixture(WS_A));
+    expect(await restoreCardAction(form())).toEqual({ success: false, error: "Card not found" });
+    expectNoWrites(...writeSeams);
+  });
+  it("A3 WS-B admin denied", async () => {
+    signInAs("u", WS_B, "admin");
+    h.getArchivedCardWithListAndBoard.mockResolvedValue(archivedFixture(WS_A));
+    expect(await restoreCardAction(form())).toEqual({ success: false, error: "Card not found" });
+    expectNoWrites(...writeSeams);
+  });
+  it("guard: archived board → not found, no write", async () => {
+    signInAs("u", WS_A, "editor");
+    const fixture = archivedFixture(WS_A);
+    h.getArchivedCardWithListAndBoard.mockResolvedValue({
+      ...fixture,
+      board: { ...fixture.board, archivedAt: new Date() },
+    });
+    expect(await restoreCardAction(form())).toEqual({ success: false, error: "Card not found" });
+    expectNoWrites(...writeSeams);
+  });
+  it("guard: not-archived/foreign id (resolver null) → not found, no write", async () => {
+    signInAs("u", WS_A, "editor");
+    h.getArchivedCardWithListAndBoard.mockResolvedValue(null);
+    expect(await restoreCardAction(form())).toEqual({ success: false, error: "Card not found" });
+    expectNoWrites(...writeSeams);
+  });
+  it("allow: WS-A editor reaches $transaction", async () => {
+    signInAs("u", WS_A, "editor");
+    h.getArchivedCardWithListAndBoard.mockResolvedValue(archivedFixture(WS_A));
+    await restoreCardAction(form());
     expect(h.db.$transaction).toHaveBeenCalled();
   });
 });
