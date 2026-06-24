@@ -2,7 +2,7 @@
 
 ## Status
 
-in_progress
+implemented
 
 ## Lane
 
@@ -109,4 +109,27 @@ locations.
 
 ### PR2 (UI)
 
-_(filled in with the UI PR)_
+- `components/boards/card-checklists-section.tsx` — new section rendered in the
+  card detail sheet (replaces the dead `<ActionChip label="Checklist" />`). Per
+  checklist: title, `done/total` count, item rows (native checkbox + delete),
+  add-item form; plus an add-checklist form. Calls the 5 actions via a
+  `useTransition` + `router.refresh()` runner (mirrors `CardLabelsSection`).
+- Wiring: `page.tsx` loads `getCardChecklists(cardId)` in the existing parallel
+  block and passes `checklists` to `<CardDetailSheet>`, which threads it through
+  to `CardDetailDialogBody` → the section. No store/realtime changes (revalidate
+  refreshes the prop).
+- Proof: `npx tsc --noEmit` + `npm run lint` clean; `npm test` 405 green
+  (unchanged — UI has no unit harness). Manual browser QA (2026-06-24, dev server
+  + Chrome DevTools MCP, "Filter Board" → Card A):
+  - Section shows "No checklists yet." + "Add checklist" (dead chip gone).
+  - Create "Acceptance criteria" → renders at `0/0`; **activity log records
+    "created this checklist"**.
+  - Add item "Write unit tests" → `0/1`, checkbox + delete present.
+  - Toggle complete → checkbox checked, `1/1`, line-through; **no activity spam**
+    (item toggles don't log, as designed). The control is the shadcn `Checkbox`
+    (added via `npx shadcn add checkbox`) with an `htmlFor`-linked label, so the
+    whole row toggles — verified by toggling via a click on the item *text*.
+  - Delete item → `0/0`, "No items yet."
+  - Delete checklist → "No checklists yet."; activity log records "deleted this
+    checklist". Each step persisted through the real Server Action → Prisma →
+    revalidate path.
