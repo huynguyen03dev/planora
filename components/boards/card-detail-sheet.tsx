@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useRef, useEffect } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import {
@@ -30,6 +30,7 @@ import type { AttachmentRecord } from "@/lib/attachment";
 import type { CardMemberRecord, AssignableWorkspaceMemberRecord } from "@/lib/card-member";
 import { cn } from "@/lib/utils";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
+import { mentionMatchesName, extractMentionQuery } from "@/lib/mention";
 
 const estimateOptions = ["", "1", "2", "4", "8", "16"] as const;
 
@@ -106,9 +107,9 @@ export function CardDetailSheet({
     storeSelectedCard && card && storeSelectedCard.card.id === card.id
       ? storeSelectedCard.assignees
       : assignees;
-  const liveAssignableMembers =
+  const liveAssignableMembers: AssignableWorkspaceMemberRecord[] =
     storeSelectedCard && card && storeSelectedCard.card.id === card.id
-      ? storeSelectedCard.assignableMembers
+      ? storeSelectedCard.assignableMembers.map((m) => ({ ...m, role: "" }))
       : assignableMembers;
 
   if (!card) {
@@ -167,7 +168,7 @@ type CardDetailDialogBodyProps = {
   // Role-less: the dropdown renders name/email only, and the live store snapshot
   // (selectedCard.assignableMembers) carries no role. AssignableWorkspaceMemberRecord
   // from the server prop is structurally assignable here (US-011).
-  assignableMembers: CardMemberRecord[];
+  assignableMembers: AssignableWorkspaceMemberRecord[];
   boardId: string;
   boardLabels: LabelChip[];
   cardLabelIds: string[];
@@ -632,7 +633,7 @@ function CardDetailDialogBody({
               </div>
             </div>
 
-            <CommentComposer cardId={card.id} canComment={canComment} />
+            <CommentComposer cardId={card.id} canComment={canComment} assignableMembers={assignableMembers} />
 
             {comments.length === 0 && activity.length === 0 ? (
               <div className="rounded-lg border bg-background p-4">
@@ -646,7 +647,7 @@ function CardDetailDialogBody({
                   <div className="space-y-3">
                     <h4 className="text-sm font-semibold">Comments</h4>
                     {comments.map((comment) => (
-                      <CommentItem key={comment.id} comment={comment} />
+                      <CommentItem key={comment.id} comment={comment} memberNames={assignableMembers.map((m) => m.name)} />
                     ))}
                   </div>
                 )}
@@ -706,12 +707,55 @@ function MetaBlock({ label, value }: MetaBlockProps) {
 type CommentComposerProps = {
   cardId: string;
   canComment: boolean;
+  assignableMembers: AssignableWorkspaceMemberRecord[];
 };
 
-function CommentComposer({ cardId, canComment }: CommentComposerProps) {
+function CommentComposer({ cardId, canComment, assignableMembers }: CommentComposerProps) {
   const [content, setContent] = useState("");
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
+  const [showMention, setShowMention] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [mentionStartIndex, setMentionStartIndex] = useState(0);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const filteredMembers = showMention
+    ? assignableMembers.filter((m) =>
+        mentionQuery === "" || mentionMatchesName(mentionQuery, m.name)
+      )
+    : [];
+
+  useEffect(() => {
+    if (!showMention) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node)
+      ) {
+        setShowMention(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showMention]);
+
+  function handleMentionSelect(member: AssignableWorkspaceMemberRecord) {
+    const before = content.slice(0, mentionStartIndex);
+    const textarea = textareaRef.current;
+    const cursorPos = textarea?.selectionStart ?? content.length;
+    const after = content.slice(cursorPos);
+    const newContent = `${before}@${member.name} ${after}`;
+    setContent(newContent);
+    setShowMention(false);
+    setTimeout(() => {
+      if (textarea) {
+        const newPos = before.length + member.name.length + 2;
+        textarea.focus();
+        textarea.setSelectionRange(newPos, newPos);
+      }
+    }, 0);
+  }
 
   function handleSubmit() {
     if (!content.trim()) {
@@ -736,18 +780,76 @@ function CommentComposer({ cardId, canComment }: CommentComposerProps) {
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 relative">
       <textarea
+        ref={textareaRef}
         value={content}
         onChange={(e) => {
-          setContent(e.target.value);
+          const val = e.target.value;
+          setContent(val);
           setError("");
+          const pos = e.target.selectionStart ?? val.length;
+          const mention = extractMentionQuery(val, pos);
+          if (mention) {
+            setShowMention(true);
+            setMentionQuery(mention.query);
+            setMentionStartIndex(mention.startIndex);
+          } else {
+            setShowMention(false);
+          }
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && showMention) {
+            setShowMention(false);
+          }
         }}
         disabled={isPending || !canComment}
         rows={3}
         placeholder={canComment ? "Write a comment..." : "You do not have permission to comment on this card."}
         className="flex min-h-20 w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
       />
+      {showMention && (
+        <div
+          ref={dropdownRef}
+          className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border bg-popover text-popover-foreground shadow-lg"
+        >
+          {filteredMembers.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-muted-foreground">
+              No matches
+            </div>
+          ) : (
+            filteredMembers.map((member) => (
+              <button
+                key={member.id}
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground transition-colors text-left"
+                onClick={() => handleMentionSelect(member)}
+              >
+                {member.image ? (
+                  <img
+                    src={member.image}
+                    alt={member.name}
+                    className="h-6 w-6 shrink-0 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
+                    {member.name
+                      .split(" ")
+                      .map((n) => n[0])
+                      .slice(0, 2)
+                      .join("")
+                      .toUpperCase()}
+                  </div>
+                )}
+                <span className="flex-1 truncate">{member.name}</span>
+                <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                  {member.role}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       {canComment && (
         <Button
@@ -765,9 +867,66 @@ function CommentComposer({ cardId, canComment }: CommentComposerProps) {
 
 type CommentItemProps = {
   comment: UIComment;
+  memberNames: string[];
 };
 
-function CommentItem({ comment }: CommentItemProps) {
+function renderMentionContent(content: string, memberNames: string[]) {
+  if (!memberNames.length) return content;
+
+  const lowerNames = memberNames.map((n) => n.toLowerCase());
+  const result: React.ReactNode[] = [];
+  let i = 0;
+  let plainStart = 0;
+
+  function flushPlain(end: number) {
+    if (end > plainStart) {
+      result.push(content.slice(plainStart, end));
+      plainStart = end;
+    }
+  }
+
+  while (i < content.length) {
+    if (content[i] === "@" && i + 1 < content.length) {
+      let bestMatch: { name: string; endIndex: number } | null = null;
+
+      for (let j = 0; j < memberNames.length; j++) {
+        const name = memberNames[j];
+        const lowerName = lowerNames[j];
+        const afterAt = content.slice(i + 1);
+        if (afterAt.toLowerCase().startsWith(lowerName)) {
+          const endIdx = i + 1 + name.length;
+          const nextChar = content[endIdx];
+          if (!nextChar || !/[a-zA-Z]/.test(nextChar)) {
+            if (!bestMatch || name.length > bestMatch.name.length) {
+              bestMatch = { name, endIndex: endIdx };
+            }
+          }
+        }
+      }
+
+      if (bestMatch) {
+        flushPlain(i);
+        result.push(
+          <span
+            key={i}
+            className="rounded bg-[var(--chart-2)]/10 px-0.5 font-medium text-[var(--chart-2)]"
+          >
+            @{bestMatch.name}
+          </span>
+        );
+        i = bestMatch.endIndex;
+        plainStart = i;
+        continue;
+      }
+    }
+    i++;
+  }
+
+  flushPlain(content.length);
+  return result;
+}
+
+function CommentItem({ comment, memberNames }: CommentItemProps) {
   const initials = comment.user.name
     .split(" ")
     .map((n) => n[0])
@@ -793,7 +952,7 @@ function CommentItem({ comment }: CommentItemProps) {
             <span className="text-sm font-medium">{comment.user.name}</span>
             <span className="text-xs text-muted-foreground">{date}</span>
           </div>
-          <p className="whitespace-pre-wrap text-sm">{comment.content}</p>
+          <p className="whitespace-pre-wrap text-sm">{renderMentionContent(comment.content, memberNames)}</p>
         </div>
       </div>
     </div>

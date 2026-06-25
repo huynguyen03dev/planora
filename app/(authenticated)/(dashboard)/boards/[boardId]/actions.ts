@@ -64,7 +64,7 @@ import {
   emitCardMembersUpdated,
   emitCommentCreated,
 } from "@/lib/realtime/server";
-import { notifyCardAssigned, notifyCommentOnCard } from "@/lib/notification";
+import { notifyCardAssigned, notifyCommentOnCard, notifyMentioned } from "@/lib/notification";
 import {
   createListSchema,
   updateListSchema,
@@ -1299,6 +1299,16 @@ export async function createCommentAction(
         boardTitle: boardForTitle?.title ?? "Untitled board",
         commenterUserId: userId,
         commenterName: user?.name ?? "Unknown",
+      });
+      await notifyMentioned({
+        content,
+        cardId,
+        cardTitle: result.card.title,
+        boardId: result.list.boardId,
+        boardTitle: boardForTitle?.title ?? "Untitled board",
+        commenterUserId: userId,
+        commenterName: user?.name ?? "Unknown",
+        workspaceId: result.board.workspaceId,
       });
     } catch (notificationError) {
       console.error("Failed to send comment notifications:", notificationError);

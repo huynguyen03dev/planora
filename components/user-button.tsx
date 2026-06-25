@@ -22,7 +22,7 @@ export function UserButton({
   createWorkspaceHref,
 }: UserButtonProps) {
   const router = useRouter();
-  const { data: session } = useSession();
+  const { data: session, isPending } = useSession();
   const user = session?.user;
 
   const initials = user?.name
@@ -60,7 +60,7 @@ export function UserButton({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="flex size-8 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground outline-none ring-offset-background transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-        {initials}
+        {isPending ? null : initials}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         {user && (
