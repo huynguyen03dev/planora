@@ -4,6 +4,7 @@ import db from "@/lib/prisma";
 import { emitNotificationNew } from "@/lib/realtime/server";
 import { sendEmail } from "@/lib/email";
 import { AssignEmail } from "@/emails/assign-email";
+import { MentionEmail } from "@/emails/mention-email";
 
 export type NotificationRecord = {
   id: string;
@@ -85,7 +86,7 @@ async function createNotification(data: {
   const notification = await db.notification.create({
     data: {
       userId: data.userId,
-      type: data.type as "ASSIGNED" | "COMMENT" | "INVITE",
+      type: data.type as "ASSIGNED" | "COMMENT" | "INVITE" | "MENTIONED",
       title: data.title,
       message: data.message,
       linkUrl: data.linkUrl ?? null,
@@ -214,6 +215,112 @@ export async function notifyCommentOnCard(data: {
       }),
     ),
   );
+}
+
+export async function notifyMentioned(data: {
+  content: string;
+  cardId: string;
+  cardTitle: string;
+  boardId: string;
+  boardTitle: string;
+  commenterUserId: string;
+  commenterName: string;
+  workspaceId: string;
+}): Promise<void> {
+  try {
+    // Fetch all workspace members (typical workspace < 500 members — fine to
+    // load in one query and match in JS).
+    const members = await db.workspaceMember.findMany({
+      where: { organizationId: data.workspaceId },
+      select: {
+        userId: true,
+        user: { select: { name: true, email: true } },
+      },
+    });
+
+    if (members.length === 0) return;
+
+    // Build a set of resolved user IDs by scanning the content for @memberName
+    // patterns. Uses the same algorithm as renderMentionContent: find each '@',
+    // then try to match the longest member name that follows it with a word
+    // boundary after.
+    const content = data.content;
+    const memberMap = new Map<string, { userId: string; name: string; email: string | null }>();
+    for (const m of members) {
+      if (m.user.name) memberMap.set(m.user.name.toLowerCase(), { userId: m.userId, name: m.user.name, email: m.user.email ?? null });
+    }
+
+    const resolvedUserIds = new Set<string>();
+    let i = 0;
+    while (i < content.length) {
+      if (content[i] === "@" && i + 1 < content.length) {
+        let bestUserId: string | null = null;
+        let bestEnd = 0;
+
+        for (const [lowerName, { userId, name }] of memberMap) {
+          const afterAt = content.slice(i + 1);
+          if (afterAt.toLowerCase().startsWith(lowerName)) {
+            const endIdx = i + 1 + name.length;
+            const nextChar = content[endIdx];
+            if (nextChar === undefined || !/[a-zA-Z]/.test(nextChar)) {
+              if (name.length > (bestEnd - i - 1)) {
+                bestUserId = userId;
+                bestEnd = endIdx;
+              }
+            }
+          }
+        }
+
+        if (bestUserId) {
+          resolvedUserIds.add(bestUserId);
+          i = bestEnd;
+          continue;
+        }
+      }
+      i++;
+    }
+
+    // Filter out commenter
+    resolvedUserIds.delete(data.commenterUserId);
+
+    if (resolvedUserIds.size === 0) return;
+
+    await Promise.all(
+      Array.from(resolvedUserIds).map((userId) =>
+        createNotification({
+          userId,
+          type: "MENTIONED",
+          title: `Mentioned in "${data.cardTitle}"`,
+          message: `${data.commenterName} mentioned you in a comment on "${data.cardTitle}" in "${data.boardTitle}".`,
+          linkUrl: `/boards/${data.boardId}`,
+        }),
+      ),
+    );
+
+    // Best-effort mention emails
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    for (const userId of resolvedUserIds) {
+      const member = Array.from(memberMap.values()).find((m) => m.userId === userId);
+      if (!member?.email) continue;
+
+      try {
+        await sendEmail({
+          to: member.email,
+          subject: `You were mentioned in "${data.cardTitle}"`,
+          react: MentionEmail({
+            mentionedByName: data.commenterName,
+            cardTitle: data.cardTitle,
+            boardName: data.boardTitle,
+            cardLink: `${appUrl}/boards/${data.boardId}`,
+          }),
+        });
+      } catch (emailError) {
+        console.error("[notification] Failed to send mention email:", emailError);
+      }
+    }
+  } catch (error) {
+    console.error("[notification] Failed to send mention notifications:", error);
+  }
 }
 
 export async function notifyInvited(data: {
