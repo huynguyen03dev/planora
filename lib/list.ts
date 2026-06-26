@@ -37,6 +37,8 @@ export type ListCardRecord = {
   listId: string;
   title: string;
   position: number;
+  coverImage: string | null;
+  priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
   labels: CardLabelRecord[];
 };
 
@@ -68,6 +70,8 @@ export async function getListsByBoardId(
           listId: true,
           title: true,
           position: true,
+          coverImage: true,
+          priority: true,
           labels: {
             select: {
               label: { select: { id: true, name: true, color: true } },
@@ -85,6 +89,8 @@ export async function getListsByBoardId(
       listId: card.listId,
       title: card.title,
       position: card.position,
+      coverImage: card.coverImage,
+      priority: card.priority,
       labels: card.labels.map((cardLabel) => cardLabel.label),
     })),
   }));

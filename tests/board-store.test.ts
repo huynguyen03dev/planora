@@ -329,7 +329,7 @@ describe("applyRemoteListDeleted", () => {
   it("removes the list and its cards", () => {
     const lists = makeLists();
     lists[0].cards = [
-      { id: "card-1", listId: "list-1", title: "A", position: 16384, labels: [] },
+      { id: "card-1", listId: "list-1", title: "A", position: 16384, coverImage: null, priority: null, labels: [] },
     ];
     useBoardStore.setState({ boardId: "board-1", lists });
 
@@ -370,11 +370,11 @@ describe("applyRemoteListDeleted", () => {
 function makeListsWithCards(): ListWithCards[] {
   const lists = makeLists();
   lists[0].cards = [
-    { id: "card-a", listId: "list-1", title: "Alpha", position: 16384, labels: [] },
-    { id: "card-c", listId: "list-1", title: "Charlie", position: 49152, labels: [] },
+    { id: "card-a", listId: "list-1", title: "Alpha", position: 16384, coverImage: null, priority: null, labels: [] },
+    { id: "card-c", listId: "list-1", title: "Charlie", position: 49152, coverImage: null, priority: null, labels: [] },
   ];
   lists[1].cards = [
-    { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, labels: [] },
+    { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, coverImage: null, priority: null, labels: [] },
   ];
   return lists;
 }
@@ -395,6 +395,8 @@ const selectedCardFor = (cardId: string, title: string) => ({
     estimateHours: null,
     dueDate: null,
     completedAt: null,
+    coverImage: null,
+    priority: null,
     updatedAt: new Date(),
   },
   comments: [],
@@ -449,10 +451,10 @@ describe("applyRemoteCardMoved", () => {
     // canonical float-gap position and MUST apply to correct it — otherwise a
     // later remote re-sort would misorder the board.
     const lists = makeListsWithCards();
-    lists[0].cards = [{ id: "card-c", listId: "list-1", title: "Charlie", position: 49152, labels: [] }];
+    lists[0].cards = [{ id: "card-c", listId: "list-1", title: "Charlie", position: 49152, coverImage: null, priority: null, labels: [] }];
     lists[1].cards = [
-      { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, labels: [] },
-      { id: "card-a", listId: "list-2", title: "Alpha", position: 99999, labels: [] },
+      { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, coverImage: null, priority: null, labels: [] },
+      { id: "card-a", listId: "list-2", title: "Alpha", position: 99999, coverImage: null, priority: null, labels: [] },
     ];
     useBoardStore.setState({ boardId: "board-1", lists });
 

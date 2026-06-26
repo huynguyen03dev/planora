@@ -33,6 +33,8 @@ export type ListWithCards = {
     listId: string;
     title: string;
     position: number;
+    coverImage: string | null;
+    priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
     labels: CardLabel[];
   }>;
 };
@@ -46,6 +48,8 @@ export type SelectedCardData = {
     estimateHours: number | null;
     dueDate: Date | null;
     completedAt: Date | null;
+    coverImage: string | null;
+    priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
     updatedAt: Date;
   };
   comments: Array<{
@@ -401,7 +405,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
 
         return {
           ...list,
-          cards: [...list.cards, { ...payload.card, labels: [] }].sort(
+          cards: [...list.cards, { ...payload.card, coverImage: null, priority: null, labels: [] }].sort(
             (a, b) => a.position - b.position,
           ),
         };

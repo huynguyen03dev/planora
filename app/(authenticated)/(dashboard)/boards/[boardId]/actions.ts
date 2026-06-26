@@ -11,9 +11,12 @@ import {
   getArchivedCardWithListAndBoard,
   reorderCardWithinListByNeighbors,
   getCardWithListAndMembers,
+  type CardDetailRecord,
+  updateCardCover,
+  updateCardPriority,
 } from "@/lib/card";
 import { createComment } from "@/lib/comment";
-import { createAttachment } from "@/lib/attachment";
+import { createAttachment, getAttachmentsByCardId } from "@/lib/attachment";
 import {
   type ChecklistWithItems,
   type ChecklistItemRecord,
@@ -83,6 +86,9 @@ import {
   updateListIsDoneSchema,
   updateCardEstimateSchema,
   updateCardDueDateSchema,
+  updateCardPrioritySchema,
+  updateCardCoverSchema,
+  setCardCoverSchema,
   createLabelSchema,
   updateLabelSchema,
   deleteLabelSchema,
@@ -266,6 +272,10 @@ type UpdateCardDueDateResult =
   | { success: true }
   | { success: false; error: string };
 
+
+type UpdateCardPriorityResult =
+  | { success: true; card: CardDetailRecord }
+  | { success: false; error: string };
 export async function createListAction(
   formData: FormData,
 ): Promise<CreateListResult> {
@@ -1003,6 +1013,202 @@ export async function updateCardDueDateAction(
     return { success: true };
   } catch {
     return { success: false, error: "Failed to update due date. Please try again." };
+  }
+}
+
+export async function updateCardPriorityAction(
+  formData: FormData,
+): Promise<UpdateCardPriorityResult> {
+  const rawData = Object.fromEntries(formData);
+  const priorityValue = rawData.priority === "NONE" ? null : rawData.priority;
+
+  const parsed = updateCardPrioritySchema.safeParse({
+    cardId: rawData.cardId,
+    priority: priorityValue,
+  });
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  await verifySession();
+  const { cardId, priority } = parsed.data;
+
+  const result = await getCardWithListAndBoard(cardId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(result.board.workspaceId, {
+    card: ["update"],
+  });
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  try {
+    const card = await updateCardPriority(cardId, priority);
+    revalidatePath(`/boards/${result.list.boardId}`);
+    return { success: true, card };
+  } catch {
+    return { success: false, error: "Failed to update priority. Please try again." };
+  }
+}
+
+type UpdateCardCoverResult =
+  | { success: true; card: CardDetailRecord }
+  | { success: false; error: string };
+
+export async function updateCardCoverAction(
+  formData: FormData,
+): Promise<UpdateCardCoverResult> {
+  const coverImage = formData.get("coverImage");
+  const coverImageValue = coverImage === "" ? null : coverImage;
+
+  const parsed = updateCardCoverSchema.safeParse({
+    cardId: formData.get("cardId"),
+    coverImage: coverImageValue,
+  });
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  await verifySession();
+  const { cardId, coverImage: parsedCoverImage } = parsed.data;
+
+  const result = await getCardWithListAndBoard(cardId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(result.board.workspaceId, {
+    card: ["update"],
+  });
+
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  // Security: a cover URL must point to one of this card's own attachments.
+  // External URLs are rejected — they would let an editor plant a tracking
+  // pixel that fires for every board viewer (US-018 contract). Removal (null)
+  // is always allowed.
+  if (parsedCoverImage !== null) {
+    const attachments = await getAttachmentsByCardId(cardId);
+    const isOwnAttachment = attachments.some(
+      (attachment) => attachment.fileUrl === parsedCoverImage,
+    );
+    if (!isOwnAttachment) {
+      return {
+        success: false,
+        error: "Cover image must be one of this card's attachments.",
+      };
+    }
+  }
+
+  try {
+    const card = await updateCardCover(cardId, parsedCoverImage);
+    revalidatePath(`/boards/${result.list.boardId}`);
+    return { success: true, card };
+  } catch {
+    return { success: false, error: "Failed to update card cover. Please try again." };
+  }
+}
+
+type SetCardCoverResult =
+  | { success: true; card: CardDetailRecord }
+  | { success: false; error: string };
+
+export async function setCardCoverAction(
+  formData: FormData,
+): Promise<SetCardCoverResult> {
+  const cardId = formData.get("cardId");
+  const file = formData.get("file");
+
+  if (!cardId || typeof cardId !== "string" || !file || !(file instanceof File)) {
+    return { success: false, error: "Invalid request" };
+  }
+
+  const parsed = setCardCoverSchema.safeParse({ cardId, file });
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  const { userId: actorUserId } = await verifySession();
+
+  const { cardId: parsedCardId } = parsed.data;
+
+  const cardResult = await getCardWithListAndBoard(parsedCardId);
+  if (!cardResult || cardResult.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(cardResult.board.workspaceId, {
+    card: ["update"],
+  });
+
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  let cloudinaryResult;
+  try {
+    cloudinaryResult = await uploadToCloudinary({ file });
+  } catch (error) {
+    console.error("Cloudinary upload failed:", error);
+    return { success: false, error: "Failed to upload file to cloud storage. Please try again." };
+  }
+
+  try {
+    await createAttachment({
+      cardId: parsedCardId,
+      userId: actorUserId,
+      fileName: file.name,
+      fileUrl: cloudinaryResult.secureUrl,
+      fileType: file.type,
+      fileSize: file.size,
+      cloudinaryPublicId: cloudinaryResult.publicId,
+      cloudinaryResourceType: cloudinaryResult.resourceType,
+    });
+
+    await createActivityEntry({
+      workspaceId: cardResult.board.workspaceId,
+      boardId: cardResult.board.id,
+      cardId: parsedCardId,
+      userId: actorUserId,
+      action: "CREATED",
+      entityType: "ATTACHMENT",
+      metadata: {
+        fileName: file.name,
+        fileSize: file.size,
+      },
+    });
+
+    const card = await updateCardCover(parsedCardId, cloudinaryResult.secureUrl);
+    revalidatePath(`/boards/${cardResult.board.id}`);
+    return { success: true, card };
+  } catch (error) {
+    console.error("Failed to set card cover:", error);
+    try {
+      const { v2: cloudinary } = await import("cloudinary");
+      const config = (await import("@/lib/cloudinary")).getCloudinaryConfig();
+      cloudinary.config({
+        cloud_name: config.cloudName,
+        api_key: config.apiKey,
+        api_secret: config.apiSecret,
+      });
+      await cloudinary.uploader.destroy(cloudinaryResult.publicId, {
+        resource_type: cloudinaryResult.resourceType,
+      });
+      console.log("Cleaned up orphaned Cloudinary file:", cloudinaryResult.publicId);
+    } catch (cleanupError) {
+      console.error("Failed to clean up Cloudinary file:", cleanupError);
+    }
+    return { success: false, error: "Failed to set card cover. Please try again." };
   }
 }
 

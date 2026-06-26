@@ -2,6 +2,8 @@ import "server-only";
 
 import { v2 as cloudinary } from "cloudinary";
 
+import { ATTACHMENT_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/schemas/file";
+
 /**
  * Cloudinary integration for file uploads.
  * Stores metadata about uploaded files and manages upload requests.
@@ -46,19 +48,6 @@ export type CloudinaryUploadResponse = {
 export function validateFileForUpload(
   file: File,
 ): { valid: true } | { valid: false; error: string } {
-  const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
-  const ALLOWED_MIME_TYPES = [
-    "image/jpeg",
-    "image/png",
-    "image/gif",
-    "image/webp",
-    "application/pdf",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.ms-excel",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  ];
-
   if (!file) {
     return { valid: false, error: "File is required" };
   }
@@ -67,14 +56,14 @@ export function validateFileForUpload(
     return { valid: false, error: "File cannot be empty" };
   }
 
-  if (file.size > MAX_FILE_SIZE) {
+  if (file.size > MAX_FILE_SIZE_BYTES) {
     return { valid: false, error: `File size must be less than 50 MB` };
   }
 
-  if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+  if (!ATTACHMENT_MIME_TYPES.includes(file.type as (typeof ATTACHMENT_MIME_TYPES)[number])) {
     return {
       valid: false,
-      error: `File type not allowed. Supported: ${ALLOWED_MIME_TYPES.join(", ")}`,
+      error: `File type not allowed. Supported: ${ATTACHMENT_MIME_TYPES.join(", ")}`,
     };
   }
 

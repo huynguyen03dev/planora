@@ -32,6 +32,8 @@ type BoardContentProps = {
       listId: string;
       title: string;
       position: number;
+      coverImage: string | null;
+      priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
       labels: Array<{ id: string; name: string; color: string }>;
     }>;
   }>;

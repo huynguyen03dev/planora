@@ -1,6 +1,6 @@
 "use client";
 
-import { DragDropVerticalIcon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
+import { DragDropVerticalIcon, Flag01Icon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo, useState, useTransition } from "react";
 import { Draggable } from "@hello-pangea/dnd";
@@ -26,11 +26,26 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
+// Priority chip: soft tinted bg + dark icon/text. Distinct from solid label
+// pills (different visual language) and accessible — icon + text, never
+// color-only. Foreground uses darkened hues so amber/yellow still meets contrast.
+const PRIORITY_CONFIG: Record<
+  string,
+  { label: string; tint: string; fg: string }
+> = {
+  URGENT: { label: "Urgent", tint: "#EF44441A", fg: "#B91C1C" },
+  HIGH: { label: "High", tint: "#F973161A", fg: "#C2410C" },
+  MEDIUM: { label: "Medium", tint: "#EAB3081A", fg: "#B45309" },
+  LOW: { label: "Low", tint: "#3B82F61A", fg: "#1D4ED8" },
+};
+
 type ListCardItemProps = {
   card: {
     id: string;
     title: string;
     listId: string;
+    coverImage: string | null;
+    priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
     labels: Array<{ id: string; name: string; color: string }>;
   };
   index: number;
@@ -91,9 +106,16 @@ function ListCardItemComponent({
           >
             <Card
               size="sm"
-              className={cn("gap-2 py-3 shadow-sm", snapshot.isDragging && "shadow-lg")}
+              className={cn("gap-0 overflow-hidden py-0 shadow-sm", snapshot.isDragging && "shadow-lg")}
             >
-              <CardContent className="space-y-2 px-3">
+              {card.coverImage ? (
+                <img
+                  src={card.coverImage}
+                  alt=""
+                  className="h-20 w-full object-cover"
+                />
+              ) : null}
+              <CardContent className="space-y-2 px-3 py-3">
                 {card.labels.length > 0 ? (
                   <div className="flex flex-wrap gap-1">
                     {card.labels.map((label) => (
@@ -176,6 +198,26 @@ function ListCardItemComponent({
                     </div>
                   )}
                 </div>
+
+                {card.priority ? (
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium"
+                      style={{
+                        backgroundColor: PRIORITY_CONFIG[card.priority].tint,
+                        color: PRIORITY_CONFIG[card.priority].fg,
+                      }}
+                    >
+                      <HugeiconsIcon
+                        icon={Flag01Icon}
+                        size={12}
+                        strokeWidth={2}
+                        className="text-current"
+                      />
+                      {PRIORITY_CONFIG[card.priority].label}
+                    </span>
+                  </div>
+                ) : null}
 
                 {error ? <p className="text-xs text-destructive">{error}</p> : null}
               </CardContent>

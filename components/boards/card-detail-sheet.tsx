@@ -7,9 +7,12 @@ import {
   assignCardMemberAction,
   createCommentAction,
   removeCardMemberAction,
+  updateCardCoverAction,
+  setCardCoverAction,
   updateCardDetailsAction,
   updateCardDueDateAction,
   updateCardEstimateAction,
+  updateCardPriorityAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +23,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { CardAttachments } from "@/components/boards/card-attachments";
 import { CardChecklistsSection, type ChecklistData } from "@/components/boards/card-checklists-section";
 import { CardLabelsSection, type LabelChip } from "@/components/boards/card-labels-section";
@@ -198,6 +208,8 @@ function CardDetailDialogBody({
     card.estimateHours?.toString() ?? "",
   );
   const [draftDueDate, setDraftDueDate] = useState(toDateInputValue(card.dueDate));
+  const [draftPriority, setDraftPriority] = useState(card.priority ?? "NONE");
+  const coverInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
 
@@ -207,6 +219,24 @@ function CardDetailDialogBody({
   const availableMembers = assignableMembers.filter(
     (member) => !assignedMemberIds.has(member.id),
   );
+
+  // Covers may only be sourced from this card's own image attachments
+  // (the server rejects anything else — US-018 anti-tracking-pixel contract).
+  const imageAttachments = attachments.filter((attachment) =>
+    attachment.fileType.startsWith("image/"),
+  );
+
+  function submitCover(coverImage: string) {
+    setError("");
+    const fd = new FormData();
+    fd.set("cardId", card.id);
+    fd.set("coverImage", coverImage);
+    startTransition(async () => {
+      const result = await updateCardCoverAction(fd);
+      if (!result.success) setError(result.error);
+      else router.refresh();
+    });
+  }
 
   function handleSave() {
     if (isPending) {
@@ -357,6 +387,17 @@ function CardDetailDialogBody({
         </DialogClose>
       </div>
 
+      {card.coverImage ? (
+        <div className="relative">
+          <img
+            src={card.coverImage}
+            alt="Card cover"
+            className="h-48 w-full object-cover"
+          />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background via-background/10 to-transparent" />
+        </div>
+      ) : null}
+
       <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1.65fr)_minmax(320px,1fr)]">
         <div className="min-h-0 overflow-y-auto px-6 py-6">
           <div className="space-y-6">
@@ -389,6 +430,101 @@ function CardDetailDialogBody({
               </div>
             </section>
 
+            <section className="space-y-3 rounded-lg border bg-muted/20 p-4">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-semibold">Cover</label>
+                  {card.coverImage && canEdit ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={isPending}
+                      onClick={() => submitCover("")}
+                    >
+                      Remove
+                    </Button>
+                  ) : null}
+                </div>
+
+                {card.coverImage ? (
+                  <img
+                    src={card.coverImage}
+                    alt="Cover preview"
+                    className="h-12 w-full rounded object-cover"
+                  />
+                ) : null}
+
+                {canEdit ? (
+                  <>
+                    {imageAttachments.length > 0 ? (
+                      <div className="space-y-1.5">
+                        <p className="text-xs text-muted-foreground">
+                          Choose from attachments
+                        </p>
+                        <div className="grid grid-cols-4 gap-2">
+                          {imageAttachments.map((attachment) => {
+                            const isCurrent =
+                              attachment.fileUrl === card.coverImage;
+                            return (
+                              <button
+                                key={attachment.id}
+                                type="button"
+                                disabled={isPending}
+                                title={attachment.fileName}
+                                onClick={() => submitCover(attachment.fileUrl)}
+                                className={cn(
+                                  "relative aspect-video overflow-hidden rounded border-2 transition",
+                                  isCurrent
+                                    ? "border-primary"
+                                    : "border-transparent hover:border-muted-foreground/40",
+                                )}
+                              >
+                                <img
+                                  src={attachment.fileUrl}
+                                  alt={attachment.fileName}
+                                  className="h-full w-full object-cover"
+                                />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <input
+                      type="file"
+                      ref={coverInputRef}
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        setError("");
+                        const fd = new FormData();
+                        fd.set("cardId", card.id);
+                        fd.set("file", file);
+                        startTransition(async () => {
+                          const result = await setCardCoverAction(fd);
+                          if (!result.success) setError(result.error);
+                          else router.refresh();
+                        });
+                        e.target.value = "";
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={isPending}
+                      onClick={() => coverInputRef.current?.click()}
+                    >
+                      Upload new image
+                    </Button>
+                  </>
+                ) : null}
+              </div>
+            </section>
+
             <CardLabelsSection
               cardId={card.id}
               boardId={boardId}
@@ -403,6 +539,43 @@ function CardDetailDialogBody({
               canEdit={canEdit}
             />
 
+            <section className="space-y-3 rounded-lg border bg-muted/20 p-4">
+              <div className="space-y-2">
+                <label htmlFor="card-priority" className="text-sm font-semibold">
+                  Priority
+                </label>
+                <Select
+                  value={draftPriority}
+                  onValueChange={(value) => {
+                    setDraftPriority(value);
+                    setError("");
+                    const fd = new FormData();
+                    fd.set("cardId", card.id);
+                    fd.set("priority", value);
+                    startTransition(async () => {
+                      const result = await updateCardPriorityAction(fd);
+                      if (!result.success) {
+                        setError(result.error);
+                        setDraftPriority(card.priority ?? "NONE");
+                      } else router.refresh();
+                    });
+                  }}
+                  disabled={!canEdit || isPending}
+                >
+                  <SelectTrigger id="card-priority" className="w-full">
+                    <SelectValue placeholder="No priority" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NONE">No priority</SelectItem>
+                    <SelectItem value="URGENT">🔴 Urgent</SelectItem>
+                    <SelectItem value="HIGH">🟠 High</SelectItem>
+                    <SelectItem value="MEDIUM">🟡 Medium</SelectItem>
+                    <SelectItem value="LOW">🔵 Low</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </section>
+
             <section className="grid gap-3 rounded-lg border bg-muted/20 p-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <label
@@ -411,22 +584,25 @@ function CardDetailDialogBody({
                 >
                   Estimate
                 </label>
-                <select
-                  id="card-estimate-hours"
-                  value={draftEstimateHours}
-                  onChange={(event) => {
-                    setDraftEstimateHours(event.target.value);
+                <Select
+                  value={draftEstimateHours === "" ? "none" : draftEstimateHours}
+                  onValueChange={(value) => {
+                    setDraftEstimateHours(value === "none" ? "" : value);
                     setError("");
                   }}
                   disabled={!canEdit || isPending || Boolean(card.completedAt)}
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 >
-                  {estimateOptions.map((option) => (
-                    <option key={option || "none"} value={option}>
-                      {option ? `${option}h` : "No estimate"}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger id="card-estimate-hours" className="w-full">
+                    <SelectValue placeholder="No estimate" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {estimateOptions.map((option) => (
+                      <SelectItem key={option || "none"} value={option || "none"}>
+                        {option ? `${option}h` : "No estimate"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 {card.completedAt ? (
                   <p className="text-xs text-muted-foreground">
                     Locked after first completion.
