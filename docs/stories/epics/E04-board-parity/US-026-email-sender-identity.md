@@ -2,7 +2,8 @@
 
 ## Status
 
-planned
+implemented — merged via PR #28 (commit 7e3cb7c). Status corrected 2026-06-26
+(was stale "planned"; work shipped).
 
 ## Lane
 

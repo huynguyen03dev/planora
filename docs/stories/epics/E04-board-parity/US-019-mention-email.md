@@ -2,7 +2,8 @@
 
 ## Status
 
-ready
+implemented — merged via PR #26 (commit be8ecfe, "@mention ... and email").
+Status corrected 2026-06-26 (was stale "ready"; work shipped).
 
 ## Lane
 
