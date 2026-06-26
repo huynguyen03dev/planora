@@ -5,6 +5,7 @@ import { emitNotificationNew } from "@/lib/realtime/server";
 import { sendEmail } from "@/lib/email";
 import { AssignEmail } from "@/emails/assign-email";
 import { MentionEmail } from "@/emails/mention-email";
+import { DueDateEmail } from "@/emails/due-date-email";
 
 export type NotificationRecord = {
   id: string;
@@ -86,7 +87,7 @@ async function createNotification(data: {
   const notification = await db.notification.create({
     data: {
       userId: data.userId,
-      type: data.type as "ASSIGNED" | "COMMENT" | "INVITE" | "MENTIONED",
+      type: data.type as "ASSIGNED" | "COMMENT" | "INVITE" | "MENTIONED" | "DUE_DATE",
       title: data.title,
       message: data.message,
       linkUrl: data.linkUrl ?? null,
@@ -343,4 +344,60 @@ export async function notifyInvited(data: {
     message: `${data.inviterName} invited you to join the workspace "${data.workspaceName}".`,
     linkUrl: "/invitations",
   });
+}
+
+export async function notifyDueDate(data: {
+  userId: string;
+  cardId: string;
+  cardTitle: string;
+  boardId: string;
+  boardTitle: string;
+  milestone: "DUE_SOON" | "OVERDUE";
+  dueDate: Date;
+}): Promise<void> {
+  const milestoneLabel = data.milestone === "DUE_SOON" ? "due soon" : "overdue";
+  const title = `"${data.cardTitle}" is ${milestoneLabel}`;
+  const message =
+    data.milestone === "DUE_SOON"
+      ? `The card "${data.cardTitle}" on "${data.boardTitle}" is due soon.`
+      : `The card "${data.cardTitle}" on "${data.boardTitle}" is overdue.`;
+
+  try {
+    const notification = await createNotification({
+      userId: data.userId,
+      type: "DUE_DATE",
+      title,
+      message,
+      linkUrl: `/boards/${data.boardId}`,
+    });
+
+    // Best-effort email
+    try {
+      const user = await db.user.findUnique({
+        where: { id: data.userId },
+        select: { email: true, name: true },
+      });
+
+      if (user) {
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+        await sendEmail({
+          to: user.email,
+          subject: title,
+          react: DueDateEmail({
+            milestone: data.milestone,
+            cardTitle: data.cardTitle,
+            boardName: data.boardTitle,
+            cardLink: `${appUrl}/boards/${data.boardId}`,
+          }),
+        });
+      }
+    } catch (emailError) {
+      console.error("[notification] Failed to send due-date email:", emailError);
+    }
+
+    void notification;
+  } catch (error) {
+    // Re-throw so the caller (scheduler) can roll back the CardReminder claim
+    throw error;
+  }
 }

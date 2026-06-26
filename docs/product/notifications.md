@@ -18,7 +18,7 @@ Planora notifies users through three channels for the same events: **in-app**
 | Assigned to a card | yes | yes | `emails/assign-email.tsx` |
 | Comment on a relevant card | yes | yes | — |
 | Workspace invitation | yes | yes | `emails/invite-email.tsx` |
-| Due date | type exists | — | — |
+| Due date (DUE_SOON / OVERDUE) | yes | yes | `emails/due-date-email.tsx` |
 
 When a Server Action creates a notification it persists the row and calls
 `emitNotificationNew(userId, payload)` so the recipient's UI updates live.
@@ -34,6 +34,67 @@ When a Server Action creates a notification it persists the row and calls
 
 > Note: the notification bell lifecycle was fixed in commit `f1aba24` — keep the
 > bell subscription tied to the session socket, not remounted per page.
+
+## Scheduler
+
+Due-date reminders are driven by a periodic scanner, not by user actions. The
+scheduler checks every 15 minutes for cards entering the DUE_SOON (~24h before
+due) or OVERDUE (~1h after due) windows and fires notifications via the same
+`createNotification` + `sendEmail` path as user-initiated notifications.
+
+### Mechanism
+
+- A `POST /api/cron/due-date-reminders` route contains all scheduler logic,
+  guarded by a bearer token (`CRON_SECRET` env var).
+- In dev / self-hosted, `server.ts` runs a `setInterval` that hits the route
+  every 15 minutes. In production, external cron (GitHub Actions, system cron)
+  may drive the same route instead.
+- The route is idempotent — duplicate or overlapping ticks are safe due to the
+  dedup invariant (see below).
+
+### Dedup (CardReminder table)
+
+| Column | Type | Purpose |
+| --- | --- | --- |
+| `cardId` | String | The card being reminded about |
+| `userId` | String | The recipient |
+| `milestone` | String | `"DUE_SOON"` or `"OVERDUE"` |
+| `sentAt` | DateTime | When the reminder was sent |
+
+The `@@unique([cardId, userId, milestone])` constraint ensures each reminder
+fires at most once. The scheduler try-inserts a `CardReminder` row as a claim
+before sending; a `P2002` unique violation means "already sent, skip." If the
+`notifyDueDate` call fails, the row is rolled back (deleted) so the next tick
+retries.
+
+When a card's due date is changed or cleared, all `CardReminder` rows for that
+card are deleted, allowing a fresh DUE_SOON from the new date.
+
+### Idempotency guarantee
+
+The scheduler is safe under:
+- Overlapping ticks (two ticks running concurrently)
+- Dual drivers (in-process + external cron simultaneously)
+- Process restarts (next tick recovers)
+
+### Observability
+
+Each tick logs a structured line:
+```
+[due-date-scheduler] processed=N notified=M skipped=K errors=E elapsedMs=...
+```
+- `processed`: number of candidate cards scanned
+- `notified`: successful notification+email sends
+- `skipped`: dedup collisions (already sent)
+- `errors`: per-card failures (logged individually with card ID)
+- `elapsedMs`: total tick duration
+
+### Single-instance requirement (LOW-4)
+
+The in-process `setInterval` assumes one server process. Do not run the app
+in PM2 cluster / multi-replica mode with the in-process driver enabled.
+For multi-instance deployments, use external cron driving the idempotent
+HTTP route instead.
 
 ## Email
 

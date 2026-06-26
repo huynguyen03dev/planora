@@ -278,9 +278,11 @@ model Card {
   comments         Comment[]
   attachments      Attachment[]
   activities       Activity[]        @relation("CardActivity")
+  cardReminders    CardReminder[]
 
   @@index([listId, position])
   @@index([listId, archivedAt])
+  @@index([dueDate, completedAt])
   @@map("card")
 }
 
@@ -410,6 +412,21 @@ model Notification {
 
   @@index([userId, isRead, createdAt])
   @@map("notification")
+}
+
+// ─── Scheduler bookkeeping (due-date reminders) ───────────────────
+
+model CardReminder {
+  id        String   @id @default(uuid())
+  cardId    String
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  userId    String
+  milestone String   // "DUE_SOON" | "OVERDUE"
+  sentAt    DateTime @default(now())
+
+  @@unique([cardId, userId, milestone])
+  @@index([cardId])
+  @@map("cardReminder")
 }
 
 // ─── Analytics History (append-only, survives card/list deletion) ───

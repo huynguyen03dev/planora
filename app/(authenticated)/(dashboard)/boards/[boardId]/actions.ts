@@ -942,6 +942,10 @@ export async function updateCardDueDateAction(
 
     if (previousIso !== nextIso) {
       await db.$transaction(async (tx) => {
+        // HIGH-1: Invalidate any existing reminders so the new date gets a
+        // fresh DUE_SOON and cleared dates cancel unsent reminders.
+        await tx.cardReminder.deleteMany({ where: { cardId } });
+
         await tx.card.update({
           where: {
             id: cardId,
