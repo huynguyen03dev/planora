@@ -41,6 +41,7 @@ export function AuthenticatedHeaderActions({ initialUnreadCount }: Authenticated
     <div className="flex items-center gap-1">
       <Link
         href="/invitations"
+        aria-label="Invitations"
         className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent ${
           isInvitationsActive ? "bg-accent font-medium" : "text-muted-foreground"
         }`}
