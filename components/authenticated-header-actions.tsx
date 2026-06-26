@@ -1,26 +1,55 @@
 "use client"
 
-import { useState } from "react"
-import Link from "next/link"
+import { useEffect, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { InboxIcon } from "@hugeicons/core-free-icons"
-import { HugeiconsIcon } from "@hugeicons/react"
 
 import { CreateWorkspaceModal } from "@/components/boards/create-workspace-modal"
 import { NotificationBell } from "@/components/notifications/notification-bell"
 import { NotificationDropdown } from "@/components/notifications/notification-dropdown"
 import { UserButton } from "@/components/user-button"
+import { computeInboxBadgeCount } from "@/lib/notifications/inbox"
+import { initSocket } from "@/lib/realtime/client"
 
 type AuthenticatedHeaderActionsProps = {
   initialUnreadCount: number
+  initialInvitationCount: number
 }
 
-export function AuthenticatedHeaderActions({ initialUnreadCount }: AuthenticatedHeaderActionsProps) {
+export function AuthenticatedHeaderActions({
+  initialUnreadCount,
+  initialInvitationCount,
+}: AuthenticatedHeaderActionsProps) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
   const [unreadCount, setUnreadCount] = useState(initialUnreadCount)
+  const [invitationCount, setInvitationCount] = useState(initialInvitationCount)
+
+  useEffect(() => {
+    setUnreadCount(initialUnreadCount)
+  }, [initialUnreadCount])
+
+  useEffect(() => {
+    setInvitationCount(initialInvitationCount)
+  }, [initialInvitationCount])
+
+  // The socket is owned by SocketLifecycleProvider and lives for the whole
+  // authenticated session, so subscribing once on mount is sufficient. New
+  // activity notifications bump the unread portion of the badge.
+  useEffect(() => {
+    const socket = initSocket()
+
+    function handleNotificationNew() {
+      setUnreadCount((prev) => prev + 1)
+    }
+
+    socket.on("notification:new", handleNotificationNew)
+
+    return () => {
+      socket.off("notification:new", handleNotificationNew)
+    }
+  }, [])
 
   function openCreateWorkspace() {
     const params = new URLSearchParams(searchParams.toString())
@@ -35,23 +64,13 @@ export function AuthenticatedHeaderActions({ initialUnreadCount }: Authenticated
     router.replace(query ? `${pathname}?${query}` : pathname)
   }
 
-  const isInvitationsActive = pathname === "/invitations"
+  const badgeCount = computeInboxBadgeCount(unreadCount, invitationCount)
 
   return (
     <div className="flex items-center gap-1">
-      <Link
-        href="/invitations"
-        aria-label="Invitations"
-        className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent ${
-          isInvitationsActive ? "bg-accent font-medium" : "text-muted-foreground"
-        }`}
-      >
-        <HugeiconsIcon icon={InboxIcon} className="size-4" />
-        <span className="hidden sm:inline">Invitations</span>
-      </Link>
       <div className="relative">
         <NotificationBell
-          initialUnreadCount={unreadCount}
+          count={badgeCount}
           onClick={() => setIsNotificationsOpen((prev) => !prev)}
           isOpen={isNotificationsOpen}
         />
@@ -60,6 +79,7 @@ export function AuthenticatedHeaderActions({ initialUnreadCount }: Authenticated
           onClose={() => setIsNotificationsOpen(false)}
           onMarkOneRead={() => setUnreadCount((c) => Math.max(0, c - 1))}
           onMarkAllRead={() => setUnreadCount(0)}
+          onInvitationCountChange={(count) => setInvitationCount(Math.max(0, count))}
         />
       </div>
       <UserButton onCreateWorkspace={openCreateWorkspace} />

@@ -2,14 +2,18 @@ import Link from "next/link";
 
 import { AuthenticatedHeaderActions } from "@/components/authenticated-header-actions";
 import { verifySession } from "@/lib/dal";
+import { listReceivedPendingInvitationsByEmail } from "@/lib/invitation";
 import { getUnreadNotificationCount } from "@/lib/notification";
 import { SocketLifecycleProvider } from "@/lib/realtime/socket-lifecycle-provider";
 
 export default async function AuthenticatedLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const { userId } = await verifySession();
-  const unreadCount = await getUnreadNotificationCount(userId);
+  const { userId, user } = await verifySession();
+  const [unreadCount, pendingInvitations] = await Promise.all([
+    getUnreadNotificationCount(userId),
+    listReceivedPendingInvitationsByEmail(user.email),
+  ]);
 
   return (
     <SocketLifecycleProvider>
@@ -18,7 +22,10 @@ export default async function AuthenticatedLayout({
           <Link href="/boards" className="text-lg font-semibold">
             Planora
           </Link>
-          <AuthenticatedHeaderActions initialUnreadCount={unreadCount} />
+          <AuthenticatedHeaderActions
+            initialUnreadCount={unreadCount}
+            initialInvitationCount={pendingInvitations.length}
+          />
         </header>
         {children}
       </div>

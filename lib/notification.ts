@@ -24,6 +24,9 @@ export async function getUnreadNotificationCount(userId: string): Promise<number
     where: {
       userId,
       isRead: false,
+      // INVITE notifications are surfaced directly from the invitation table in
+      // the unified inbox, so they are excluded here to avoid double-counting.
+      type: { not: "INVITE" },
     },
   });
 }
@@ -33,7 +36,9 @@ export async function getNotificationsForUser(
   options?: { limit?: number },
 ): Promise<NotificationRecord[]> {
   return db.notification.findMany({
-    where: { userId },
+    // INVITE notifications are surfaced directly from the invitation table in
+    // the unified inbox; exclude them so the feed never double-lists an invite.
+    where: { userId, type: { not: "INVITE" } },
     orderBy: { createdAt: "desc" },
     take: options?.limit ?? 50,
     select: {
@@ -331,21 +336,14 @@ export async function notifyInvited(data: {
   inviterName: string;
   workspaceName: string;
 }): Promise<void> {
-  // Only create in-app notification if the invited user has an account
-  const user = await db.user.findUnique({
-    where: { email: data.invitedEmail },
-    select: { id: true },
-  });
-
-  if (!user) return;
-
-  await createNotification({
-    userId: user.id,
-    type: "INVITE",
-    title: `Invited to "${data.workspaceName}"`,
-    message: `${data.inviterName} invited you to join the workspace "${data.workspaceName}".`,
-    linkUrl: "/invitations",
-  });
+  // Intentionally a no-op. Pending workspace invitations are now surfaced
+  // directly in the unified inbox (the notification bell) from the invitation
+  // table, with inline Accept / Decline actions — see lib/notifications/inbox.ts
+  // and the /api/invitations/pending route. Creating a separate INVITE
+  // notification row here would duplicate that signal, so we no longer do it.
+  // The signature is preserved so existing callers in the invite flow keep
+  // working without change.
+  void data;
 }
 
 export async function notifyDueDate(data: {

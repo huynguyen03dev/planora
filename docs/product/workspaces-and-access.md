@@ -67,8 +67,12 @@ match.)
   sign-up/sign-in carrying a return URL + the invited email (pre-filled), so the
   invitee returns to the invitation and accepts in one flow. Acceptance still
   requires the signed-in email to match the invited email.
-- Signed-in members also see pending offers at `/invitations`. Accepting makes
-  the user a `WorkspaceMember`.
+- Signed-in users see pending offers in the **notification bell's unified
+  inbox** as Accept / Decline cards, surfaced live from the `invitation` table
+  on every page (see `docs/product/notifications.md` → *Unified inbox*). The
+  `/invitations` page is retained as the accept landing and full-list view but
+  is no longer a standalone nav entry. Accepting makes the user a
+  `WorkspaceMember`.
 
 ## Workspace settings (admin)
 
