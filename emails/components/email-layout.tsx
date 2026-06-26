@@ -179,9 +179,16 @@ export function FallbackLink({ href }: { href: string }) {
 export function EmailLayout({
   preview,
   children,
+  footerNote = "You received this email because you're a member of a Planora workspace.",
 }: {
   preview: string;
   children: React.ReactNode;
+  /**
+   * Context line in the footer explaining why the recipient got this email.
+   * Defaults to the member message; templates sent to non-members (e.g.
+   * invitations) must override it.
+   */
+  footerNote?: string;
 }) {
   return (
     <Html>
@@ -214,10 +221,7 @@ export function EmailLayout({
             <Text style={footerText}>
               Planora — your team&apos;s boards, organized.
             </Text>
-            <Text style={footerMuted}>
-              You received this email because you&apos;re a member of a Planora
-              workspace.
-            </Text>
+            <Text style={footerMuted}>{footerNote}</Text>
           </Section>
         </Container>
       </Body>

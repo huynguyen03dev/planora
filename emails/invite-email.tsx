@@ -20,6 +20,7 @@ export function InviteEmail({
   return (
     <EmailLayout
       preview={`You have been invited to join ${workspaceName} on Planora`}
+      footerNote={`You received this email because ${invitedByEmail} invited you to collaborate on Planora. If you weren't expecting this, you can safely ignore it.`}
     >
       <EmailHeading>You&apos;re invited to join {workspaceName}</EmailHeading>
       <EmailText>
