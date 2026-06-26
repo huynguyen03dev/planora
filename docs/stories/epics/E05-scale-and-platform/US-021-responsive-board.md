@@ -122,6 +122,13 @@ initiative's Harness Delta.
   - **Header collapse @ 375px:** the top-bar "Invitations" link renders **icon-only** (the text `<span>` is `hidden sm:inline`); board title renders at `text-xl`; the board header toolbar wraps without overflow.
   - **Desktop unchanged @ 700px (≥ sm):** both columns measured **320px** (the fixed `w-80`), `bodyOverflowX = false` — the responsive prefixes relax only the mobile case.
   - **Drag-and-drop:** drag handles ("Drag card" / "Drag list") render at mobile width; the change is width-CSS-only and touches neither the `@hello-pangea/dnd` index space, the `apply-drop` math, nor the long-press touch sensor, so touch/keyboard drag is structurally identical to the already-proven desktop DnD (US-009/US-012 e2e). A scripted synthetic touch-drag was **not** run (CDP pointer-drag does not reliably engage the dnd sensor — see the keyboard-drag testing note); no behavioral change to re-prove.
+- Code review (independent five-axis pass): Approve after one required a11y
+  fix — hiding the "Invitations" header text below `sm:` left an icon-only link
+  with no accessible name (the Hugeicons SVG carries none). Fixed by adding
+  `aria-label="Invitations"` to the `<Link>` (commit `cbc587f`); re-verified at
+  375px the link exposes the accessible name "Invitations". Reviewer confirmed
+  the Tailwind responsive rules, the dnd index-space invariant, and the
+  `viewport` export are all correct.
 - Changed files: `app/layout.tsx`, `app/(authenticated)/layout.tsx`,
   `app/(authenticated)/(dashboard)/boards/boards-page-client.tsx`,
   `app/(authenticated)/(dashboard)/boards/[boardId]/page.tsx`,
