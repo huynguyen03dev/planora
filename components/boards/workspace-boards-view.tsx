@@ -16,12 +16,14 @@ type WorkspaceBoardsViewProps = {
     title: string;
     backgroundColor?: string | null;
   }[];
+  starredBoardIds?: string[];
   canCreateBoard: boolean;
 };
 
 export function WorkspaceBoardsView({
   workspace,
   boards,
+  starredBoardIds = [],
   canCreateBoard,
 }: WorkspaceBoardsViewProps) {
   const [isCreateBoardOpen, setCreateBoardOpen] = useState(false);
@@ -59,6 +61,7 @@ export function WorkspaceBoardsView({
             id={board.id}
             title={board.title}
             backgroundColor={board.backgroundColor}
+            starred={starredBoardIds.includes(board.id)}
           />
         ))}
 

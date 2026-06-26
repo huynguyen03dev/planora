@@ -18,9 +18,10 @@ type WorkspaceSectionProps = {
     title: string;
     backgroundColor?: string | null;
   }[];
+  starredBoardIds?: string[];
 };
 
-export function WorkspaceSection({ workspace, boards }: WorkspaceSectionProps) {
+export function WorkspaceSection({ workspace, boards, starredBoardIds = [] }: WorkspaceSectionProps) {
   const [isCreateBoardOpen, setCreateBoardOpen] = useState(false);
   const initial = workspace.name.charAt(0).toUpperCase();
 
@@ -42,6 +43,7 @@ export function WorkspaceSection({ workspace, boards }: WorkspaceSectionProps) {
             id={board.id}
             title={board.title}
             backgroundColor={board.backgroundColor}
+            starred={starredBoardIds.includes(board.id)}
           />
         ))}
 

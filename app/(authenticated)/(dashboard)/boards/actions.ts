@@ -2,8 +2,8 @@
 
 import { refresh, revalidatePath } from "next/cache";
 
-import { getBoardById, createBoard, updateBoard, deleteBoard } from "@/lib/board";
-import { hasWorkspacePermission } from "@/lib/authorization";
+import { getBoardById, createBoard, updateBoard, deleteBoard, toggleBoardStar } from "@/lib/board";
+import { hasWorkspacePermission, isWorkspaceMember } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
 import { createWorkspaceForCurrentUser } from "@/lib/workspace";
 import {
@@ -186,5 +186,33 @@ export async function deleteBoardAction(boardId: string): Promise<DeleteBoardRes
       success: false,
       error: "Failed to delete board. Please try again.",
     };
+  }
+}
+
+type ToggleStarResult =
+  | { success: true; starred: boolean }
+  | { success: false; error: string };
+
+export async function toggleBoardStarAction(
+  boardId: string,
+): Promise<ToggleStarResult> {
+  const { userId } = await verifySession();
+
+  const board = await getBoardById(boardId);
+  if (!board) {
+    return { success: false, error: "Board not found" };
+  }
+
+  const isMember = await isWorkspaceMember(userId, board.workspaceId);
+  if (!isMember) {
+    return { success: false, error: "Board not found" };
+  }
+
+  try {
+    const starred = await toggleBoardStar(userId, boardId);
+    revalidatePath("/boards");
+    return { success: true, starred };
+  } catch {
+    return { success: false, error: "Failed to toggle star" };
   }
 }

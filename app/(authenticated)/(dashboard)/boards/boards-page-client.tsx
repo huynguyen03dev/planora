@@ -17,6 +17,7 @@ type WorkspaceSummary = {
 type BoardsPageClientProps = {
   workspaces: WorkspaceSummary[];
   boards: WorkspaceBoard[];
+  starredBoardIds: string[];
   selectedWorkspaceId: string | null;
   onOpenModal: () => void;
 };
@@ -24,6 +25,7 @@ type BoardsPageClientProps = {
 export function BoardsPageClient({
   workspaces,
   boards,
+  starredBoardIds,
   selectedWorkspaceId,
   onOpenModal,
 }: BoardsPageClientProps) {
@@ -50,10 +52,11 @@ export function BoardsPageClient({
               boards={boards.filter(
                 (board) => board.workspaceId === selectedWorkspace.id,
               )}
+              starredBoardIds={starredBoardIds}
               canCreateBoard={selectedWorkspace.canCreateBoard}
             />
           ) : (
-            <BoardsOverview workspaces={workspaces} boards={boards} />
+            <BoardsOverview workspaces={workspaces} boards={boards} starredBoardIds={starredBoardIds} />
           )}
         </main>
       </div>
