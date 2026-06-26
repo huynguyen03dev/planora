@@ -211,7 +211,7 @@ export function BoardContent({
             <div
               ref={provided.innerRef}
               {...provided.droppableProps}
-              className="flex w-max min-w-full items-start gap-4 p-4"
+              className="flex w-max min-w-full items-start gap-4 p-3 sm:p-4"
             >
               {boardLists.map((list, index) => (
                 <ListColumn

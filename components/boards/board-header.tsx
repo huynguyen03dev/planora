@@ -135,10 +135,10 @@ export function BoardHeader({
               }}
               className="max-w-full text-left"
             >
-              <h1 className="truncate text-2xl font-semibold text-white">{board.title}</h1>
+              <h1 className="truncate text-xl font-semibold text-white sm:text-2xl">{board.title}</h1>
             </button>
           ) : (
-            <h1 className="truncate text-2xl font-semibold text-white">{board.title}</h1>
+            <h1 className="truncate text-xl font-semibold text-white sm:text-2xl">{board.title}</h1>
           )}
         </div>
 

@@ -46,7 +46,7 @@ export function AuthenticatedHeaderActions({ initialUnreadCount }: Authenticated
         }`}
       >
         <HugeiconsIcon icon={InboxIcon} className="size-4" />
-        <span>Invitations</span>
+        <span className="hidden sm:inline">Invitations</span>
       </Link>
       <div className="relative">
         <NotificationBell

@@ -218,7 +218,7 @@ export default async function BoardPage({
       canEditCard={canEditCard}
       canArchiveCard={canArchiveCard}
     >
-      <div className="flex h-full min-h-0 flex-1 flex-col p-6">
+      <div className="flex h-full min-h-0 flex-1 flex-col p-3 sm:p-6">
         <BoardHeader
           board={{
             id: board.id,
