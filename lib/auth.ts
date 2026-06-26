@@ -57,6 +57,7 @@ export const auth = betterAuth({
             inviteLink,
             invitedByEmail: inviter.user.email,
           }),
+          fromName: `${inviter.user.name ?? inviter.user.email.split("@")[0]} invited you to Planora`,
         }).catch((error) => {
           console.error("[auth] Failed to send invitation email:", error);
         });
