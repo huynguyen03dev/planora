@@ -163,6 +163,7 @@ export async function notifyCardAssigned(data: {
           assignedByName: data.assignedByName,
           cardLink: `${appUrl}/boards/${data.boardId}`,
         }),
+        fromName: `${data.assignedByName} (Planora)`,
       });
     }
   } catch (error) {
@@ -314,6 +315,7 @@ export async function notifyMentioned(data: {
             boardName: data.boardTitle,
             cardLink: `${appUrl}/boards/${data.boardId}`,
           }),
+          fromName: `${data.commenterName} mentioned you (Planora)`,
         });
       } catch (emailError) {
         console.error("[notification] Failed to send mention email:", emailError);
