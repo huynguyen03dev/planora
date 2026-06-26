@@ -89,4 +89,49 @@ app.prepare().then(() => {
   server.listen(port, () => {
     console.log(`> Ready on http://${hostname}:${port}`);
   });
+
+  // ── Due-date reminder scheduler driver ───────────────────────────────
+  // In-process setInterval that hits the cron route every 15 minutes.
+  // No-op when CRON_SECRET is unset (prod may use external cron instead).
+  let reminderInterval: ReturnType<typeof setInterval> | null = null;
+
+  if (process.env.CRON_SECRET) {
+    const CRON_INTERVAL_MS = 15 * 60 * 1000;
+    const appUrl = `http://${hostname}:${port}`;
+
+    reminderInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`${appUrl}/api/cron/due-date-reminders`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.CRON_SECRET}`,
+            "Content-Type": "application/json",
+          },
+        });
+        if (!response.ok) {
+          console.error(`[due-date-scheduler] HTTP ${response.status} from cron route`);
+        }
+      } catch (error) {
+        console.error("[due-date-scheduler] Failed to tick:", error);
+      }
+    }, CRON_INTERVAL_MS);
+
+    console.log(`[due-date-scheduler] In-process driver started (interval=${CRON_INTERVAL_MS}ms)`);
+  } else {
+    console.log("[due-date-scheduler] CRON_SECRET unset — in-process driver disabled");
+  }
+
+  // ── Graceful shutdown (MEDIUM-2) ────────────────────────────────────
+  const shutdown = () => {
+    console.log("[server] Shutting down...");
+    if (reminderInterval) {
+      clearInterval(reminderInterval);
+      reminderInterval = null;
+    }
+    io.close();
+    server.close(() => process.exit(0));
+  };
+
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 });
