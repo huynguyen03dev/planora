@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { IMAGE_MIME_TYPES, fileSchema } from "./file";
+
 const MIN_CARD_TITLE_LENGTH = 1;
 const MAX_CARD_TITLE_LENGTH = 160;
 
@@ -130,3 +132,24 @@ export const updateCardDueDateSchema = z.object({
 });
 
 export type UpdateCardDueDateInput = z.infer<typeof updateCardDueDateSchema>;
+
+export const updateCardPrioritySchema = z.object({
+  cardId: z.string().uuid({ message: "Invalid card ID" }),
+  priority: z.enum(["URGENT", "HIGH", "MEDIUM", "LOW"]).nullable(),
+});
+
+export type UpdateCardPriorityInput = z.infer<typeof updateCardPrioritySchema>;
+
+export const updateCardCoverSchema = z.object({
+  cardId: z.string().uuid({ message: "Invalid card ID" }),
+  coverImage: z.string().url({ message: "Must be a valid URL" }).max(2048).nullable(),
+});
+
+export type UpdateCardCoverInput = z.infer<typeof updateCardCoverSchema>;
+
+export const setCardCoverSchema = z.object({
+  cardId: z.string().uuid({ message: "Invalid card ID" }),
+  file: fileSchema(IMAGE_MIME_TYPES, "Only image files are allowed"),
+});
+
+export type SetCardCoverInput = z.infer<typeof setCardCoverSchema>;

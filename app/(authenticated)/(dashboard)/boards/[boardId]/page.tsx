@@ -148,6 +148,8 @@ export default async function BoardPage({
       listId: card.listId,
       title: card.title,
       position: card.position,
+      coverImage: card.coverImage,
+      priority: card.priority,
       labels: card.labels,
     })),
   }));
@@ -162,6 +164,8 @@ export default async function BoardPage({
           estimateHours: selectedCard.estimateHours,
           dueDate: selectedCard.dueDate,
           completedAt: selectedCard.completedAt,
+          coverImage: selectedCard.coverImage,
+          priority: selectedCard.priority,
           updatedAt: selectedCard.updatedAt,
         },
         comments: comments.map((c) => ({

@@ -41,6 +41,8 @@ export type CardDetailRecord = {
   estimateHours: number | null;
   dueDate: Date | null;
   completedAt: Date | null;
+  priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
+  coverImage: string | null;
   updatedAt: Date;
 };
 
@@ -52,6 +54,8 @@ const CARD_DETAIL_SELECT = {
   estimateHours: true,
   dueDate: true,
   completedAt: true,
+  priority: true,
+  coverImage: true,
   updatedAt: true,
 } as const;
 
@@ -756,3 +760,25 @@ export async function getArchivedCardWithListAndBoard(
   };
 }
 
+
+export async function updateCardCover(
+  cardId: string,
+  coverImage: string | null,
+): Promise<CardDetailRecord> {
+  return db.card.update({
+    where: { id: cardId, archivedAt: null },
+    data: { coverImage },
+    select: CARD_DETAIL_SELECT,
+  });
+}
+
+export async function updateCardPriority(
+  cardId: string,
+  priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null,
+): Promise<CardDetailRecord> {
+  return db.card.update({
+    where: { id: cardId, archivedAt: null },
+    data: { priority },
+    select: CARD_DETAIL_SELECT,
+  });
+}
