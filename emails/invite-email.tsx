@@ -1,13 +1,10 @@
 import {
-  Body,
-  Button,
-  Container,
-  Head,
-  Html,
-  Preview,
-  Section,
-  Text,
-} from "@react-email/components";
+  EmailButton,
+  EmailHeading,
+  EmailLayout,
+  EmailText,
+  FallbackLink,
+} from "./components/email-layout";
 
 type InviteEmailProps = {
   workspaceName: string;
@@ -21,41 +18,17 @@ export function InviteEmail({
   invitedByEmail,
 }: InviteEmailProps) {
   return (
-    <Html>
-      <Head />
-      <Preview>
-        You have been invited to join {workspaceName} on Planora
-      </Preview>
-      <Body style={{ fontFamily: "sans-serif", margin: "0 auto" }}>
-        <Container>
-          <Section>
-            <Text style={{ fontSize: "24px", fontWeight: "bold" }}>
-              You&apos;re invited to join {workspaceName}
-            </Text>
-            <Text>
-              {invitedByEmail} has invited you to collaborate on the{" "}
-              <strong>{workspaceName}</strong> workspace in Planora.
-            </Text>
-            <Button
-              href={inviteLink}
-              style={{
-                backgroundColor: "#0f172a",
-                color: "#fff",
-                padding: "12px 24px",
-                borderRadius: "6px",
-                textDecoration: "none",
-                display: "inline-block",
-              }}
-            >
-              Accept Invitation
-            </Button>
-            <Text style={{ color: "#64748b", fontSize: "14px" }}>
-              If the button doesn&apos;t work, copy and paste this link into
-              your browser: {inviteLink}
-            </Text>
-          </Section>
-        </Container>
-      </Body>
-    </Html>
+    <EmailLayout
+      preview={`You have been invited to join ${workspaceName} on Planora`}
+      footerNote={`You received this email because ${invitedByEmail} invited you to collaborate on Planora. If you weren't expecting this, you can safely ignore it.`}
+    >
+      <EmailHeading>You&apos;re invited to join {workspaceName}</EmailHeading>
+      <EmailText>
+        <strong>{invitedByEmail}</strong> has invited you to collaborate on the{" "}
+        <strong>{workspaceName}</strong> workspace in Planora.
+      </EmailText>
+      <EmailButton href={inviteLink}>Accept invitation</EmailButton>
+      <FallbackLink href={inviteLink} />
+    </EmailLayout>
   );
 }
