@@ -1,13 +1,12 @@
+import { Text } from "@react-email/components";
+
 import {
-  Body,
-  Button,
-  Container,
-  Head,
-  Html,
-  Preview,
-  Section,
-  Text,
-} from "@react-email/components";
+  EmailButton,
+  EmailHeading,
+  EmailLayout,
+  EmailText,
+  FallbackLink,
+} from "./components/email-layout";
 
 type DueDateEmailProps = {
   milestone: "DUE_SOON" | "OVERDUE";
@@ -15,6 +14,11 @@ type DueDateEmailProps = {
   boardName: string;
   cardLink: string;
 };
+
+const badgePalette = {
+  DUE_SOON: { background: "#fef3c7", color: "#92400e", label: "Due soon" },
+  OVERDUE: { background: "#fee2e2", color: "#991b1b", label: "Overdue" },
+} as const;
 
 export function DueDateEmail({
   milestone,
@@ -24,44 +28,34 @@ export function DueDateEmail({
 }: DueDateEmailProps) {
   const label = milestone === "DUE_SOON" ? "due soon" : "overdue";
   const previewText = `"${cardTitle}" is ${label} on ${boardName}`;
-  const heading =
-    milestone === "DUE_SOON" ? "Card due soon" : "Card overdue";
+  const heading = milestone === "DUE_SOON" ? "Card due soon" : "Card overdue";
+  const badge = badgePalette[milestone];
 
   return (
-    <Html>
-      <Head />
-      <Preview>{previewText}</Preview>
-      <Body style={{ fontFamily: "sans-serif", margin: "0 auto" }}>
-        <Container>
-          <Section>
-            <Text style={{ fontSize: "24px", fontWeight: "bold" }}>
-              {heading}
-            </Text>
-            <Text>
-              The card <strong>{cardTitle}</strong> on{" "}
-              <strong>{boardName}</strong> is{" "}
-              {milestone === "DUE_SOON" ? "due soon" : "overdue"}.
-            </Text>
-            <Button
-              href={cardLink}
-              style={{
-                backgroundColor: "#0f172a",
-                color: "#fff",
-                padding: "12px 24px",
-                borderRadius: "6px",
-                textDecoration: "none",
-                display: "inline-block",
-              }}
-            >
-              View Card
-            </Button>
-            <Text style={{ color: "#64748b", fontSize: "14px" }}>
-              If the button doesn&apos;t work, copy and paste this link into
-              your browser: {cardLink}
-            </Text>
-          </Section>
-        </Container>
-      </Body>
-    </Html>
+    <EmailLayout preview={previewText}>
+      <Text
+        style={{
+          display: "inline-block",
+          backgroundColor: badge.background,
+          color: badge.color,
+          fontSize: "12px",
+          fontWeight: 600,
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+          padding: "4px 10px",
+          borderRadius: "9999px",
+          margin: "0 0 12px",
+        }}
+      >
+        {badge.label}
+      </Text>
+      <EmailHeading>{heading}</EmailHeading>
+      <EmailText>
+        The card <strong>{cardTitle}</strong> on <strong>{boardName}</strong> is{" "}
+        {label}.
+      </EmailText>
+      <EmailButton href={cardLink}>View card</EmailButton>
+      <FallbackLink href={cardLink} />
+    </EmailLayout>
   );
 }

@@ -101,3 +101,9 @@ HTTP route instead.
 `lib/email.ts` sends via **Resend** using React Email templates. Email is a
 side effect of the same Server Action that creates the in-app notification;
 failures should not roll back the primary mutation but must be logged.
+
+All templates render through the shared branded layout in
+`emails/components/email-layout.tsx` (Planora wordmark header, framed card,
+shared typography, CTA button, fallback link, and footer) so every
+transactional email is visually consistent. Templates supply only their own
+heading, body copy, and call to action.
