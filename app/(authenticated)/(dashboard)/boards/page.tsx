@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { hasWorkspacePermission } from "@/lib/authorization";
+import { getStarredBoardIds } from "@/lib/board";
 import { verifySession } from "@/lib/dal";
 import {
   listBoardsByWorkspaceIds,
@@ -38,11 +39,13 @@ export default async function BoardsPage({ searchParams }: BoardsPageProps) {
   }
 
   const boards = await listBoardsByWorkspaceIds(workspaceIds);
+  const starredBoardIds = await getStarredBoardIds(userId);
 
   return (
     <BoardsPageWrapper
       workspaces={workspaces}
       boards={boards}
+      starredBoardIds={starredBoardIds}
       selectedWorkspaceId={selectedWorkspaceId}
     />
   );
