@@ -14,7 +14,7 @@ export default async function AuthenticatedLayout({
   return (
     <SocketLifecycleProvider>
       <div className="flex min-h-screen flex-col">
-        <header className="flex h-14 items-center justify-between border-b px-6">
+        <header className="flex h-14 items-center justify-between border-b px-4 sm:px-6">
           <Link href="/boards" className="text-lg font-semibold">
             Planora
           </Link>

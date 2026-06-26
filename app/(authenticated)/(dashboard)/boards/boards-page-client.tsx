@@ -45,7 +45,7 @@ export function BoardsPageClient({
     <>
       <div className="flex flex-1 flex-col md:flex-row">
         <BoardsSidebar workspaces={workspaces} />
-        <main className="flex-1 p-6">
+        <main className="flex-1 p-4 sm:p-6">
           {selectedWorkspace ? (
             <WorkspaceBoardsView
               workspace={selectedWorkspace}

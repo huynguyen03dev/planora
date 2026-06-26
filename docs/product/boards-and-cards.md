@@ -109,6 +109,20 @@ normalizes positions on overflow. The neighbour math is pure and unit-tested in
   (those live in the card detail sheet), so those dimensions need the card
   payload enriched first.
 
+## Responsive / mobile (US-021)
+
+The authenticated shell and board view are usable at phone width with no
+horizontal page overflow — only the board canvas scrolls sideways, inside its
+own region. Lists are **fluid-width on phones** (`~80vw`, capped at the `20rem`
+desktop column) so the next list peeks into view and signals horizontal scroll;
+at the `sm:` breakpoint and up they return to the fixed `w-80` (320px) desktop
+width, so desktop renders unchanged. Page/canvas/header padding and the board
+title scale down on small screens. This is a presentation-only concern (pure
+Tailwind breakpoints, no JS viewport detection, no data/contract change).
+Drag-and-drop is untouched — width is the only thing that changes, so the
+`@hello-pangea/dnd` index space and `apply-drop` math (and the long-press touch
+sensor) behave exactly as on desktop.
+
 ## Activity
 
 Board/list/card changes write to the workspace **Activity** log
