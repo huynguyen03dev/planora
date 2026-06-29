@@ -2,11 +2,10 @@
 
 ## Status
 
-in progress — opened 2026-06-26. **Shipped: US-028, US-029** (Theme A) **·
-US-030** (Theme B — complete, 2026-06-29) **· US-031, US-032, US-033** (Theme C —
-complete, 2026-06-29) **· US-034, US-035, US-036, US-039, US-040** (Theme D — complete,
-2026-06-29) **· US-038** (Theme E, 2026-06-29) — all manual QA. Remaining:
-US-037 (Theme E) — reservation awaiting individual intake.
+**complete — closed 2026-06-29.** Shipped: **US-028, US-029** (Theme A) **·
+US-030** (Theme B) **· US-031, US-032, US-033** (Theme C) **· US-034, US-035,
+US-036, US-039, US-040** (Theme D) **· US-037, US-038** (Theme E) — all manual
+QA. Every theme (A–E) is delivered; no children remain.
 
 ## Type
 
@@ -162,7 +161,7 @@ Next free id at authoring time is **US-028**.
 
 | ID | Candidate story | Lane (est.) | Notes |
 | --- | --- | --- | --- |
-| US-037 | Board cards show info density (list/card count, last-updated, member avatars) instead of empty color blocks | normal | Low information density today. |
+| US-037 | Board cards show info density (list/card count, last-updated, member avatars) instead of empty color blocks | normal | ✅ **shipped 2026-06-29.** `board-card.tsx` rebuilt: colored header (title+star) + footer with `lists · cards`, last-activity relative time, capped assignee avatars (+N). `lib/workspace.ts` `WorkspaceBoard` enriched (`listCount`/`cardCount`/`lastActivityAt`/`members`/`memberCount`) via a **bounded** query — nested `_count` (rows scale with list count, not cards) + the repo's first `$queryRaw` for distinct `cardMember→card→list` assignees (FK/PK-indexed, parameterised, scoped to authorized boards). Last-activity = `max(board,list,card updatedAt)`. No migration/auth/Server-Action. Light+dark+375px QA; 514 tests green; app build compiles. Story: `docs/stories/epics/E02-board-experience/US-037-board-card-info-density.md`. Intake #28. |
 | US-038 | Boards grid uses the full row width (cards cling to a narrow left column at ≥1440px) | tiny | ✅ **shipped 2026-06-29.** Three board-tile containers (`boards-overview.tsx`, `workspace-section.tsx`, `workspace-boards-view.tsx`) switched from fixed-width `flex flex-wrap` to a responsive auto-fill grid (`minmax(13rem,1fr)`); tiles + create-board button made fluid (`w-44`→`w-full`); loading skeleton matched. Measured 5 even columns of ~229px at 1512px (was fixed 176px left-clinging); no overflow at 375px; light+dark QA; 514 tests green. Story: `docs/stories/epics/E02-board-experience/US-038-boards-grid-full-width.md`. Intake #27. |
 
 ## Recommended Sequencing
