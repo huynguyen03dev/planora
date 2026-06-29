@@ -41,6 +41,7 @@ Typed via `ServerToClientEvents` / `ClientToServerEvents` in
 | `list:updated` | board | title / isDone | live (in-place) |
 | `list:deleted` | board | listId | **deferred** |
 | `comment:created` | board | comment + activity + author | live (in-place); cross-client propagation to an open detail sheet proven (US-012) |
+| `board:presence` | board | watchers[] ({id,name,image}) | live (in-place); who currently has the board open — ephemeral live presence (US-041) |
 | `notification:new` | user | notification | live |
 | `analytics:refresh` | workspace | (signal only) | live |
 | `board:error` | board | error | live |
@@ -98,6 +99,28 @@ moves always apply. Mirrors the existing id-based dedupe in
 
 The drag-aware deferral invariant above is unchanged: `card:moved` / `list:moved`
 remain structural and are deferred during a local drag.
+
+## Live presence (decision 0012, US-041)
+
+The board header shows **who currently has the board open** — ephemeral live
+presence, not a persisted "watch/subscribe". State lives in an in-memory
+`PresenceRegistry` (`lib/realtime/presence.ts`), a process-global singleton like
+`global.io`. It maps `boardId → userId → socketIds` (deduped by user, so multiple
+tabs are one avatar) plus a reverse `socketId → boards` index.
+
+- **Wiring (`server.ts`):** `board:join` (after the `canUserJoinBoard` gate)
+  resolves the user's `{id,name,image}` via `getUserProfile` (memoized on
+  `socket.data`), calls `presenceRegistry.add`, and broadcasts when the visible
+  set changes. `board:leave` calls `remove`; `disconnect` calls `removeSocket`
+  (using the reverse index — `socket.rooms` is already cleared by then). Each
+  broadcast emits the full list via `emitBoardPresence` → `board:presence`.
+- **Client:** the store holds `watchers`; `applyRemotePresence` replaces it
+  (guarded on `boardId` like every `applyRemote*`). The provider seeds the
+  current viewer (`seedWatchers`) on mount to avoid an empty-avatar flash; the
+  first server broadcast — deduped by user id — takes over. Presence is in-place
+  (never touches the lists array), so it is **not** drag-deferred.
+- **Scope/limits:** in-memory and single-server (see decision 0012); resets on
+  server restart, clients re-join on reconnect.
 
 ## Proof
 

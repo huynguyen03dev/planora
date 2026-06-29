@@ -3,11 +3,13 @@ import { createServer } from "http";
 import { parse } from "url";
 import next from "next";
 
-import { initIO } from "@/lib/realtime/server";
-import { authenticateSocket, canUserJoinBoard, canUserJoinWorkspace } from "@/lib/realtime/auth";
+import { initIO, emitBoardPresence } from "@/lib/realtime/server";
+import { authenticateSocket, canUserJoinBoard, canUserJoinWorkspace, getUserProfile } from "@/lib/realtime/auth";
 import { ROOMS } from "@/lib/realtime/events";
+import { presenceRegistry } from "@/lib/realtime/presence";
+import type { Watcher } from "@/lib/realtime/types";
 
-type SocketData = { userId: string };
+type SocketData = { userId: string; profile?: Watcher | null };
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = dev ? "localhost" : (process.env.HOSTNAME || "0.0.0.0");
@@ -56,12 +58,39 @@ app.prepare().then(() => {
         return;
       }
 
+      // The tab may have closed during the auth round-trip — don't register a
+      // watcher for a dead socket (no disconnect would ever clean it up).
+      if (!socket.connected) {
+        return;
+      }
+
       socket.join(ROOMS.board(boardId));
+
+      // Resolve the display profile once per connection (it never changes).
+      const data = socket.data as SocketData;
+      if (data.profile === undefined) {
+        data.profile = await getUserProfile(userId);
+      }
+      const profile = data.profile;
+      if (!profile || !socket.connected) {
+        return;
+      }
+
+      // Broadcast only when this is the user's first socket on the board; the
+      // broadcast targets the room the joiner is now in, so they receive the
+      // full list too.
+      if (presenceRegistry.add(boardId, socket.id, profile)) {
+        emitBoardPresence(boardId, presenceRegistry.watchers(boardId));
+      }
     });
 
     socket.on("board:leave", (payload) => {
       const { boardId } = payload;
       socket.leave(ROOMS.board(boardId));
+
+      if (presenceRegistry.remove(boardId, socket.id, userId)) {
+        emitBoardPresence(boardId, presenceRegistry.watchers(boardId));
+      }
     });
 
     socket.on("workspace:join", async (payload) => {
@@ -82,7 +111,13 @@ app.prepare().then(() => {
     });
 
     socket.on("disconnect", () => {
-      // Cleanup if needed
+      // Drop this socket from every board it was viewing and refresh presence for
+      // the boards where the user actually left (last tab gone). Uses the
+      // registry's reverse index, so `socket.rooms` (already cleared by now) is
+      // not needed.
+      for (const boardId of presenceRegistry.removeSocket(socket.id)) {
+        emitBoardPresence(boardId, presenceRegistry.watchers(boardId));
+      }
     });
   });
 

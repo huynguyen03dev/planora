@@ -3,6 +3,7 @@
 import { create } from "zustand";
 
 import type {
+  BoardPresencePayload,
   CardArchivedPayload,
   CardCreatedPayload,
   CardLabelsUpdatedPayload,
@@ -14,6 +15,7 @@ import type {
   ListDeletedPayload,
   ListMovedPayload,
   ListUpdatedPayload,
+  Watcher,
 } from "@/lib/realtime/types";
 
 export type CardLabel = {
@@ -111,6 +113,8 @@ type BoardStore = {
   socketConnected: boolean;
   isDragging: boolean;
   pendingResync: boolean;
+  /** Users currently viewing this board (live presence). Deduped, server-driven. */
+  watchers: Watcher[];
   /** Client-only view filter: card label ids to keep visible (OR). Empty = show all. */
   filterLabelIds: string[];
   /** Client-only card search: title substring (case-insensitive). Empty = show all. */
@@ -121,6 +125,8 @@ type BoardStore = {
   setSelectedCardId: (cardId: string | null) => void;
   setSelectedCard: (card: SelectedCardData | null) => void;
   setSocketConnected: (connected: boolean) => void;
+  /** Seed presence with the current viewer to avoid an empty-avatar flash; no-op if already populated. */
+  seedWatchers: (watchers: Watcher[]) => void;
   setDragging: (dragging: boolean) => void;
   markResyncPending: () => void;
   consumeResync: () => boolean;
@@ -140,6 +146,7 @@ type BoardStore = {
   applyRemoteCardLabelsUpdated: (payload: CardLabelsUpdatedPayload) => void;
   applyRemoteCardMembersUpdated: (payload: CardMembersUpdatedPayload) => void;
   applyRemoteCommentCreated: (payload: CommentCreatedPayload) => void;
+  applyRemotePresence: (payload: BoardPresencePayload) => void;
 };
 
 export const useBoardStore = create<BoardStore>((set, get) => ({
@@ -150,6 +157,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
   socketConnected: false,
   isDragging: false,
   pendingResync: false,
+  watchers: [],
   filterLabelIds: [],
   searchQuery: "",
 
@@ -162,6 +170,13 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
   setSelectedCard: (card) => set({ selectedCard: card }),
 
   setSocketConnected: (connected) => set({ socketConnected: connected }),
+
+  // Seed presence with a known baseline (the current viewer) so the header isn't
+  // blank before the first server broadcast. The caller keys this on boardId, so
+  // it runs once per board — resetting to just yourself on a board switch, while
+  // the authoritative `board:presence` broadcast (deduped by user id) fills in
+  // everyone else a moment later.
+  seedWatchers: (watchers) => set({ watchers }),
 
   setDragging: (dragging) => set({ isDragging: dragging }),
 
@@ -203,9 +218,21 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     socketConnected: false,
     isDragging: false,
     pendingResync: false,
+    watchers: [],
     filterLabelIds: [],
     searchQuery: "",
   }),
+
+  // Live presence: replace the watcher list with the server's authoritative set.
+  // Guarded on boardId like every applyRemote* — during A→B navigation the socket
+  // is briefly in both rooms, so a stale board-A payload can arrive after switching.
+  applyRemotePresence: (payload) => {
+    if (get().boardId !== payload.boardId) {
+      return;
+    }
+
+    set({ watchers: payload.watchers });
+  },
 
   applyRemoteCardMoved: (payload) => {
     const { boardId } = get();

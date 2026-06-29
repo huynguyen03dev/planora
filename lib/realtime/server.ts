@@ -1,6 +1,6 @@
 import { Server } from "socket.io";
 
-import type { CardLabelSnapshot, CardMemberSnapshot, CardSnapshot, ListSnapshot, NotificationNewPayload, ServerToClientEvents, ClientToServerEvents } from "./types";
+import type { CardLabelSnapshot, CardMemberSnapshot, CardSnapshot, ListSnapshot, NotificationNewPayload, ServerToClientEvents, ClientToServerEvents, Watcher } from "./types";
 import { ROOMS } from "./events";
 
 declare global {
@@ -267,6 +267,26 @@ export function emitCommentCreated(boardId: string, payload: {
     });
   } catch (error) {
     console.error("[realtime] Failed to emit comment:created:", error);
+  }
+}
+
+// Live presence (not structural): the set of users currently viewing a board
+// changed. Broadcast the full watcher list to the board room. Ephemeral — never
+// touches the lists array, so it is always safe to apply (no drag deferral).
+export function emitBoardPresence(boardId: string, watchers: Watcher[]) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.board(boardId)).emit("board:presence", {
+      boardId,
+      watchers,
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit board:presence:", error);
   }
 }
 
