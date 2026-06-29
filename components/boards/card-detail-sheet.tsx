@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition, useRef, useEffect } from "react";
+import { useState, useTransition, useRef } from "react";
+import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import {
@@ -14,15 +15,18 @@ import {
   updateCardEstimateAction,
   updateCardPriorityAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogClose,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -40,13 +44,42 @@ import type { AttachmentRecord } from "@/lib/attachment";
 import type { CardMemberRecord, AssignableWorkspaceMemberRecord } from "@/lib/card-member";
 import { cn } from "@/lib/utils";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
-import { mentionMatchesName, extractMentionQuery } from "@/lib/mention";
+import { useMentionAutocomplete } from "./use-mention-autocomplete";
 
 const estimateOptions = ["", "1", "2", "4", "8", "16"] as const;
 
 function toDateInputValue(date: Date | null): string {
   return date ? date.toISOString().slice(0, 10) : "";
 }
+
+function getInitials(name: string): string {
+  return name
+    .split(" ")
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+function MemberAvatar({
+  name,
+  image,
+  size = "default",
+  className,
+}: {
+  name: string;
+  image?: string | null;
+  size?: "default" | "sm" | "lg";
+  className?: string;
+}) {
+  return (
+    <Avatar size={size} className={className}>
+      {image ? <AvatarImage src={image} alt={name} /> : null}
+      <AvatarFallback>{getInitials(name)}</AvatarFallback>
+    </Avatar>
+  );
+}
+
 
 type UIComment = {
   id: string;
@@ -375,9 +408,9 @@ function CardDetailDialogBody({
           <DialogTitle className="text-2xl font-semibold tracking-tight">
             {canEdit ? "Edit card" : "Card details"}
           </DialogTitle>
-          <p className="text-sm text-muted-foreground">
+          <DialogDescription>
             Review this card, update its description, and prepare the space for collaboration.
-          </p>
+          </DialogDescription>
         </DialogHeader>
 
         <DialogClose asChild>
@@ -662,7 +695,7 @@ function CardDetailDialogBody({
               </div>
 
               {canEdit ? (
-                <textarea
+                <Textarea
                   id="card-detail-description"
                   value={draftDescription}
                   onChange={(e) => {
@@ -672,7 +705,7 @@ function CardDetailDialogBody({
                   disabled={isPending}
                   rows={10}
                   placeholder="Add a more detailed description..."
-                  className="flex min-h-44 w-full rounded-lg border border-input bg-transparent px-4 py-3 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  className="min-h-44"
                 />
               ) : (
                 <div className="min-h-44 rounded-lg border bg-muted/20 px-4 py-3 text-sm whitespace-pre-wrap">
@@ -702,9 +735,12 @@ function CardDetailDialogBody({
                       key={member.id}
                       className="flex items-center justify-between rounded-lg border bg-background px-3 py-2"
                     >
-                      <div>
-                        <div className="text-sm font-medium">{member.name}</div>
-                        <div className="text-xs text-muted-foreground">{member.email}</div>
+                      <div className="flex min-w-0 items-center gap-3">
+                        <MemberAvatar name={member.name} image={member.image} />
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium">{member.name}</div>
+                          <div className="truncate text-xs text-muted-foreground">{member.email}</div>
+                        </div>
                       </div>
                       {canEdit ? (
                         <Button
@@ -738,14 +774,19 @@ function CardDetailDialogBody({
                         <Button
                           key={member.id}
                           variant="outline"
-                          size="sm"
-                          className="w-full justify-start"
+                          className="h-auto w-full justify-start gap-3 py-2"
                           disabled={isPending}
                           onClick={() => {
                             handleAssignMember(member.id);
                           }}
                         >
-                          {member.name} ({member.email})
+                          <MemberAvatar name={member.name} image={member.image} size="sm" />
+                          <span className="flex min-w-0 flex-col text-left">
+                            <span className="truncate text-sm font-medium">{member.name}</span>
+                            <span className="truncate text-xs font-normal text-muted-foreground">
+                              {member.email}
+                            </span>
+                          </span>
                         </Button>
                       ))}
                     </div>
@@ -890,48 +931,28 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
   const [content, setContent] = useState("");
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
-  const [showMention, setShowMention] = useState(false);
-  const [mentionQuery, setMentionQuery] = useState("");
-  const [mentionStartIndex, setMentionStartIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const filteredMembers = showMention
-    ? assignableMembers.filter((m) =>
-        mentionQuery === "" || mentionMatchesName(mentionQuery, m.name)
-      )
-    : [];
-
-  useEffect(() => {
-    if (!showMention) return;
-    function handleClickOutside(e: MouseEvent) {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(e.target as Node)
-      ) {
-        setShowMention(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showMention]);
-
-  function handleMentionSelect(member: AssignableWorkspaceMemberRecord) {
-    const before = content.slice(0, mentionStartIndex);
-    const textarea = textareaRef.current;
-    const cursorPos = textarea?.selectionStart ?? content.length;
-    const after = content.slice(cursorPos);
-    const newContent = `${before}@${member.name} ${after}`;
-    setContent(newContent);
-    setShowMention(false);
-    setTimeout(() => {
-      if (textarea) {
-        const newPos = before.length + member.name.length + 2;
-        textarea.focus();
-        textarea.setSelectionRange(newPos, newPos);
-      }
-    }, 0);
-  }
+  const {
+    open: isMentionOpen,
+    items: mentionItems,
+    activeIndex: mentionActiveIndex,
+    setActiveIndex: setMentionActiveIndex,
+    setFloating: setMentionFloating,
+    floatingStyles: mentionFloatingStyles,
+    listboxId: mentionListboxId,
+    optionId: mentionOptionId,
+    selectMember: selectMentionMember,
+    comboboxProps: mentionComboboxProps,
+  } = useMentionAutocomplete({
+    members: assignableMembers,
+    value: content,
+    setValue: (value) => {
+      setContent(value);
+      setError("");
+    },
+    textareaRef,
+  });
 
   function handleSubmit() {
     if (!content.trim()) {
@@ -956,76 +977,63 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
   }
 
   return (
-    <div className="space-y-2 relative">
-      <textarea
+    <div className="space-y-2">
+      <Textarea
         ref={textareaRef}
         value={content}
-        onChange={(e) => {
-          const val = e.target.value;
-          setContent(val);
-          setError("");
-          const pos = e.target.selectionStart ?? val.length;
-          const mention = extractMentionQuery(val, pos);
-          if (mention) {
-            setShowMention(true);
-            setMentionQuery(mention.query);
-            setMentionStartIndex(mention.startIndex);
-          } else {
-            setShowMention(false);
-          }
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Escape" && showMention) {
-            setShowMention(false);
-          }
-        }}
         disabled={isPending || !canComment}
         rows={3}
         placeholder={canComment ? "Write a comment..." : "You do not have permission to comment on this card."}
-        className="flex min-h-20 w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        className="min-h-20"
+        {...mentionComboboxProps}
       />
-      {showMention && (
-        <div
-          ref={dropdownRef}
-          className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border bg-popover text-popover-foreground shadow-lg"
-        >
-          {filteredMembers.length === 0 ? (
-            <div className="px-3 py-2 text-sm text-muted-foreground">
-              No matches
-            </div>
-          ) : (
-            filteredMembers.map((member) => (
-              <button
-                key={member.id}
-                type="button"
-                className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground transition-colors text-left"
-                onClick={() => handleMentionSelect(member)}
-              >
-                {member.image ? (
-                  <img
-                    src={member.image}
-                    alt={member.name}
-                    className="h-6 w-6 shrink-0 rounded-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
-                    {member.name
-                      .split(" ")
-                      .map((n) => n[0])
-                      .slice(0, 2)
-                      .join("")
-                      .toUpperCase()}
+      {isMentionOpen
+        ? createPortal(
+            <div
+              ref={setMentionFloating}
+              style={mentionFloatingStyles}
+              id={mentionListboxId}
+              role="listbox"
+              aria-label="Mention a member"
+              // pointer-events-auto: the list is portaled to <body>, which Radix
+              // Dialog marks pointer-events:none while open; re-enable it here or
+              // clicks fall through to the textarea behind the (inert) backdrop.
+              className="pointer-events-auto z-50 w-56 overflow-y-auto rounded-lg border bg-popover text-popover-foreground shadow-lg"
+            >
+              {mentionItems.length === 0 ? (
+                <div className="px-3 py-2 text-sm text-muted-foreground">
+                  No matches
+                </div>
+              ) : (
+                mentionItems.map((member, index) => (
+                  <div
+                    key={member.id}
+                    id={mentionOptionId(index)}
+                    role="option"
+                    aria-selected={index === mentionActiveIndex}
+                    // Keep textarea focus on click so selection + caret restore work.
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setMentionActiveIndex(index)}
+                    onClick={() => selectMentionMember(member)}
+                    className={cn(
+                      "flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm transition-colors",
+                      index === mentionActiveIndex
+                        ? "bg-accent text-accent-foreground"
+                        : "text-popover-foreground",
+                    )}
+                  >
+                    <MemberAvatar name={member.name} image={member.image} size="sm" />
+                    <span className="flex-1 truncate">{member.name}</span>
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                      {member.role}
+                    </span>
                   </div>
-                )}
-                <span className="flex-1 truncate">{member.name}</span>
-                <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-                  {member.role}
-                </span>
-              </button>
-            ))
-          )}
-        </div>
-      )}
+                ))
+              )}
+            </div>,
+            document.body,
+          )
+        : null}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       {canComment && (
         <Button
@@ -1103,13 +1111,6 @@ function renderMentionContent(content: string, memberNames: string[]) {
 }
 
 function CommentItem({ comment, memberNames }: CommentItemProps) {
-  const initials = comment.user.name
-    .split(" ")
-    .map((n) => n[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-
   const date = new Date(comment.createdAt).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
@@ -1120,9 +1121,7 @@ function CommentItem({ comment, memberNames }: CommentItemProps) {
   return (
     <div className="rounded-lg border bg-background p-3">
       <div className="flex items-start gap-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
-          {initials}
-        </div>
+        <MemberAvatar name={comment.user.name} image={comment.user.image} />
         <div className="min-w-0 space-y-1">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium">{comment.user.name}</span>
@@ -1140,13 +1139,6 @@ type ActivityItemProps = {
 };
 
 function ActivityItem({ activity }: ActivityItemProps) {
-  const initials = activity.user.name
-    .split(" ")
-    .map((n) => n[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-
   const date = new Date(activity.createdAt).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
@@ -1159,9 +1151,7 @@ function ActivityItem({ activity }: ActivityItemProps) {
   return (
     <div className="rounded-lg border bg-background p-3">
       <div className="flex items-start gap-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
-          {initials}
-        </div>
+        <MemberAvatar name={activity.user.name} image={activity.user.image} />
         <div className="min-w-0 space-y-1">
           <p className="text-sm">
             <span className="font-medium">{activity.user.name}</span>{" "}
