@@ -61,6 +61,9 @@ export function BoardFilter() {
           <DropdownMenuCheckboxItem
             key={label.id}
             checked={filterLabelIds.includes(label.id)}
+            // Selected rows carry the brand tint (the #E9F2FE analogue, US-042)
+            // in addition to the check indicator, so selection is never color-only.
+            className="data-[state=checked]:bg-selected-tint data-[state=checked]:text-selected-tint-foreground"
             // Keep the menu open so multiple labels can be toggled in one pass.
             onSelect={(event) => event.preventDefault()}
             onCheckedChange={() => toggleLabelFilter(label.id)}
