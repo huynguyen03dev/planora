@@ -3,7 +3,16 @@
 import { useState, useTransition, useRef } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Calendar03Icon } from "@hugeicons/core-free-icons";
+import {
+  Attachment01Icon,
+  Calendar03Icon,
+  Cancel01Icon,
+  Flag03Icon,
+  Image01Icon,
+  Tag01Icon,
+  Task01Icon,
+  UserMultipleIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { format } from "date-fns";
 
@@ -31,10 +40,8 @@ import {
   DialogClose,
   DialogContent,
   DialogDescription,
-  DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -176,6 +183,18 @@ export function CardDetailSheet({
   const currentCard = card;
   const isOpen = open && dismissedCardId !== currentCard.id;
 
+  // Bind the hero title/description to the live store value (not the stale server
+  // prop) so a remote rename or description edit isn't clobbered when the field
+  // blurs (US-043). Comments/activity/members already merge from the store above.
+  const liveCard: CardDetailRecord =
+    storeSelectedCard && storeSelectedCard.card.id === currentCard.id
+      ? {
+          ...currentCard,
+          title: storeSelectedCard.card.title,
+          description: storeSelectedCard.card.description,
+        }
+      : currentCard;
+
   function handleClose() {
     setDismissedCardId(currentCard.id);
 
@@ -195,10 +214,25 @@ export function CardDetailSheet({
         }
       }}
     >
-      <DialogContent className="h-[min(88vh,760px)] max-w-[min(96vw,1120px)] overflow-hidden p-0">
+      <DialogContent
+        className="h-[min(88vh,760px)] max-w-[min(96vw,1120px)] overflow-hidden p-0"
+        onEscapeKeyDown={(e) => {
+          // While the hero title is being edited, Escape reverts the field
+          // (handled on the input) and must NOT close the dialog. Cancel Radix's
+          // dismiss here — the supported API — only when the title input holds an
+          // unsaved edit; otherwise Escape closes the dialog as usual (US-043).
+          const active = document.activeElement as HTMLInputElement | null;
+          if (
+            active?.id === "card-detail-title" &&
+            active.value !== liveCard.title
+          ) {
+            e.preventDefault();
+          }
+        }}
+      >
         <CardDetailDialogBody
           key={currentCard.id}
-          card={currentCard}
+          card={liveCard}
           comments={liveComments}
           activity={liveActivity}
           attachments={attachments}
@@ -261,6 +295,43 @@ function CardDetailDialogBody({
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
   const selectedDueDate = parseDateInputValue(draftDueDate);
+
+  // The hero title/description bind to the live store value (passed in via
+  // `card`). Reflect a remote edit into the draft whenever the local user isn't
+  // actively typing that field, so the next blur can't clobber a remote rename
+  // (US-043). This is the React "adjust state during render" pattern (guarded by
+  // a baseline so it can't loop) — not an effect — and the focus flags keep an
+  // in-progress local edit from being overwritten mid-keystroke.
+  const [titleEditing, setTitleEditing] = useState(false);
+  const [descriptionEditing, setDescriptionEditing] = useState(false);
+
+  const [titleBaseline, setTitleBaseline] = useState(card.title);
+  if (card.title !== titleBaseline) {
+    setTitleBaseline(card.title);
+    if (!titleEditing) setDraftTitle(card.title);
+  }
+
+  const liveDescription = card.description ?? "";
+  const [descriptionBaseline, setDescriptionBaseline] = useState(liveDescription);
+  if (liveDescription !== descriptionBaseline) {
+    setDescriptionBaseline(liveDescription);
+    if (!descriptionEditing) setDraftDescription(liveDescription);
+  }
+
+  // Action-row affordances scroll the matching editor into view inside the left
+  // column and move focus to its primary control, so the document-style "Add to
+  // card" row is keyboard-operable and every editor stays reachable (US-043).
+  function focusSection(sectionId: string, focusId?: string) {
+    const section = document.getElementById(sectionId);
+    if (!section) return;
+    section.scrollIntoView({ behavior: "smooth", block: "start" });
+    const target = focusId
+      ? document.getElementById(focusId)
+      : section.querySelector<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        );
+    target?.focus({ preventScroll: true });
+  }
 
   const assignedMemberIds = new Set(assignees.map((member) => member.id));
   const availableMembers = assignableMembers.filter(
@@ -421,25 +492,268 @@ function CardDetailDialogBody({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="flex items-start justify-between gap-4 border-b px-6 py-5">
-        <DialogHeader className="space-y-2">
-          <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            <span className="rounded-full bg-muted px-2 py-1">Card</span>
-            <span>Board detail</span>
-          </div>
-          <DialogTitle className="text-2xl font-semibold tracking-tight">
-            {canEdit ? "Edit card" : "Card details"}
-          </DialogTitle>
-          <DialogDescription>
-            Review this card, update its description, and prepare the space for collaboration.
-          </DialogDescription>
-        </DialogHeader>
+      {/* Document-style header: the title is the hero (inline-editable), with an
+          "Add to card" action row beneath it — no breadcrumb, no "Edit card"
+          heading, no uppercase TITLE label (US-043). The Dialog still needs an
+          accessible name/description for Radix + screen readers, supplied
+          visually-hidden below. */}
+      <DialogTitle className="sr-only">{card.title || "Card details"}</DialogTitle>
+      <DialogDescription className="sr-only">
+        Card details and editors. Edit the title, description, labels, dates,
+        checklist, members, attachments, and post comments.
+      </DialogDescription>
 
-        <DialogClose asChild>
-          <Button type="button" variant="ghost" size="sm">
-            Close
-          </Button>
-        </DialogClose>
+      <div className="space-y-3 border-b px-6 py-4">
+        <div className="flex items-start justify-between gap-3">
+          {canEdit ? (
+            <input
+              id="card-detail-title"
+              aria-label="Card title"
+              value={draftTitle}
+              onChange={(e) => {
+                setDraftTitle(e.target.value);
+                setError("");
+              }}
+              onFocus={(e) => {
+                setTitleEditing(true);
+                // Radix's auto-focus-on-open (and a Tab into the field) selects
+                // the whole title, so a stray keystroke would wipe it. After the
+                // browser settles, collapse a full selection to the caret-at-end;
+                // a click that places its own caret is left untouched (US-043).
+                const el = e.currentTarget;
+                requestAnimationFrame(() => {
+                  if (
+                    el.value.length > 0 &&
+                    el.selectionStart === 0 &&
+                    el.selectionEnd === el.value.length
+                  ) {
+                    const end = el.value.length;
+                    el.setSelectionRange(end, end);
+                  }
+                });
+              }}
+              onBlur={() => {
+                setTitleEditing(false);
+                saveDetails(draftTitle, draftDescription);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                } else if (e.key === "Escape") {
+                  // Revert the field to the live value, in place (keep focus so
+                  // the caret stays put). The dialog is kept open by the
+                  // DialogContent onEscapeKeyDown guard above (US-043).
+                  setDraftTitle(card.title);
+                  setError("");
+                }
+              }}
+              disabled={isPending}
+              className="-mx-2 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2 py-1 text-2xl font-semibold tracking-tight outline-none hover:bg-muted/50 focus-visible:border-ring focus-visible:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-60"
+            />
+          ) : (
+            <h2 className="min-w-0 flex-1 px-0 py-1 text-2xl font-semibold tracking-tight">
+              {card.title}
+            </h2>
+          )}
+
+          <div className="flex shrink-0 items-center gap-2 pt-1.5">
+            {/* Save/error status lives inline in the header (Google-Docs style) so
+                it takes no vertical room — it used to be an empty min-h spacer at
+                the top of the column that pushed the Description down (US-043). */}
+            <span
+              aria-live="polite"
+              title={error || (isPending ? "Saving…" : undefined)}
+              className={cn(
+                "max-w-[14rem] truncate text-xs",
+                error ? "text-destructive" : "text-muted-foreground",
+              )}
+            >
+              {error ? error : isPending ? "Saving…" : null}
+            </span>
+
+            <DialogClose asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Close card"
+              >
+                <HugeiconsIcon icon={Cancel01Icon} size={18} strokeWidth={2} />
+              </Button>
+            </DialogClose>
+          </div>
+        </div>
+
+        {canEdit ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mr-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Add to card
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => focusSection("card-section-labels")}
+            >
+              <HugeiconsIcon icon={Tag01Icon} size={16} strokeWidth={2} />
+              Labels
+            </Button>
+            {/* Order mirrors the body section order (Labels → Checklist →
+                Priority → Dates) so clicking the row left-to-right scrolls
+                monotonically down, never up-then-down (US-043). */}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => focusSection("card-section-checklist")}
+            >
+              <HugeiconsIcon icon={Task01Icon} size={16} strokeWidth={2} />
+              Checklist
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => focusSection("card-section-priority", "card-priority")}
+            >
+              <HugeiconsIcon icon={Flag03Icon} size={16} strokeWidth={2} />
+              Priority
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => focusSection("card-section-dates", "card-due-date")}
+            >
+              <HugeiconsIcon icon={Calendar03Icon} size={16} strokeWidth={2} />
+              Dates
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => focusSection("card-section-members")}
+            >
+              <HugeiconsIcon icon={UserMultipleIcon} size={16} strokeWidth={2} />
+              Members
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => focusSection("card-section-attachments")}
+            >
+              <HugeiconsIcon icon={Attachment01Icon} size={16} strokeWidth={2} />
+              Attachment
+            </Button>
+
+            {/* Cover demoted from a top-of-column panel to a secondary action
+                (US-043). Both paths preserved: pick an existing image attachment
+                or upload a new one, including the zero-attachments case. */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button type="button" variant="outline" size="sm">
+                  <HugeiconsIcon icon={Image01Icon} size={16} strokeWidth={2} />
+                  Cover
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-72 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold">Cover</p>
+                  {card.coverImage ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={isPending}
+                      onClick={() => submitCover("")}
+                    >
+                      Remove
+                    </Button>
+                  ) : null}
+                </div>
+
+                {card.coverImage ? (
+                  <img
+                    src={card.coverImage}
+                    alt="Cover preview"
+                    className="h-16 w-full rounded object-cover"
+                  />
+                ) : null}
+
+                {imageAttachments.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-muted-foreground">
+                      Choose from attachments
+                    </p>
+                    <div className="grid grid-cols-3 gap-2">
+                      {imageAttachments.map((attachment) => {
+                        const isCurrent = attachment.fileUrl === card.coverImage;
+                        return (
+                          <button
+                            key={attachment.id}
+                            type="button"
+                            disabled={isPending}
+                            title={attachment.fileName}
+                            onClick={() => submitCover(attachment.fileUrl)}
+                            className={cn(
+                              "relative aspect-video overflow-hidden rounded border-2 transition",
+                              isCurrent
+                                ? "border-primary"
+                                : "border-transparent hover:border-muted-foreground/40",
+                            )}
+                          >
+                            <img
+                              src={attachment.fileUrl}
+                              alt={attachment.fileName}
+                              className="h-full w-full object-cover"
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    No image attachments yet. Upload one below to use as a cover.
+                  </p>
+                )}
+
+                <input
+                  type="file"
+                  ref={coverInputRef}
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setError("");
+                    const fd = new FormData();
+                    fd.set("cardId", card.id);
+                    fd.set("file", file);
+                    startTransition(async () => {
+                      const result = await setCardCoverAction(fd);
+                      if (!result.success) setError(result.error);
+                      else router.refresh();
+                    });
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  disabled={isPending}
+                  onClick={() => coverInputRef.current?.click()}
+                >
+                  Upload new image
+                </Button>
+              </PopoverContent>
+            </Popover>
+          </div>
+        ) : null}
       </div>
 
       {card.coverImage ? (
@@ -456,44 +770,8 @@ function CardDetailDialogBody({
       <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1.65fr)_minmax(320px,1fr)]">
         <div className="min-h-0 overflow-y-auto px-6 py-6">
           <div className="space-y-6">
-            <div aria-live="polite" className="min-h-5">
-              {error ? (
-                <p className="text-sm text-destructive">{error}</p>
-              ) : isPending ? (
-                <p className="text-sm text-muted-foreground">Saving…</p>
-              ) : null}
-            </div>
-
             <section className="space-y-3">
-              <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Title
-                </p>
-                {canEdit ? (
-                  <Input
-                    id="card-detail-title"
-                    value={draftTitle}
-                    onChange={(e) => {
-                      setDraftTitle(e.target.value);
-                      setError("");
-                    }}
-                    onBlur={() => saveDetails(draftTitle, draftDescription)}
-                    disabled={isPending}
-                    className="h-11 text-lg font-semibold"
-                  />
-                ) : (
-                  <h2 className="text-2xl font-semibold tracking-tight">{card.title}</h2>
-                )}
-              </div>
-            </section>
-
-            <section className="space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-base font-semibold">Description</h3>
-                <span className="text-xs text-muted-foreground">
-                  {canEdit ? "Editable" : "Read only"}
-                </span>
-              </div>
+              <h3 className="text-base font-semibold">Description</h3>
 
               {canEdit ? (
                 <Textarea
@@ -503,7 +781,11 @@ function CardDetailDialogBody({
                     setDraftDescription(e.target.value);
                     setError("");
                   }}
-                  onBlur={() => saveDetails(draftTitle, draftDescription)}
+                  onFocus={() => setDescriptionEditing(true)}
+                  onBlur={() => {
+                    setDescriptionEditing(false);
+                    saveDetails(draftTitle, draftDescription);
+                  }}
                   disabled={isPending}
                   rows={10}
                   placeholder="Add a more detailed description..."
@@ -516,116 +798,28 @@ function CardDetailDialogBody({
               )}
             </section>
 
-            <section className="space-y-3 rounded-lg border bg-muted/20 p-4">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-semibold">Cover</label>
-                  {card.coverImage && canEdit ? (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={isPending}
-                      onClick={() => submitCover("")}
-                    >
-                      Remove
-                    </Button>
-                  ) : null}
-                </div>
+            <div id="card-section-labels">
+              <CardLabelsSection
+                cardId={card.id}
+                boardId={boardId}
+                boardLabels={boardLabels}
+                cardLabelIds={cardLabelIds}
+                canEdit={canEdit}
+              />
+            </div>
 
-                {card.coverImage ? (
-                  <img
-                    src={card.coverImage}
-                    alt="Cover preview"
-                    className="h-12 w-full rounded object-cover"
-                  />
-                ) : null}
+            <div id="card-section-checklist">
+              <CardChecklistsSection
+                cardId={card.id}
+                checklists={checklists}
+                canEdit={canEdit}
+              />
+            </div>
 
-                {canEdit ? (
-                  <>
-                    {imageAttachments.length > 0 ? (
-                      <div className="space-y-1.5">
-                        <p className="text-xs text-muted-foreground">
-                          Choose from attachments
-                        </p>
-                        <div className="grid grid-cols-4 gap-2">
-                          {imageAttachments.map((attachment) => {
-                            const isCurrent =
-                              attachment.fileUrl === card.coverImage;
-                            return (
-                              <button
-                                key={attachment.id}
-                                type="button"
-                                disabled={isPending}
-                                title={attachment.fileName}
-                                onClick={() => submitCover(attachment.fileUrl)}
-                                className={cn(
-                                  "relative aspect-video overflow-hidden rounded border-2 transition",
-                                  isCurrent
-                                    ? "border-primary"
-                                    : "border-transparent hover:border-muted-foreground/40",
-                                )}
-                              >
-                                <img
-                                  src={attachment.fileUrl}
-                                  alt={attachment.fileName}
-                                  className="h-full w-full object-cover"
-                                />
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    <input
-                      type="file"
-                      ref={coverInputRef}
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        setError("");
-                        const fd = new FormData();
-                        fd.set("cardId", card.id);
-                        fd.set("file", file);
-                        startTransition(async () => {
-                          const result = await setCardCoverAction(fd);
-                          if (!result.success) setError(result.error);
-                          else router.refresh();
-                        });
-                        e.target.value = "";
-                      }}
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={isPending}
-                      onClick={() => coverInputRef.current?.click()}
-                    >
-                      Upload new image
-                    </Button>
-                  </>
-                ) : null}
-              </div>
-            </section>
-
-            <CardLabelsSection
-              cardId={card.id}
-              boardId={boardId}
-              boardLabels={boardLabels}
-              cardLabelIds={cardLabelIds}
-              canEdit={canEdit}
-            />
-
-            <CardChecklistsSection
-              cardId={card.id}
-              checklists={checklists}
-              canEdit={canEdit}
-            />
-
-            <section className="space-y-3 rounded-lg border bg-muted/20 p-4">
+            <section
+              id="card-section-priority"
+              className="space-y-3 rounded-lg border bg-muted/20 p-4"
+            >
               <div className="space-y-2">
                 <label htmlFor="card-priority" className="text-sm font-semibold">
                   Priority
@@ -662,7 +856,10 @@ function CardDetailDialogBody({
               </div>
             </section>
 
-            <section className="grid gap-3 rounded-lg border bg-muted/20 p-4 sm:grid-cols-2">
+            <section
+              id="card-section-dates"
+              className="grid gap-3 rounded-lg border bg-muted/20 p-4 sm:grid-cols-2"
+            >
               <div className="space-y-2">
                 <label
                   htmlFor="card-estimate-hours"
@@ -772,7 +969,7 @@ function CardDetailDialogBody({
               </div>
             </section>
 
-            <section className="space-y-3">
+            <section id="card-section-members" className="space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-base font-semibold">Members</h3>
                 <span className="text-xs text-muted-foreground">
@@ -853,11 +1050,13 @@ function CardDetailDialogBody({
               ) : null}
             </section>
 
-            <CardAttachments
-              cardId={card.id}
-              attachments={attachments}
-              canEdit={canEdit}
-            />
+            <div id="card-section-attachments">
+              <CardAttachments
+                cardId={card.id}
+                attachments={attachments}
+                canEdit={canEdit}
+              />
+            </div>
           </div>
         </div>
 
@@ -1025,7 +1224,6 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
       {canComment && (
         <Button
           type="button"
-          size="sm"
           disabled={isPending || !content.trim()}
           onClick={handleSubmit}
         >
