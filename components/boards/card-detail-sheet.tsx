@@ -7,6 +7,7 @@ import {
   Attachment01Icon,
   Calendar03Icon,
   Cancel01Icon,
+  Flag03Icon,
   Image01Icon,
   Tag01Icon,
   Task01Icon,
@@ -598,9 +599,9 @@ function CardDetailDialogBody({
               <HugeiconsIcon icon={Tag01Icon} size={16} strokeWidth={2} />
               Labels
             </Button>
-            {/* Order mirrors the body section order (Labels → Checklist → Dates)
-                so clicking the row left-to-right scrolls monotonically down,
-                never up-then-down (US-043). */}
+            {/* Order mirrors the body section order (Labels → Checklist →
+                Priority → Dates) so clicking the row left-to-right scrolls
+                monotonically down, never up-then-down (US-043). */}
             <Button
               type="button"
               variant="outline"
@@ -609,6 +610,15 @@ function CardDetailDialogBody({
             >
               <HugeiconsIcon icon={Task01Icon} size={16} strokeWidth={2} />
               Checklist
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => focusSection("card-section-priority", "card-priority")}
+            >
+              <HugeiconsIcon icon={Flag03Icon} size={16} strokeWidth={2} />
+              Priority
             </Button>
             <Button
               type="button"
@@ -806,7 +816,10 @@ function CardDetailDialogBody({
               />
             </div>
 
-            <section className="space-y-3 rounded-lg border bg-muted/20 p-4">
+            <section
+              id="card-section-priority"
+              className="space-y-3 rounded-lg border bg-muted/20 p-4"
+            >
               <div className="space-y-2">
                 <label htmlFor="card-priority" className="text-sm font-semibold">
                   Priority
