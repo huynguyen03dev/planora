@@ -32,6 +32,17 @@ export type CardLabelRecord = {
   color: string;
 };
 
+export type CardFaceMember = {
+  id: string;
+  name: string;
+  image: string | null;
+};
+
+// How many member avatars the card face renders before collapsing the rest into
+// a "+N" overflow chip. Keeps the board-load payload bounded (US-030 perf watch)
+// while still signalling "who's on this card" at a glance.
+export const MAX_CARD_FACE_AVATARS = 3;
+
 export type ListCardRecord = {
   id: string;
   listId: string;
@@ -39,7 +50,16 @@ export type ListCardRecord = {
   position: number;
   coverImage: string | null;
   priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
+  dueDate: Date | null;
+  completedAt: Date | null;
   labels: CardLabelRecord[];
+  /** Up to MAX_CARD_FACE_AVATARS assignees for the avatar stack. */
+  members: CardFaceMember[];
+  /** Total assignees (>= members.length); drives the "+N" overflow. */
+  memberCount: number;
+  checklistDone: number;
+  checklistTotal: number;
+  commentCount: number;
 };
 
 export type ListWithCardsRecord = ListRecord & {
@@ -72,11 +92,26 @@ export async function getListsByBoardId(
           position: true,
           coverImage: true,
           priority: true,
+          dueDate: true,
+          completedAt: true,
           labels: {
             select: {
               label: { select: { id: true, name: true, color: true } },
             },
           },
+          members: {
+            take: MAX_CARD_FACE_AVATARS,
+            orderBy: { assignedAt: "asc" },
+            select: {
+              user: { select: { id: true, name: true, image: true } },
+            },
+          },
+          // Item booleans only, aggregated to done/total below — the card face
+          // sends two numbers, never the raw items, to keep the payload small.
+          checklists: {
+            select: { items: { select: { isCompleted: true } } },
+          },
+          _count: { select: { members: true, comments: true } },
         },
       },
     },
@@ -84,15 +119,35 @@ export async function getListsByBoardId(
 
   return lists.map((list) => ({
     ...list,
-    cards: list.cards.map((card) => ({
-      id: card.id,
-      listId: card.listId,
-      title: card.title,
-      position: card.position,
-      coverImage: card.coverImage,
-      priority: card.priority,
-      labels: card.labels.map((cardLabel) => cardLabel.label),
-    })),
+    cards: list.cards.map((card) => {
+      let checklistTotal = 0;
+      let checklistDone = 0;
+      for (const checklist of card.checklists) {
+        for (const item of checklist.items) {
+          checklistTotal += 1;
+          if (item.isCompleted) {
+            checklistDone += 1;
+          }
+        }
+      }
+
+      return {
+        id: card.id,
+        listId: card.listId,
+        title: card.title,
+        position: card.position,
+        coverImage: card.coverImage,
+        priority: card.priority,
+        dueDate: card.dueDate,
+        completedAt: card.completedAt,
+        labels: card.labels.map((cardLabel) => cardLabel.label),
+        members: card.members.map((member) => member.user),
+        memberCount: card._count.members,
+        checklistDone,
+        checklistTotal,
+        commentCount: card._count.comments,
+      };
+    }),
   }));
 }
 

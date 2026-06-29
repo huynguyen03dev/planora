@@ -3,10 +3,10 @@
 ## Status
 
 in progress — opened 2026-06-26. **Shipped: US-028, US-029** (Theme A) **·
-US-034, US-035, US-040** (Theme D core) **· US-031, US-032, US-033** (Theme C —
-complete, 2026-06-29) — all manual QA. Remaining: US-030 (Theme B),
-US-036/US-039 (Theme D), US-037/US-038 (Theme E) — reservations awaiting
-individual intake.
+US-030** (Theme B — complete, 2026-06-29) **· US-031, US-032, US-033** (Theme C —
+complete, 2026-06-29) **· US-034, US-035, US-040** (Theme D core) — all manual
+QA. Remaining: US-036/US-039 (Theme D), US-037/US-038 (Theme E) — reservations
+awaiting individual intake.
 
 ## Type
 
@@ -138,7 +138,7 @@ Next free id at authoring time is **US-028**.
 
 | ID | Candidate story | Lane (est.) | Notes |
 | --- | --- | --- | --- |
-| US-030 | Surface a card-face metadata row: due-date badge (with overdue/today/soon states), member avatars, checklist progress (e.g. `2/4`), comment count | normal | **Contract change** to `docs/product/boards-and-cards.md`. Requires the board-page query + `BoardContent`/`list-card-item` props to carry `dueDate`, member summary, checklist done/total, comment count. Watch DnD payload weight (IN-01 US-004 perf budget). |
+| US-030 | Surface a card-face metadata row: due-date badge (with overdue/today/soon states), member avatars, checklist progress (e.g. `2/4`), comment count | high-risk | ✅ **shipped 2026-06-29.** `lib/list.ts`, `list-card-item.tsx` (+ type threading through `page.tsx`/`board-content.tsx`/`board-store.ts`/`list-column.tsx`). Card face now shows due badge (overdue/today/soon/done), capped assignee avatars (+N), checklist `done/total`, comment count — counts aggregated server-side. **Escalated to high-risk:** the contract change (`boards-and-cards.md`) + an **additive FK-index migration** (`comment.cardId`, `checklist.cardId`, `checklistItem.checklistId`) the new aggregates need (decision **0011**; human confirmed full scope + migration at intake #24). No new field/action/auth. Manual QA desktop + 375px; 64 unit tests green. Story folder: `…/US-030-card-face-metadata/`. |
 
 ### Theme C — Card detail dialog redesign (P1, normal)
 

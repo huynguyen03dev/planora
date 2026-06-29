@@ -329,7 +329,7 @@ describe("applyRemoteListDeleted", () => {
   it("removes the list and its cards", () => {
     const lists = makeLists();
     lists[0].cards = [
-      { id: "card-1", listId: "list-1", title: "A", position: 16384, coverImage: null, priority: null, labels: [] },
+      { id: "card-1", listId: "list-1", title: "A", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
     ];
     useBoardStore.setState({ boardId: "board-1", lists });
 
@@ -370,11 +370,11 @@ describe("applyRemoteListDeleted", () => {
 function makeListsWithCards(): ListWithCards[] {
   const lists = makeLists();
   lists[0].cards = [
-    { id: "card-a", listId: "list-1", title: "Alpha", position: 16384, coverImage: null, priority: null, labels: [] },
-    { id: "card-c", listId: "list-1", title: "Charlie", position: 49152, coverImage: null, priority: null, labels: [] },
+    { id: "card-a", listId: "list-1", title: "Alpha", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
+    { id: "card-c", listId: "list-1", title: "Charlie", position: 49152, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
   ];
   lists[1].cards = [
-    { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, coverImage: null, priority: null, labels: [] },
+    { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
   ];
   return lists;
 }
@@ -451,10 +451,10 @@ describe("applyRemoteCardMoved", () => {
     // canonical float-gap position and MUST apply to correct it — otherwise a
     // later remote re-sort would misorder the board.
     const lists = makeListsWithCards();
-    lists[0].cards = [{ id: "card-c", listId: "list-1", title: "Charlie", position: 49152, coverImage: null, priority: null, labels: [] }];
+    lists[0].cards = [{ id: "card-c", listId: "list-1", title: "Charlie", position: 49152, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 }];
     lists[1].cards = [
-      { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, coverImage: null, priority: null, labels: [] },
-      { id: "card-a", listId: "list-2", title: "Alpha", position: 99999, coverImage: null, priority: null, labels: [] },
+      { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
+      { id: "card-a", listId: "list-2", title: "Alpha", position: 99999, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
     ];
     useBoardStore.setState({ boardId: "board-1", lists });
 

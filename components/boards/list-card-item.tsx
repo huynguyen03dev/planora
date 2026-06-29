@@ -1,6 +1,13 @@
 "use client";
 
-import { DragDropVerticalIcon, Flag01Icon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
+import {
+  Calendar03Icon,
+  CheckmarkSquare01Icon,
+  Comment01Icon,
+  DragDropVerticalIcon,
+  Flag01Icon,
+  MoreHorizontalIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo, useState, useTransition } from "react";
 import { Draggable } from "@hello-pangea/dnd";
@@ -16,6 +23,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarGroup,
+  AvatarGroupCount,
+  AvatarImage,
+} from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -39,6 +53,70 @@ const PRIORITY_CONFIG: Record<
   LOW: { label: "Low", tint: "#3B82F61A", fg: "#1D4ED8" },
 };
 
+function getInitials(name: string): string {
+  return name
+    .split(" ")
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+function startOfDay(date: Date): Date {
+  const copy = new Date(date);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
+
+type DueState = "overdue" | "today" | "soon" | "upcoming" | "done";
+
+// Card-face due-date badge: state + short label + accessible description. A
+// completed card (completedAt set) always reads as "done" and never as overdue.
+// The visible label alone never carries state by color — the icon + word
+// ("Today"/"Tomorrow"/date) and the aria-label do (never color-only).
+function describeDueDate(
+  dueDate: Date,
+  completedAt: Date | null,
+): { state: DueState; label: string; a11yLabel: string } {
+  const due = new Date(dueDate);
+  const now = new Date();
+  const dayLabel = due.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(due.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }),
+  });
+
+  if (completedAt) {
+    return { state: "done", label: dayLabel, a11yLabel: `Completed, was due ${dayLabel}` };
+  }
+
+  const diffDays = Math.round(
+    (startOfDay(due).getTime() - startOfDay(now).getTime()) / 86_400_000,
+  );
+
+  if (diffDays < 0) {
+    return { state: "overdue", label: dayLabel, a11yLabel: `Due ${dayLabel}, overdue` };
+  }
+  if (diffDays === 0) {
+    return { state: "today", label: "Today", a11yLabel: "Due today" };
+  }
+  if (diffDays === 1) {
+    return { state: "soon", label: "Tomorrow", a11yLabel: "Due tomorrow" };
+  }
+  if (diffDays <= 3) {
+    return { state: "soon", label: dayLabel, a11yLabel: `Due ${dayLabel}, soon` };
+  }
+  return { state: "upcoming", label: dayLabel, a11yLabel: `Due ${dayLabel}` };
+}
+
+const DUE_STATE_CLASS: Record<DueState, string> = {
+  overdue: "bg-destructive/10 text-destructive",
+  today: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  soon: "text-amber-700 dark:text-amber-400",
+  upcoming: "text-muted-foreground",
+  done: "text-emerald-700 dark:text-emerald-500",
+};
+
 type ListCardItemProps = {
   card: {
     id: string;
@@ -46,7 +124,14 @@ type ListCardItemProps = {
     listId: string;
     coverImage: string | null;
     priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
+    dueDate: Date | null;
+    completedAt: Date | null;
     labels: Array<{ id: string; name: string; color: string }>;
+    members: Array<{ id: string; name: string; image: string | null }>;
+    memberCount: number;
+    checklistDone: number;
+    checklistTotal: number;
+    commentCount: number;
   };
   index: number;
   canEdit: boolean;
@@ -71,6 +156,15 @@ function ListCardItemComponent({
 
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [isArchiving, startArchiveTransition] = useTransition();
+
+  const due = card.dueDate ? describeDueDate(card.dueDate, card.completedAt) : null;
+  const memberOverflow = Math.max(0, card.memberCount - card.members.length);
+  const hasMeta =
+    Boolean(card.priority) ||
+    Boolean(due) ||
+    card.checklistTotal > 0 ||
+    card.commentCount > 0 ||
+    card.memberCount > 0;
 
   function handleArchive() {
     const formData = new FormData();
@@ -199,23 +293,107 @@ function ListCardItemComponent({
                   )}
                 </div>
 
-                {card.priority ? (
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium"
-                      style={{
-                        backgroundColor: PRIORITY_CONFIG[card.priority].tint,
-                        color: PRIORITY_CONFIG[card.priority].fg,
-                      }}
-                    >
-                      <HugeiconsIcon
-                        icon={Flag01Icon}
-                        size={12}
-                        strokeWidth={2}
-                        className="text-current"
-                      />
-                      {PRIORITY_CONFIG[card.priority].label}
-                    </span>
+                {hasMeta ? (
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      {card.priority ? (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium"
+                          style={{
+                            backgroundColor: PRIORITY_CONFIG[card.priority].tint,
+                            color: PRIORITY_CONFIG[card.priority].fg,
+                          }}
+                        >
+                          <HugeiconsIcon
+                            icon={Flag01Icon}
+                            size={12}
+                            strokeWidth={2}
+                            className="text-current"
+                          />
+                          {PRIORITY_CONFIG[card.priority].label}
+                        </span>
+                      ) : null}
+
+                      {due ? (
+                        <span
+                          role="img"
+                          aria-label={due.a11yLabel}
+                          title={due.a11yLabel}
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium",
+                            DUE_STATE_CLASS[due.state],
+                          )}
+                        >
+                          <HugeiconsIcon
+                            icon={Calendar03Icon}
+                            size={12}
+                            strokeWidth={2}
+                            className="text-current"
+                          />
+                          {due.label}
+                        </span>
+                      ) : null}
+
+                      {card.checklistTotal > 0 ? (
+                        <span
+                          role="img"
+                          aria-label={`${card.checklistDone} of ${card.checklistTotal} checklist items complete`}
+                          className={cn(
+                            "inline-flex items-center gap-1 text-xs font-medium",
+                            card.checklistDone === card.checklistTotal
+                              ? "text-emerald-700 dark:text-emerald-500"
+                              : "text-muted-foreground",
+                          )}
+                        >
+                          <HugeiconsIcon
+                            icon={CheckmarkSquare01Icon}
+                            size={12}
+                            strokeWidth={2}
+                            className="text-current"
+                          />
+                          {card.checklistDone}/{card.checklistTotal}
+                        </span>
+                      ) : null}
+
+                      {card.commentCount > 0 ? (
+                        <span
+                          role="img"
+                          aria-label={`${card.commentCount} ${
+                            card.commentCount === 1 ? "comment" : "comments"
+                          }`}
+                          className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground"
+                        >
+                          <HugeiconsIcon
+                            icon={Comment01Icon}
+                            size={12}
+                            strokeWidth={2}
+                            className="text-current"
+                          />
+                          {card.commentCount}
+                        </span>
+                      ) : null}
+                    </div>
+
+                    {card.memberCount > 0 ? (
+                      <AvatarGroup className="shrink-0">
+                        {card.members.map((member) => (
+                          <Avatar key={member.id} size="sm">
+                            {member.image ? (
+                              <AvatarImage src={member.image} alt={member.name} />
+                            ) : null}
+                            <AvatarFallback>{getInitials(member.name)}</AvatarFallback>
+                          </Avatar>
+                        ))}
+                        {memberOverflow > 0 ? (
+                          <AvatarGroupCount
+                            className="text-xs"
+                            aria-label={`${memberOverflow} more`}
+                          >
+                            +{memberOverflow}
+                          </AvatarGroupCount>
+                        ) : null}
+                      </AvatarGroup>
+                    ) : null}
                   </div>
                 ) : null}
 
