@@ -127,11 +127,13 @@ export function NotificationDropdown({
   }
 
   function removeInvitation(invitationId: string) {
-    setInvitations((prev) => {
-      const next = prev.filter((invitation) => invitation.id !== invitationId);
-      onInvitationCountChange(next.length);
-      return next;
-    });
+    // Compute the next list outside the state updater: updaters run during
+    // render, and notifying the parent there would setState mid-render. This
+    // runs only from the async accept/decline handlers (event-driven), so it's
+    // safe to call the parent callback directly.
+    const next = invitations.filter((invitation) => invitation.id !== invitationId);
+    setInvitations(next);
+    onInvitationCountChange(next.length);
   }
 
   function handleAccept(invitationId: string, workspaceId: string) {

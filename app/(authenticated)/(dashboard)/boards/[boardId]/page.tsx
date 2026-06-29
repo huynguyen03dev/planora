@@ -41,7 +41,7 @@ export default async function BoardPage({
   params,
   searchParams,
 }: BoardPageProps) {
-  const { userId } = await verifySession();
+  const { userId, user } = await verifySession();
   const { boardId } = await params;
   const resolvedSearchParams = await searchParams;
 
@@ -220,6 +220,7 @@ export default async function BoardPage({
       lists={listsWithCards}
       selectedCardId={selectedCardId}
       selectedCard={selectedCardData}
+      currentViewer={{ id: user.id, name: user.name, image: user.image ?? null }}
       canEdit={canEditList}
       canDelete={canDeleteList}
       canCreateList={canCreateList}

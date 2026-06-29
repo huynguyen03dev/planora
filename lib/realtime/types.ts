@@ -113,6 +113,16 @@ export interface NotificationNewPayload {
   createdAt: string;
 }
 
+export interface Watcher {
+  id: string;
+  name: string;
+  image: string | null;
+}
+
+export interface BoardPresencePayload extends BoardEventPayload {
+  watchers: Watcher[];
+}
+
 export interface WorkspaceEventPayload {
   workspaceId: string;
 }
@@ -134,6 +144,7 @@ export type ServerToClientEvents = {
   "card:labels-updated": (payload: CardLabelsUpdatedPayload) => void;
   "card:members-updated": (payload: CardMembersUpdatedPayload) => void;
   "comment:created": (payload: CommentCreatedPayload) => void;
+  "board:presence": (payload: BoardPresencePayload) => void;
   "notification:new": (payload: NotificationNewPayload) => void;
   "analytics:refresh": (payload: AnalyticsRefreshPayload) => void;
   "board:error": (payload: { message: string }) => void;

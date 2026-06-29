@@ -14,9 +14,20 @@ import { BoardSearch } from "@/components/boards/board-search";
 import { ArchivedCardsDialog } from "@/components/boards/archived-cards-dialog";
 import type { ArchivedCardData } from "@/components/boards/archived-cards-dialog";
 import { BoardMenu } from "@/components/boards/board-menu";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarGroup,
+  AvatarGroupCount,
+  AvatarImage,
+} from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getBoardTheme } from "@/lib/constants";
+import { getInitials } from "@/lib/utils";
+
+// Cap how many watcher avatars render before collapsing into a "+N" count.
+const MAX_VISIBLE_WATCHERS = 5;
 
 type BoardHeaderProps = {
   board: {
@@ -39,6 +50,10 @@ export function BoardHeader({
   archivedCards,
   starred,
 }: BoardHeaderProps) {
+  // Live presence: who currently has this board open. Server-driven, deduped.
+  const watchers = useBoardStore((s) => s.watchers);
+  const visibleWatchers = watchers.slice(0, MAX_VISIBLE_WATCHERS);
+  const watcherOverflow = watchers.length - visibleWatchers.length;
   const [draftTitle, setDraftTitle] = useState(board.title);
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState("");
@@ -178,14 +193,26 @@ export function BoardHeader({
             </span>
           ) : null}
 
-          <div className="flex items-center -space-x-2 pr-1">
-            <span className="flex size-8 items-center justify-center rounded-full border-2 border-white bg-sky-200 text-xs font-semibold text-sky-900">
-              AL
-            </span>
-            <span className="flex size-8 items-center justify-center rounded-full border-2 border-white bg-emerald-200 text-xs font-semibold text-emerald-900">
-              MK
-            </span>
-          </div>
+          {watchers.length > 0 ? (
+            <AvatarGroup className="pr-1" aria-label="Viewing now">
+              {visibleWatchers.map((watcher) => (
+                <Avatar key={watcher.id} title={watcher.name}>
+                  {watcher.image ? (
+                    <AvatarImage src={watcher.image} alt={watcher.name} />
+                  ) : null}
+                  <AvatarFallback>{getInitials(watcher.name)}</AvatarFallback>
+                </Avatar>
+              ))}
+              {watcherOverflow > 0 ? (
+                <AvatarGroupCount
+                  className="text-xs"
+                  aria-label={`${watcherOverflow} more`}
+                >
+                  +{watcherOverflow}
+                </AvatarGroupCount>
+              ) : null}
+            </AvatarGroup>
+          ) : null}
 
           <Button
             type="button"

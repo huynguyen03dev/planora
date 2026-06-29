@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { initSocket, joinBoard, leaveBoard } from "@/lib/realtime/client";
 import type {
+  BoardPresencePayload,
   CardArchivedPayload,
   CardCreatedPayload,
   CardLabelsUpdatedPayload,
@@ -16,6 +17,7 @@ import type {
   ListDeletedPayload,
   ListMovedPayload,
   ListUpdatedPayload,
+  Watcher,
 } from "@/lib/realtime/types";
 
 import { useBoardStore, type ListWithCards, type SelectedCardData } from "./board-store";
@@ -26,6 +28,7 @@ type BoardStoreProviderProps = {
   lists: ListWithCards[];
   selectedCardId: string | null;
   selectedCard: SelectedCardData | null;
+  currentViewer: Watcher;
   canEdit: boolean;
   canDelete: boolean;
   canCreateList: boolean;
@@ -40,6 +43,7 @@ export function BoardStoreProvider({
   lists,
   selectedCardId,
   selectedCard,
+  currentViewer: { id: viewerId, name: viewerName, image: viewerImage },
 }: BoardStoreProviderProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -62,6 +66,8 @@ export function BoardStoreProvider({
   const applyRemoteCardLabelsUpdated = useBoardStore((s) => s.applyRemoteCardLabelsUpdated);
   const applyRemoteCardMembersUpdated = useBoardStore((s) => s.applyRemoteCardMembersUpdated);
   const applyRemoteCommentCreated = useBoardStore((s) => s.applyRemoteCommentCreated);
+  const applyRemotePresence = useBoardStore((s) => s.applyRemotePresence);
+  const seedWatchers = useBoardStore((s) => s.seedWatchers);
 
   const normalizedLists = useMemo(() => {
     return lists.map((list) => ({
@@ -194,6 +200,12 @@ export function BoardStoreProvider({
       applyRemoteCommentCreated(payload);
     }
 
+    function handlePresence(payload: BoardPresencePayload) {
+      // Live presence never touches the lists array, so it applies immediately —
+      // no drag deferral. The store guards on boardId.
+      applyRemotePresence(payload);
+    }
+
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
     socket.on("connect_error", handleConnectError);
@@ -208,6 +220,7 @@ export function BoardStoreProvider({
     socket.on("card:labels-updated", handleCardLabelsUpdated);
     socket.on("card:members-updated", handleCardMembersUpdated);
     socket.on("comment:created", handleCommentCreated);
+    socket.on("board:presence", handlePresence);
 
     return () => {
       socket.off("connect", handleConnect);
@@ -224,6 +237,7 @@ export function BoardStoreProvider({
       socket.off("card:labels-updated", handleCardLabelsUpdated);
       socket.off("card:members-updated", handleCardMembersUpdated);
       socket.off("comment:created", handleCommentCreated);
+      socket.off("board:presence", handlePresence);
     };
   }, [
     setSocketConnected,
@@ -238,10 +252,21 @@ export function BoardStoreProvider({
     applyRemoteCardLabelsUpdated,
     applyRemoteCardMembersUpdated,
     applyRemoteCommentCreated,
+    applyRemotePresence,
     router,
     pathname,
     searchParams,
   ]);
+
+  // Seed presence with the current viewer so the header shows at least
+  // ourselves before the first server broadcast lands (avoids an empty flash),
+  // and so a board switch resets to just ourselves rather than showing the
+  // previous board's watchers. Keyed on boardId + the viewer's primitive fields
+  // (not the prop object), so a router.refresh() — which re-creates the object —
+  // doesn't re-run this and clobber the live list.
+  useEffect(() => {
+    seedWatchers([{ id: viewerId, name: viewerName, image: viewerImage }]);
+  }, [boardId, viewerId, viewerName, viewerImage, seedWatchers]);
 
   // Board room join/leave: separate from socket lifecycle
   useEffect(() => {
