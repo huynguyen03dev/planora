@@ -51,7 +51,7 @@ import type { CommentRecord } from "@/lib/comment";
 import type { ActivityRecord } from "@/lib/activity";
 import type { AttachmentRecord } from "@/lib/attachment";
 import type { CardMemberRecord, AssignableWorkspaceMemberRecord } from "@/lib/card-member";
-import { cn } from "@/lib/utils";
+import { cn, getInitials } from "@/lib/utils";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
 import { useMentionAutocomplete } from "./use-mention-autocomplete";
 
@@ -73,15 +73,6 @@ function parseDateInputValue(value: string): Date | undefined {
 
 function toDueDateValue(date: Date): string {
   return format(date, "yyyy-MM-dd");
-}
-
-function getInitials(name: string): string {
-  return name
-    .split(" ")
-    .map((part) => part[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
 }
 
 function MemberAvatar({

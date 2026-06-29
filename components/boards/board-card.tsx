@@ -14,9 +14,9 @@ import {
   AvatarGroupCount,
   AvatarImage,
 } from "@/components/ui/avatar";
+import { getBoardTheme } from "@/lib/constants";
+import { getInitials } from "@/lib/utils";
 import type { WorkspaceBoardMember } from "@/lib/workspace";
-
-import { defaultBoardGradient } from "./styles";
 
 type BoardCardProps = {
   id: string;
@@ -30,15 +30,6 @@ type BoardCardProps = {
   memberCount: number;
 };
 
-function getInitials(name: string): string {
-  return name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join("");
-}
-
 export function BoardCard({
   id,
   title,
@@ -51,7 +42,7 @@ export function BoardCard({
   memberCount,
 }: BoardCardProps) {
   const [isPending, startTransition] = useTransition();
-  const backgroundStyle = backgroundColor ?? defaultBoardGradient;
+  const backgroundStyle = getBoardTheme(backgroundColor).header;
   const starDisplay = starred || isPending;
   const memberOverflow = Math.max(0, memberCount - members.length);
 
