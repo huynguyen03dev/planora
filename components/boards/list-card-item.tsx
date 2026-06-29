@@ -13,6 +13,7 @@ import { memo, useState, useTransition } from "react";
 import { Draggable } from "@hello-pangea/dnd";
 
 import { archiveCardAction } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
+import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,6 +39,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { LabelMark } from "@/components/boards/label-mark";
 import { cn, getInitials } from "@/lib/utils";
 
 // Priority chip: soft tinted bg + tinted icon/text. Distinct from solid label
@@ -159,6 +161,11 @@ function ListCardItemComponent({
 }: ListCardItemProps) {
   const [error, setError] = useState("");
 
+  // Board-wide "expand labels" preference (US-044). Read from the store, not local
+  // state, so toggling it re-renders every card consistently and it never resets
+  // mid-drag (the memo'd card re-renders per drag tick).
+  const expandLabels = useBoardStore((s) => s.expandLabels);
+
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [isArchiving, startArchiveTransition] = useTransition();
 
@@ -204,28 +211,33 @@ function ListCardItemComponent({
             aria-hidden={hidden || undefined}
           >
             <Card
-              size="sm"
+              // No size="sm": its data-[size=sm]:py-4 is a variant class that the
+              // py-0 override can't win against, padding ~32px back onto every
+              // tile. Without it, the explicit gap-0 / py-0 (+ CardContent p-2)
+              // take effect, which is what makes the compact tile actually compact
+              // (US-044).
               className={cn("gap-0 overflow-hidden py-0 shadow-sm", snapshot.isDragging && "shadow-lg")}
             >
               {card.coverImage ? (
+                // Compact tiles (US-044): the cover shrinks from h-20 so an 80px
+                // image can't dominate a now-~48px tile, while still reading as a
+                // cover. The drag placeholder carries no cover (it never has), so
+                // covered cards are intentionally a touch taller than the ghost.
                 <img
                   src={card.coverImage}
                   alt=""
-                  className="h-20 w-full object-cover"
+                  className="h-10 w-full object-cover"
                 />
               ) : null}
-              <CardContent className="space-y-2 px-3 py-3">
+              <CardContent className="space-y-1.5 p-2">
                 {card.labels.length > 0 ? (
                   <div className="flex flex-wrap gap-1">
                     {card.labels.map((label) => (
-                      <span
+                      <LabelMark
                         key={label.id}
-                        className="max-w-full truncate rounded px-2 py-0.5 text-xs font-medium text-white"
-                        style={{ backgroundColor: label.color }}
-                        title={label.name}
-                      >
-                        {label.name}
-                      </span>
+                        label={label}
+                        variant={expandLabels ? "chip" : "bar"}
+                      />
                     ))}
                   </div>
                 ) : null}

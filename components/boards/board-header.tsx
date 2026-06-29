@@ -10,6 +10,7 @@ import {
 } from "@/app/(authenticated)/(dashboard)/boards/actions";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
 import { BoardFilter } from "@/components/boards/board-filter";
+import { BoardLabelToggle } from "@/components/boards/board-label-toggle";
 import { BoardSearch } from "@/components/boards/board-search";
 import { ArchivedCardsDialog } from "@/components/boards/archived-cards-dialog";
 import type { ArchivedCardData } from "@/components/boards/archived-cards-dialog";
@@ -243,6 +244,8 @@ export function BoardHeader({
           </Button>
 
           <BoardSearch />
+
+          <BoardLabelToggle />
 
           <BoardFilter />
 
