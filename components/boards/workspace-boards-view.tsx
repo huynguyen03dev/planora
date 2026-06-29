@@ -2,6 +2,7 @@ import { useState } from "react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
+import type { WorkspaceBoard } from "@/lib/workspace";
 
 import { BoardCard } from "./board-card";
 import { CreateBoardModal } from "./create-board-modal";
@@ -13,11 +14,7 @@ type WorkspaceBoardsViewProps = {
     name: string;
     slug: string;
   };
-  boards: {
-    id: string;
-    title: string;
-    backgroundColor?: string | null;
-  }[];
+  boards: WorkspaceBoard[];
   starredBoardIds?: string[];
   canCreateBoard: boolean;
 };
@@ -60,9 +57,7 @@ export function WorkspaceBoardsView({
         {boards.map((board) => (
           <BoardCard
             key={board.id}
-            id={board.id}
-            title={board.title}
-            backgroundColor={board.backgroundColor}
+            {...board}
             starred={starredBoardIds.includes(board.id)}
           />
         ))}
@@ -71,7 +66,7 @@ export function WorkspaceBoardsView({
           <Button
             type="button"
             variant="outline"
-            className="h-24 w-full rounded-lg border-2 border-dashed border-muted bg-transparent text-sm font-normal text-muted-foreground shadow-none hover:border-primary/50 hover:bg-transparent hover:text-foreground"
+            className="h-full min-h-32 w-full rounded-lg border-2 border-dashed border-muted bg-transparent text-sm font-normal text-muted-foreground shadow-none hover:border-primary/50 hover:bg-transparent hover:text-foreground"
             onClick={() => setCreateBoardOpen(true)}
           >
             + Create board

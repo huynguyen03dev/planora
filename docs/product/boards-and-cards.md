@@ -16,6 +16,15 @@ carry rich metadata. All mutations are Server Actions under
   that fills the available row width (fluid tiles, min ~13rem per column) rather
   than fixed-width tiles clinging to a narrow left column on wide screens
   (US-038). Presentation only.
+- Each board tile shows **information density** — a colored identity header
+  (title + star) plus a footer with **list count · card count**, a
+  **last-activity** relative timestamp, and a capped **assignee avatar stack**
+  (`+N` overflow) — instead of a bare color block (US-037). These are read-only
+  aggregates added to the overview payload: card count aggregates across the
+  board's lists, last-activity is `max(board, list, card updatedAt)`, and members
+  are the distinct assignees across the board's non-archived cards (resolved via
+  a bounded `cardMember → card → list` join, not a per-card fetch). No data,
+  contract, or auth change.
 
 ## Lists
 
