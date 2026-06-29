@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { CreateWorkspaceModal } from "@/components/boards/create-workspace-modal"
 import { NotificationBell } from "@/components/notifications/notification-bell"
 import { NotificationDropdown } from "@/components/notifications/notification-dropdown"
+import { ThemeToggle } from "@/components/theme-toggle"
 import { UserButton } from "@/components/user-button"
 import { computeInboxBadgeCount } from "@/lib/notifications/inbox"
 import { initSocket } from "@/lib/realtime/client"
@@ -68,6 +69,7 @@ export function AuthenticatedHeaderActions({
 
   return (
     <div className="flex items-center gap-1">
+      <ThemeToggle />
       <div className="relative">
         <NotificationBell
           count={badgeCount}

@@ -39,7 +39,7 @@ function Trend({
 
   return (
     <span
-      className={`text-sm ${trend.isImprovement ? "text-green-600" : "text-red-600"}`}
+      className={`text-sm ${trend.isImprovement ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
     >
       {trend.rising ? "↑" : "↓"} {trend.magnitude.toFixed(1)}%
     </span>
@@ -70,7 +70,7 @@ function Card({ title, value, trend, lowConfidence, subtitle }: CardProps) {
         <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
       )}
       {lowConfidence && (
-        <p className="mt-1 text-xs text-amber-600">
+        <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
           Low confidence: historical data may be incomplete
         </p>
       )}

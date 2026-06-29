@@ -2,7 +2,9 @@
 
 ## Status
 
-planned
+implemented — 2026-06-29 (manual QA, browser-verified). `next-themes` provider +
+header `ThemeToggle` (Hugeicons) make the shipped `.dark` palette reachable;
+dark-mode audit fixed the analytics dashboard's light-only amber/red/green panels.
 
 ## Lane
 
@@ -125,5 +127,59 @@ PR so future theme work reuses it rather than re-rolling.
 
 ## Evidence
 
-Add before/after screenshots (the new toggle; board + card detail in dark) to
-`.ui-review/` after implementation.
+### What shipped
+
+- **Provider.** `next-themes` is installed; a `"use client"` `ThemeProvider`
+  (`components/theme-provider.tsx`) with `attribute="class"`,
+  `defaultTheme="system"`, `enableSystem`, `disableTransitionOnChange` wraps
+  `{children}` in the root layout (`app/layout.tsx`), which stays a Server
+  Component. `<html>` carries `suppressHydrationWarning`. Persistence is
+  per-device via localStorage (Non-Goals: no DB/cross-device sync).
+- **Header toggle.** `components/theme-toggle.tsx` — a shadcn `DropdownMenu`
+  icon button placed beside the notification bell in
+  `components/authenticated-header-actions.tsx`. 32×32 hit target (≥24), matches
+  the bell's hover/focus treatment, visible focus ring, `aria-label="Switch
+  theme"`. Offers **Light / Dark / System** with **Hugeicons** (`Sun03Icon`,
+  `Moon02Icon`, `ComputerIcon`) — no lucide. The current choice is marked by a
+  non-color **✓** plus an sr-only "(selected)" (WCAG 1.4.1). The trigger icon
+  swaps sun↔moon purely via the `.dark` CSS class (`dark:hidden`/`dark:block`),
+  so it is correct before first paint and never hydration-mismatches; the
+  `theme` JS value is read only inside the portal-rendered menu (opened well
+  after mount), so no `mounted` guard is needed.
+- **Dark-mode audit.** Dark had never run in-product. App-wide sweep found the
+  codebase already token-based (shadcn `bg-card`/`text-foreground`/etc.); the
+  only `text-white`/`bg-white` hits sit on intentionally-colored surfaces (board
+  cover banner, label chips, workspace badges, destructive badge) and are
+  theme-independent. The **analytics dashboard** was the lone breakage: four
+  light-only panels got `dark:` variants —
+  `launch-boundary-banner.tsx` and `data-quality-section.tsx` (amber
+  `border-amber-200 bg-amber-50 text-amber-800` notice →
+  `dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300`),
+  `kpi-cards.tsx` (green/red trend + amber low-confidence → brighter `-400` in
+  dark), `lead-time-table.tsx` (red/emerald Late/On-time badges → `-400` in
+  dark). No other surface needed a fix.
+
+### Verified (browser, authenticated, dev server)
+
+- Toggle dropdown opens with Light/Dark/System + Hugeicons; **✓** tracks the
+  active choice ("System (selected)" → "Dark (selected)" in the a11y tree).
+- **Dark renders correctly** on boards overview, board, card detail (US-043
+  document layout), and the analytics dashboard — readable text, dark surfaces,
+  legible label chips, brand-primary Post-comment, no white-on-white.
+- **Persistence:** selecting Dark sets `localStorage.theme="dark"`; after a full
+  reload `<html>` already carries `dark` and `color-scheme: dark` (next-themes'
+  blocking pre-hydration script), so **no flash** of the light theme.
+- **Light round-trip** works (sun icon returns, focus ring intact).
+- **Mobile 375px:** `scrollWidth === innerWidth` (no horizontal overflow), toggle
+  reachable.
+- **No hydration mismatch / no console errors or warnings** across boards/board/
+  card-detail/dashboard. Full lint clean (only pre-existing `<img>` cover
+  warnings); unit suite green (523 passing).
+- Auth/public routes (`app/(public)/sign-in`, `sign-up`) are token-based (no
+  light-only hardcodes) — verified by static sweep (couldn't view live while
+  authenticated; they inherit the global provider/theme).
+
+### Screenshots (`.ui-review/`)
+
+- `us-046-dark-boards-overview.png`, `us-046-dark-card-detail.png`,
+  `us-046-dark-dashboard.png` (post-fix amber notice), `us-046-dark-mobile.png`.
