@@ -3,6 +3,9 @@
 import { useState, useTransition, useRef } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Calendar03Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { format } from "date-fns";
 
 import {
   assignCardMemberAction,
@@ -17,6 +20,12 @@ import {
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Dialog,
   DialogClose,
@@ -50,6 +59,20 @@ const estimateOptions = ["", "1", "2", "4", "8", "16"] as const;
 
 function toDateInputValue(date: Date | null): string {
   return date ? date.toISOString().slice(0, 10) : "";
+}
+
+// The due-date wire format stays the "YYYY-MM-DD" string the existing
+// updateCardDueDateAction expects (z.coerce.date()). Parse/format it in *local*
+// terms so the calendar shows the day the string names regardless of timezone.
+function parseDateInputValue(value: string): Date | undefined {
+  if (!value) return undefined;
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return undefined;
+  return new Date(year, month - 1, day);
+}
+
+function toDueDateValue(date: Date): string {
+  return format(date, "yyyy-MM-dd");
 }
 
 function getInitials(name: string): string {
@@ -241,10 +264,12 @@ function CardDetailDialogBody({
     card.estimateHours?.toString() ?? "",
   );
   const [draftDueDate, setDraftDueDate] = useState(toDateInputValue(card.dueDate));
+  const [dueDateOpen, setDueDateOpen] = useState(false);
   const [draftPriority, setDraftPriority] = useState(card.priority ?? "NONE");
   const coverInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
+  const selectedDueDate = parseDateInputValue(draftDueDate);
 
   const assignedMemberIds = new Set(assignees.map((member) => member.id));
   const availableMembers = assignableMembers.filter(
@@ -683,21 +708,76 @@ function CardDetailDialogBody({
               </div>
 
               <div className="space-y-2">
-                <label htmlFor="card-due-date" className="text-sm font-semibold">
+                <span id="card-due-date-label" className="text-sm font-semibold">
                   Due date
-                </label>
-                <Input
-                  id="card-due-date"
-                  type="date"
-                  value={draftDueDate}
-                  onChange={(event) => {
-                    const next = event.target.value;
-                    setDraftDueDate(next);
-                    setError("");
-                    saveDueDate(next);
-                  }}
-                  disabled={!canEdit || isPending}
-                />
+                </span>
+                <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="card-due-date"
+                      type="button"
+                      variant="outline"
+                      disabled={!canEdit || isPending}
+                      aria-labelledby="card-due-date-label card-due-date"
+                      aria-label={
+                        selectedDueDate
+                          ? `Due date: ${format(selectedDueDate, "PPP")}. Change due date`
+                          : "Set due date"
+                      }
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !selectedDueDate && "text-muted-foreground",
+                      )}
+                    >
+                      <HugeiconsIcon
+                        icon={Calendar03Icon}
+                        size={16}
+                        strokeWidth={2}
+                        className="mr-2 shrink-0"
+                      />
+                      {selectedDueDate
+                        ? format(selectedDueDate, "PPP")
+                        : "No due date"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      autoFocus
+                      selected={selectedDueDate}
+                      defaultMonth={selectedDueDate}
+                      onSelect={(date) => {
+                        if (!date) {
+                          return;
+                        }
+                        const next = toDueDateValue(date);
+                        setDraftDueDate(next);
+                        setError("");
+                        saveDueDate(next);
+                        setDueDateOpen(false);
+                      }}
+                    />
+                    {draftDueDate ? (
+                      <div className="border-t p-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="w-full justify-center"
+                          disabled={!canEdit || isPending}
+                          onClick={() => {
+                            setDraftDueDate("");
+                            setError("");
+                            saveDueDate("");
+                            setDueDateOpen(false);
+                          }}
+                        >
+                          Clear due date
+                        </Button>
+                      </div>
+                    ) : null}
+                  </PopoverContent>
+                </Popover>
               </div>
             </section>
 
