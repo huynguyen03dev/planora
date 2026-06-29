@@ -35,7 +35,7 @@ export function BoardCard({
   }
 
   return (
-    <div className="relative h-24 w-44">
+    <div className="relative h-24 w-full">
       <Link
         href={`/boards/${id}`}
         className="block h-full w-full rounded-lg p-3 transition-opacity hover:opacity-90"

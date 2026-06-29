@@ -12,6 +12,10 @@ carry rich metadata. All mutations are Server Actions under
 - Soft-deleted via `archivedAt`; deletion cascades to lists, cards, labels,
   stars, and activity.
 - Users can **star** a board (favorite) — `BoardStar`, unique per user+board.
+- The boards overview lays board tiles out in a **responsive auto-fill grid**
+  that fills the available row width (fluid tiles, min ~13rem per column) rather
+  than fixed-width tiles clinging to a narrow left column on wide screens
+  (US-038). Presentation only.
 
 ## Lists
 

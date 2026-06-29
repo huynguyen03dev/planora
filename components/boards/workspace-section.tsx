@@ -38,7 +38,7 @@ export function WorkspaceSection({ workspace, boards, starredBoardIds = [] }: Wo
         <h2 className="font-medium">{workspace.name}</h2>
       </div>
 
-      <div className="flex flex-wrap gap-4">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(13rem,1fr))] gap-4">
         {boards.map((board) => (
           <BoardCard
             key={board.id}
@@ -53,7 +53,7 @@ export function WorkspaceSection({ workspace, boards, starredBoardIds = [] }: Wo
           <Button
             type="button"
             variant="outline"
-            className="h-24 w-44 rounded-lg border-2 border-dashed border-muted bg-transparent text-sm font-normal text-muted-foreground shadow-none hover:border-primary/50 hover:bg-transparent hover:text-foreground"
+            className="h-24 w-full rounded-lg border-2 border-dashed border-muted bg-transparent text-sm font-normal text-muted-foreground shadow-none hover:border-primary/50 hover:bg-transparent hover:text-foreground"
             onClick={() => setCreateBoardOpen(true)}
           >
             + Create board
