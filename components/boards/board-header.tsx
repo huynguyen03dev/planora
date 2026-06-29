@@ -10,6 +10,10 @@ import {
 } from "@/app/(authenticated)/(dashboard)/boards/actions";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
 import { BoardFilter } from "@/components/boards/board-filter";
+import {
+  boardHeaderAvatarFallbackClass,
+  boardHeaderAvatarRingClass,
+} from "@/components/boards/board-header-controls";
 import { BoardLabelToggle } from "@/components/boards/board-label-toggle";
 import { BoardSearch } from "@/components/boards/board-search";
 import { ArchivedCardsDialog } from "@/components/boards/archived-cards-dialog";
@@ -25,7 +29,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getBoardTheme } from "@/lib/constants";
-import { getInitials } from "@/lib/utils";
+import { cn, getInitials } from "@/lib/utils";
 
 // Cap how many watcher avatars render before collapsing into a "+N" count.
 const MAX_VISIBLE_WATCHERS = 5;
@@ -195,18 +199,23 @@ export function BoardHeader({
           ) : null}
 
           {watchers.length > 0 ? (
-            <AvatarGroup className="pr-1" aria-label="Viewing now">
+            <AvatarGroup
+              className={cn("pr-1", boardHeaderAvatarRingClass)}
+              aria-label="Viewing now"
+            >
               {visibleWatchers.map((watcher) => (
                 <Avatar key={watcher.id} title={watcher.name}>
                   {watcher.image ? (
                     <AvatarImage src={watcher.image} alt={watcher.name} />
                   ) : null}
-                  <AvatarFallback>{getInitials(watcher.name)}</AvatarFallback>
+                  <AvatarFallback className={boardHeaderAvatarFallbackClass}>
+                    {getInitials(watcher.name)}
+                  </AvatarFallback>
                 </Avatar>
               ))}
               {watcherOverflow > 0 ? (
                 <AvatarGroupCount
-                  className="text-xs"
+                  className={cn("text-xs", boardHeaderAvatarFallbackClass)}
                   aria-label={`${watcherOverflow} more`}
                 >
                   +{watcherOverflow}

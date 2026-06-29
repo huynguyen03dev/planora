@@ -6,7 +6,9 @@ import { ArchiveIcon, ArrowTurnBackwardIcon } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react"
 
 import { restoreCardAction } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions"
+import { boardHeaderControlClass } from "@/components/boards/board-header-controls"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import {
   Dialog,
   DialogContent,
@@ -74,7 +76,7 @@ export function ArchivedCardsDialog({
           type="button"
           variant="outline"
           size="sm"
-          className="gap-1.5"
+          className={cn("gap-1.5", boardHeaderControlClass)}
           aria-label="View archived cards"
         >
           <HugeiconsIcon icon={ArchiveIcon} size={16} />

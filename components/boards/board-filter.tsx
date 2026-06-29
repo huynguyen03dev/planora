@@ -4,6 +4,10 @@ import { FilterIcon } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react"
 
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store"
+import {
+  boardHeaderControlActiveClass,
+  boardHeaderControlClass,
+} from "@/components/boards/board-header-controls"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -40,9 +44,13 @@ export function BoardFilter() {
       <DropdownMenuTrigger asChild>
         <Button
           type="button"
-          variant={activeCount > 0 ? "secondary" : "outline"}
+          variant="outline"
           size="sm"
-          className="gap-1.5"
+          className={cn(
+            "gap-1.5",
+            boardHeaderControlClass,
+            activeCount > 0 && boardHeaderControlActiveClass,
+          )}
           aria-label="Filter cards by label"
         >
           <HugeiconsIcon icon={FilterIcon} size={16} />

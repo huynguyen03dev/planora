@@ -4,7 +4,12 @@ import { Tag01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
+import {
+  boardHeaderControlActiveClass,
+  boardHeaderControlClass,
+} from "@/components/boards/board-header-controls";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 // Board-level control for the compact↔expanded label preference (US-044). One
 // toggle for the whole board (not per card) so the decision survives realtime
@@ -27,9 +32,13 @@ export function BoardLabelToggle() {
   return (
     <Button
       type="button"
-      variant={expandLabels ? "secondary" : "outline"}
+      variant="outline"
       size="sm"
-      className="gap-1.5"
+      className={cn(
+        "gap-1.5",
+        boardHeaderControlClass,
+        expandLabels && boardHeaderControlActiveClass,
+      )}
       aria-pressed={expandLabels}
       aria-label={
         expandLabels
