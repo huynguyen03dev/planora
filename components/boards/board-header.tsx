@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { StarIcon } from "@hugeicons/core-free-icons";
+import { Crown02Icon, StarIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 import {
@@ -21,6 +21,7 @@ import type { ArchivedCardData } from "@/components/boards/archived-cards-dialog
 import { BoardMenu } from "@/components/boards/board-menu";
 import {
   Avatar,
+  AvatarBadge,
   AvatarFallback,
   AvatarGroup,
   AvatarGroupCount,
@@ -204,13 +205,34 @@ export function BoardHeader({
               aria-label="Viewing now"
             >
               {visibleWatchers.map((watcher) => (
-                <Avatar key={watcher.id} title={watcher.name}>
+                <Avatar
+                  key={watcher.id}
+                  // Lift an admin above its overlapping neighbours so the crown
+                  // (bottom-right) is never hidden under the next avatar.
+                  className={cn(watcher.role === "admin" && "z-10")}
+                  title={
+                    watcher.role === "admin"
+                      ? `${watcher.name} (admin)`
+                      : watcher.name
+                  }
+                >
                   {watcher.image ? (
                     <AvatarImage src={watcher.image} alt={watcher.name} />
                   ) : null}
                   <AvatarFallback className={boardHeaderAvatarFallbackClass}>
                     {getInitials(watcher.name)}
                   </AvatarFallback>
+                  {watcher.role === "admin" ? (
+                    // Trello-style corner marker: a board admin gets a small gold
+                    // crown at the avatar's bottom-right. Decorative — the role is
+                    // already in the avatar's title for assistive tech.
+                    <AvatarBadge
+                      aria-hidden
+                      className="-right-0.5 -bottom-0.5 bg-amber-400 text-amber-950 ring-white/70 group-data-[size=default]/avatar:size-3 group-data-[size=default]/avatar:[&>svg]:size-2"
+                    >
+                      <HugeiconsIcon icon={Crown02Icon} strokeWidth={2.5} />
+                    </AvatarBadge>
+                  ) : null}
                 </Avatar>
               ))}
               {watcherOverflow > 0 ? (

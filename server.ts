@@ -4,12 +4,12 @@ import { parse } from "url";
 import next from "next";
 
 import { initIO, emitBoardPresence } from "@/lib/realtime/server";
-import { authenticateSocket, canUserJoinBoard, canUserJoinWorkspace, getUserProfile } from "@/lib/realtime/auth";
+import { authenticateSocket, canUserJoinWorkspace, getBoardMembershipRole, getUserProfile } from "@/lib/realtime/auth";
 import { ROOMS } from "@/lib/realtime/events";
 import { presenceRegistry } from "@/lib/realtime/presence";
-import type { Watcher } from "@/lib/realtime/types";
+import type { UserProfile, Watcher } from "@/lib/realtime/types";
 
-type SocketData = { userId: string; profile?: Watcher | null };
+type SocketData = { userId: string; profile?: UserProfile | null };
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = dev ? "localhost" : (process.env.HOSTNAME || "0.0.0.0");
@@ -51,9 +51,11 @@ app.prepare().then(() => {
 
     socket.on("board:join", async (payload) => {
       const { boardId } = payload;
-      const canJoin = await canUserJoinBoard(userId, boardId);
+      // One query resolves both authorization (null = denied) and the role used
+      // for the presence admin badge (US-047).
+      const role = await getBoardMembershipRole(userId, boardId);
 
-      if (!canJoin) {
+      if (!role) {
         socket.emit("board:error", { message: "Not authorized to join this board" });
         return;
       }
@@ -76,10 +78,14 @@ app.prepare().then(() => {
         return;
       }
 
+      // Role is board-specific, so it is merged in here rather than cached with
+      // the board-independent profile.
+      const watcher: Watcher = { ...profile, role };
+
       // Broadcast only when this is the user's first socket on the board; the
       // broadcast targets the room the joiner is now in, so they receive the
       // full list too.
-      if (presenceRegistry.add(boardId, socket.id, profile)) {
+      if (presenceRegistry.add(boardId, socket.id, watcher)) {
         emitBoardPresence(boardId, presenceRegistry.watchers(boardId));
       }
     });

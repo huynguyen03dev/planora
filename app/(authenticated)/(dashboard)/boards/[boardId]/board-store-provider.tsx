@@ -43,7 +43,7 @@ export function BoardStoreProvider({
   lists,
   selectedCardId,
   selectedCard,
-  currentViewer: { id: viewerId, name: viewerName, image: viewerImage },
+  currentViewer: { id: viewerId, name: viewerName, image: viewerImage, role: viewerRole },
 }: BoardStoreProviderProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -265,8 +265,8 @@ export function BoardStoreProvider({
   // (not the prop object), so a router.refresh() — which re-creates the object —
   // doesn't re-run this and clobber the live list.
   useEffect(() => {
-    seedWatchers([{ id: viewerId, name: viewerName, image: viewerImage }]);
-  }, [boardId, viewerId, viewerName, viewerImage, seedWatchers]);
+    seedWatchers([{ id: viewerId, name: viewerName, image: viewerImage, role: viewerRole }]);
+  }, [boardId, viewerId, viewerName, viewerImage, viewerRole, seedWatchers]);
 
   // Board room join/leave: separate from socket lifecycle
   useEffect(() => {

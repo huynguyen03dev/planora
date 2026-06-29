@@ -220,7 +220,7 @@ export default async function BoardPage({
       lists={listsWithCards}
       selectedCardId={selectedCardId}
       selectedCard={selectedCardData}
-      currentViewer={{ id: user.id, name: user.name, image: user.image ?? null }}
+      currentViewer={{ id: user.id, name: user.name, image: user.image ?? null, role }}
       canEdit={canEditList}
       canDelete={canDeleteList}
       canCreateList={canCreateList}

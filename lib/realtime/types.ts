@@ -1,3 +1,5 @@
+import type { WorkspaceRole } from "@/lib/authorization";
+
 export interface BoardEventPayload {
   boardId: string;
 }
@@ -113,10 +115,19 @@ export interface NotificationNewPayload {
   createdAt: string;
 }
 
-export interface Watcher {
+// Board-independent display fields, resolved once per socket connection.
+export interface UserProfile {
   id: string;
   name: string;
   image: string | null;
+}
+
+// A watcher is a profile plus the role it holds in *this board's* workspace, so
+// the presence list can mark board admins (US-047). Role is per-board (a user may
+// be admin in one workspace and viewer in another), so it is resolved per join,
+// not cached with the profile.
+export interface Watcher extends UserProfile {
+  role: WorkspaceRole;
 }
 
 export interface BoardPresencePayload extends BoardEventPayload {
