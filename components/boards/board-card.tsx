@@ -59,6 +59,7 @@ export function BoardCard({
         <HugeiconsIcon
           icon={StarIcon}
           className="size-[18px] drop-shadow-sm"
+          fill={starDisplay ? "currentColor" : "none"}
         />
       </button>
     </div>
