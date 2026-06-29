@@ -463,6 +463,34 @@ function CardDetailDialogBody({
               </div>
             </section>
 
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-base font-semibold">Description</h3>
+                <span className="text-xs text-muted-foreground">
+                  {canEdit ? "Editable" : "Read only"}
+                </span>
+              </div>
+
+              {canEdit ? (
+                <Textarea
+                  id="card-detail-description"
+                  value={draftDescription}
+                  onChange={(e) => {
+                    setDraftDescription(e.target.value);
+                    setError("");
+                  }}
+                  disabled={isPending}
+                  rows={10}
+                  placeholder="Add a more detailed description..."
+                  className="min-h-44"
+                />
+              ) : (
+                <div className="min-h-44 rounded-lg border bg-muted/20 px-4 py-3 text-sm whitespace-pre-wrap">
+                  {card.description || "No description yet."}
+                </div>
+              )}
+            </section>
+
             <section className="space-y-3 rounded-lg border bg-muted/20 p-4">
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -688,34 +716,6 @@ function CardDetailDialogBody({
 
             <section className="space-y-3">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="text-base font-semibold">Description</h3>
-                <span className="text-xs text-muted-foreground">
-                  {canEdit ? "Editable" : "Read only"}
-                </span>
-              </div>
-
-              {canEdit ? (
-                <Textarea
-                  id="card-detail-description"
-                  value={draftDescription}
-                  onChange={(e) => {
-                    setDraftDescription(e.target.value);
-                    setError("");
-                  }}
-                  disabled={isPending}
-                  rows={10}
-                  placeholder="Add a more detailed description..."
-                  className="min-h-44"
-                />
-              ) : (
-                <div className="min-h-44 rounded-lg border bg-muted/20 px-4 py-3 text-sm whitespace-pre-wrap">
-                  {card.description || "No description yet."}
-                </div>
-              )}
-            </section>
-
-            <section className="space-y-3">
-              <div className="flex items-center justify-between gap-3">
                 <h3 className="text-base font-semibold">Members</h3>
                 <span className="text-xs text-muted-foreground">
                   {canEdit ? "Manage assignees" : "Visible to all members"}
@@ -800,20 +800,6 @@ function CardDetailDialogBody({
               attachments={attachments}
               canEdit={canEdit}
             />
-
-            <section className="space-y-3 rounded-lg border bg-muted/20 p-4">
-              <h3 className="text-sm font-semibold">Card metadata</h3>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <MetaBlock
-                  label="Estimate"
-                  value={card.estimateHours ? `${card.estimateHours}h` : "Unestimated"}
-                />
-                <MetaBlock
-                  label="Due date"
-                  value={draftDueDate || "No due date"}
-                />
-              </div>
-            </section>
 
             {canEdit && (
               <div className="flex items-center gap-2 border-t pt-4">
@@ -902,22 +888,6 @@ function ActionChip({ label }: ActionChipProps) {
     >
       {label}
     </button>
-  );
-}
-
-type MetaBlockProps = {
-  label: string;
-  value: string;
-};
-
-function MetaBlock({ label, value }: MetaBlockProps) {
-  return (
-    <div className="space-y-1 rounded-md border bg-background p-3">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
-      <p className="text-sm">{value}</p>
-    </div>
   );
 }
 

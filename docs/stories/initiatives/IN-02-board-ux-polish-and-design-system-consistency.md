@@ -2,9 +2,10 @@
 
 ## Status
 
-in progress — opened 2026-06-26. **US-028 and US-029 shipped** (2026-06-26,
-manual QA) — Theme A complete; remaining child stories below are reservations
-awaiting individual intake.
+in progress — opened 2026-06-26. **Shipped: US-028, US-029** (Theme A) **·
+US-034, US-035, US-040** (Theme D core) **· US-031** (Theme C, 2026-06-29) — all
+manual QA. Remaining: US-032/US-033 (Theme C), US-030 (Theme B), US-036/US-039
+(Theme D), US-037/US-038 (Theme E) — reservations awaiting individual intake.
 
 ## Type
 
@@ -142,7 +143,7 @@ Next free id at authoring time is **US-028**.
 
 | ID | Candidate story | Lane (est.) | Notes |
 | --- | --- | --- | --- |
-| US-031 | Reorder the card dialog (Description directly under Title) and remove the duplicate read-only "Card metadata" block | normal | Estimate/Due date already have editable controls; the read-only `MetaBlock` duplicates them. |
+| US-031 | Reorder the card dialog (Description directly under Title) and remove the duplicate read-only "Card metadata" block | normal | ✅ **shipped 2026-06-29.** `card-detail-sheet.tsx`. Description moved directly under Title; read-only `MetaBlock` section + the `MetaBlock` component/type deleted (Estimate/Due date now show once via their editable controls). Presentation-only — no field/action/data change. Dead `ActionChip`s left for US-032. Manual QA desktop + 375px (a11y-tree + screenshots). Story: `…/US-031-card-dialog-reorder-remove-duplicate-metadata.md`. |
 | US-032 | Unify the dialog save model (autosave-on-blur or a single explicit save) and remove the dead "Add"/"Members" `ActionChip` placeholders | normal | Removes the three-competing-save-models confusion. |
 | US-033 | Move full board-label administration behind a "Manage labels" affordance instead of inlining it in every card | normal | Card dialog keeps attach/detach; CRUD moves out. |
 
