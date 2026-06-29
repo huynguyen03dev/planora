@@ -598,15 +598,9 @@ function CardDetailDialogBody({
               <HugeiconsIcon icon={Tag01Icon} size={16} strokeWidth={2} />
               Labels
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => focusSection("card-section-dates", "card-due-date")}
-            >
-              <HugeiconsIcon icon={Calendar03Icon} size={16} strokeWidth={2} />
-              Dates
-            </Button>
+            {/* Order mirrors the body section order (Labels → Checklist → Dates)
+                so clicking the row left-to-right scrolls monotonically down,
+                never up-then-down (US-043). */}
             <Button
               type="button"
               variant="outline"
@@ -615,6 +609,15 @@ function CardDetailDialogBody({
             >
               <HugeiconsIcon icon={Task01Icon} size={16} strokeWidth={2} />
               Checklist
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => focusSection("card-section-dates", "card-due-date")}
+            >
+              <HugeiconsIcon icon={Calendar03Icon} size={16} strokeWidth={2} />
+              Dates
             </Button>
             <Button
               type="button"
