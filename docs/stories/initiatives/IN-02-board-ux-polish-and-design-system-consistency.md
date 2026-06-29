@@ -3,8 +3,8 @@
 ## Status
 
 in progress — opened 2026-06-26. **Shipped: US-028, US-029** (Theme A) **·
-US-034, US-035, US-040** (Theme D core) **· US-031, US-032** (Theme C,
-2026-06-29) — all manual QA. Remaining: US-033 (Theme C), US-030 (Theme B),
+US-034, US-035, US-040** (Theme D core) **· US-031, US-032, US-033** (Theme C —
+complete, 2026-06-29) — all manual QA. Remaining: US-030 (Theme B),
 US-036/US-039 (Theme D), US-037/US-038 (Theme E) — reservations awaiting
 individual intake.
 
@@ -146,7 +146,7 @@ Next free id at authoring time is **US-028**.
 | --- | --- | --- | --- |
 | US-031 | Reorder the card dialog (Description directly under Title) and remove the duplicate read-only "Card metadata" block | normal | ✅ **shipped 2026-06-29.** `card-detail-sheet.tsx`. Description moved directly under Title; read-only `MetaBlock` section + the `MetaBlock` component/type deleted (Estimate/Due date now show once via their editable controls). Presentation-only — no field/action/data change. Dead `ActionChip`s left for US-032. Manual QA desktop + 375px (a11y-tree + screenshots). Story: `…/US-031-card-dialog-reorder-remove-duplicate-metadata.md`. |
 | US-032 | Unify the dialog save model (autosave-on-blur or a single explicit save) and remove the dead "Add"/"Members" `ActionChip` placeholders | normal | ✅ **shipped 2026-06-29.** `card-detail-sheet.tsx`. Chose **autosave**: title/description persist on blur, estimate/due-date on change (matching the already-autosaving Priority). Removed the bottom "Save changes/Reset" footer, the per-field "Save estimate"/"Save due date" buttons, and the dead `ActionChip`s (+ component/type). Added a "Saving…" polite live region. Reuses the existing per-field Server Actions — no new action/schema/contract change. Manual QA desktop + 375px (autosave round-trip verified via activity log). Story: `…/US-032-unify-card-dialog-save-model.md`. |
-| US-033 | Move full board-label administration behind a "Manage labels" affordance instead of inlining it in every card | normal | Card dialog keeps attach/detach; CRUD moves out. |
+| US-033 | Move full board-label administration behind a "Manage labels" affordance instead of inlining it in every card | normal | ✅ **shipped 2026-06-29.** `card-labels-section.tsx`. Card dialog keeps attach/detach (chips + On/Off list); full CRUD (Edit/Delete + `LabelEditor` + New label) moved into a nested "Manage labels" `Dialog`. Reuses the existing label Server Actions — no new action/schema/contract change. Manual QA desktop + 375px (attach/detach round-trip + Edit editor verified). Story: `…/US-033-manage-labels-affordance.md`. |
 
 ### Theme D — Design-system consistency (P1, normal)
 
