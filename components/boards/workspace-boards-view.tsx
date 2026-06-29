@@ -1,6 +1,8 @@
 import { useState } from "react";
 import Link from "next/link";
 
+import { Button } from "@/components/ui/button";
+
 import { BoardCard } from "./board-card";
 import { CreateBoardModal } from "./create-board-modal";
 import { workspaceBadgeGradient } from "./styles";
@@ -66,13 +68,14 @@ export function WorkspaceBoardsView({
         ))}
 
         {canCreateBoard ? (
-          <button
+          <Button
             type="button"
-            className="flex h-24 w-44 items-center justify-center rounded-lg border-2 border-dashed border-muted text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+            variant="outline"
+            className="h-24 w-44 rounded-lg border-2 border-dashed border-muted bg-transparent text-sm font-normal text-muted-foreground shadow-none hover:border-primary/50 hover:bg-transparent hover:text-foreground"
             onClick={() => setCreateBoardOpen(true)}
           >
             + Create board
-          </button>
+          </Button>
         ) : null}
       </div>
 
