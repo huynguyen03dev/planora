@@ -1,5 +1,12 @@
 import { auth } from "@/lib/auth";
+import type { WorkspaceRole } from "@/lib/authorization";
 import db from "@/lib/prisma";
+
+import type { UserProfile } from "./types";
+
+function normalizeRole(role: string): WorkspaceRole {
+  return role === "admin" || role === "editor" ? role : "viewer";
+}
 
 export async function authenticateSocket(handshake: { headers: Record<string, string> }): Promise<string | null> {
   const cookieHeader = Object.entries(handshake.headers)
@@ -27,7 +34,14 @@ export async function authenticateSocket(handshake: { headers: Record<string, st
   }
 }
 
-export async function canUserJoinBoard(userId: string, boardId: string): Promise<boolean> {
+// Returns the user's role in the board's workspace, or null when they cannot
+// join (board missing/archived, or not a member). The role doubles as the
+// authorization check (null = denied) and the presence badge source (US-047),
+// so the join path resolves membership in a single query.
+export async function getBoardMembershipRole(
+  userId: string,
+  boardId: string,
+): Promise<WorkspaceRole | null> {
   try {
     const board = await db.board.findUnique({
       where: { id: boardId },
@@ -35,7 +49,7 @@ export async function canUserJoinBoard(userId: string, boardId: string): Promise
     });
 
     if (!board || board.archivedAt) {
-      return false;
+      return null;
     }
 
     const member = await db.workspaceMember.findFirst({
@@ -43,11 +57,30 @@ export async function canUserJoinBoard(userId: string, boardId: string): Promise
         userId,
         workspace: { id: board.workspaceId },
       },
+      select: { role: true },
     });
 
-    return !!member;
+    return member ? normalizeRole(member.role) : null;
   } catch {
-    return false;
+    return null;
+  }
+}
+
+// Profile for the presence avatar list. The socket only carries a userId, so we
+// resolve the display fields once on join. Callers should memoize per-socket
+// (profile is constant for a connection) to avoid re-querying on multi-board
+// joins. Role is board-dependent and resolved separately via
+// getBoardMembershipRole.
+export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+  try {
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true, image: true },
+    });
+
+    return user;
+  } catch {
+    return null;
   }
 }
 

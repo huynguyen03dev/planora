@@ -278,9 +278,11 @@ model Card {
   comments         Comment[]
   attachments      Attachment[]
   activities       Activity[]        @relation("CardActivity")
+  cardReminders    CardReminder[]
 
   @@index([listId, position])
   @@index([listId, archivedAt])
+  @@index([dueDate, completedAt])
   @@map("card")
 }
 
@@ -328,6 +330,7 @@ model Checklist {
 
   items ChecklistItem[]
 
+  @@index([cardId])
   @@map("checklist")
 }
 
@@ -340,6 +343,7 @@ model ChecklistItem {
   position    Float
   createdAt   DateTime  @default(now())
 
+  @@index([checklistId])
   @@map("checklistItem")
 }
 
@@ -353,6 +357,7 @@ model Comment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([cardId])
   @@map("comment")
 }
 
@@ -410,6 +415,21 @@ model Notification {
 
   @@index([userId, isRead, createdAt])
   @@map("notification")
+}
+
+// ─── Scheduler bookkeeping (due-date reminders) ───────────────────
+
+model CardReminder {
+  id        String   @id @default(uuid())
+  cardId    String
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  userId    String
+  milestone String   // "DUE_SOON" | "OVERDUE"
+  sentAt    DateTime @default(now())
+
+  @@unique([cardId, userId, milestone])
+  @@index([cardId])
+  @@map("cardReminder")
 }
 
 // ─── Analytics History (append-only, survives card/list deletion) ───

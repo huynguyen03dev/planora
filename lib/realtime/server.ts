@@ -1,6 +1,6 @@
 import { Server } from "socket.io";
 
-import type { CardLabelSnapshot, CardSnapshot, ListSnapshot, NotificationNewPayload, ServerToClientEvents, ClientToServerEvents } from "./types";
+import type { CardLabelSnapshot, CardMemberSnapshot, CardSnapshot, ListSnapshot, NotificationNewPayload, ServerToClientEvents, ClientToServerEvents, Watcher } from "./types";
 import { ROOMS } from "./events";
 
 declare global {
@@ -207,6 +207,29 @@ export function emitCardLabelsUpdated(boardId: string, payload: {
   }
 }
 
+// In-place / live (not structural): a card's assignee set changed. Safe to apply
+// mid-drag — members render only in the open card detail sheet, never on the
+// list array. Mirrors card:labels-updated. Emitted on assign/remove.
+export function emitCardMembersUpdated(boardId: string, payload: {
+  cardId: string;
+  members: CardMemberSnapshot[];
+}) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.board(boardId)).emit("card:members-updated", {
+      boardId,
+      ...payload,
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit card:members-updated:", error);
+  }
+}
+
 export function emitCommentCreated(boardId: string, payload: {
   cardId: string;
   comment: {
@@ -244,6 +267,26 @@ export function emitCommentCreated(boardId: string, payload: {
     });
   } catch (error) {
     console.error("[realtime] Failed to emit comment:created:", error);
+  }
+}
+
+// Live presence (not structural): the set of users currently viewing a board
+// changed. Broadcast the full watcher list to the board room. Ephemeral — never
+// touches the lists array, so it is always safe to apply (no drag deferral).
+export function emitBoardPresence(boardId: string, watchers: Watcher[]) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.board(boardId)).emit("board:presence", {
+      boardId,
+      watchers,
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit board:presence:", error);
   }
 }
 

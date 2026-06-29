@@ -41,6 +41,8 @@ export type CardDetailRecord = {
   estimateHours: number | null;
   dueDate: Date | null;
   completedAt: Date | null;
+  priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
+  coverImage: string | null;
   updatedAt: Date;
 };
 
@@ -52,6 +54,8 @@ const CARD_DETAIL_SELECT = {
   estimateHours: true,
   dueDate: true,
   completedAt: true,
+  priority: true,
+  coverImage: true,
   updatedAt: true,
 } as const;
 
@@ -648,15 +652,66 @@ export async function softDeleteCard(cardId: string): Promise<CardRecord> {
 }
 
 /**
- * Restore a card from archive.
+ * A board's archived card, summarized for the Archived-cards view.
  */
-export async function restoreCard(cardId: string): Promise<CardRecord> {
-  return db.card.update({
+export type ArchivedCardRecord = {
+  id: string;
+  title: string;
+  listId: string;
+  listTitle: string;
+  archivedAt: Date;
+};
+
+/**
+ * List a board's archived cards (newest first) for the Archived-cards view.
+ * Scoped through the owning list/board; the board itself must not be archived.
+ */
+export async function getArchivedCards(
+  boardId: string,
+): Promise<ArchivedCardRecord[]> {
+  const cards = await db.card.findMany({
+    where: {
+      archivedAt: { not: null },
+      list: {
+        boardId,
+        board: { archivedAt: null },
+      },
+    },
+    orderBy: { archivedAt: "desc" },
+    select: {
+      id: true,
+      title: true,
+      listId: true,
+      archivedAt: true,
+      list: {
+        select: { title: true },
+      },
+    },
+  });
+
+  return cards.map((card) => ({
+    id: card.id,
+    title: card.title,
+    listId: card.listId,
+    listTitle: card.list.title,
+    // archivedAt is non-null by the `where` filter above.
+    archivedAt: card.archivedAt as Date,
+  }));
+}
+
+/**
+ * Resolve an *archived* card with its list + board scope envelope. Mirrors
+ * `getCardWithListAndBoard` but requires `archivedAt: { not: null }` — the
+ * archivedAt:null filter there means it could never find a card to restore.
+ * Returns null for a non-archived, missing, or foreign card id.
+ */
+export async function getArchivedCardWithListAndBoard(
+  cardId: string,
+): Promise<CardWithListBoardRecord | null> {
+  const card = await db.card.findFirst({
     where: {
       id: cardId,
-    },
-    data: {
-      archivedAt: null,
+      archivedAt: { not: null },
     },
     select: {
       id: true,
@@ -674,6 +729,56 @@ export async function restoreCard(cardId: string): Promise<CardRecord> {
       createdById: true,
       createdAt: true,
       updatedAt: true,
+      list: {
+        select: {
+          id: true,
+          boardId: true,
+          board: {
+            select: {
+              id: true,
+              workspaceId: true,
+              archivedAt: true,
+            },
+          },
+        },
+      },
     },
+  });
+
+  if (!card) {
+    return null;
+  }
+
+  const { list, ...cardData } = card;
+  return {
+    card: cardData,
+    list: {
+      id: list.id,
+      boardId: list.boardId,
+    },
+    board: list.board,
+  };
+}
+
+
+export async function updateCardCover(
+  cardId: string,
+  coverImage: string | null,
+): Promise<CardDetailRecord> {
+  return db.card.update({
+    where: { id: cardId, archivedAt: null },
+    data: { coverImage },
+    select: CARD_DETAIL_SELECT,
+  });
+}
+
+export async function updateCardPriority(
+  cardId: string,
+  priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null,
+): Promise<CardDetailRecord> {
+  return db.card.update({
+    where: { id: cardId, archivedAt: null },
+    data: { priority },
+    select: CARD_DETAIL_SELECT,
   });
 }

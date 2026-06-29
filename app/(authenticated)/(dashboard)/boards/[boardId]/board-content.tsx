@@ -32,7 +32,16 @@ type BoardContentProps = {
       listId: string;
       title: string;
       position: number;
+      coverImage: string | null;
+      priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
+      dueDate: Date | null;
+      completedAt: Date | null;
       labels: Array<{ id: string; name: string; color: string }>;
+      members: Array<{ id: string; name: string; image: string | null }>;
+      memberCount: number;
+      checklistDone: number;
+      checklistTotal: number;
+      commentCount: number;
     }>;
   }>;
   canEdit: boolean;
@@ -209,7 +218,7 @@ export function BoardContent({
             <div
               ref={provided.innerRef}
               {...provided.droppableProps}
-              className="flex w-max min-w-full items-start gap-4 p-4"
+              className="flex w-max min-w-full items-start gap-4 p-3 sm:p-4"
             >
               {boardLists.map((list, index) => (
                 <ListColumn

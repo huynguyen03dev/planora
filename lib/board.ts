@@ -87,3 +87,37 @@ export async function deleteBoard(boardId: string): Promise<void> {
     },
   });
 }
+
+export async function toggleBoardStar(
+  userId: string,
+  boardId: string,
+): Promise<boolean> {
+  const existing = await db.boardStar.findUnique({
+    where: {
+      boardId_userId: { boardId, userId },
+    },
+  });
+
+  if (existing) {
+    await db.boardStar.delete({
+      where: { id: existing.id },
+    });
+    return false;
+  }
+
+  await db.boardStar.create({
+    data: { boardId, userId },
+  });
+  return true;
+}
+
+export async function getStarredBoardIds(
+  userId: string,
+): Promise<string[]> {
+  const stars = await db.boardStar.findMany({
+    where: { userId },
+    select: { boardId: true },
+  });
+
+  return stars.map((s) => s.boardId);
+}

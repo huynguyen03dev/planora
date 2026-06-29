@@ -1,40 +1,106 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useRef } from "react";
+import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
+  Attachment01Icon,
+  Calendar03Icon,
+  Cancel01Icon,
+  Flag03Icon,
+  Image01Icon,
+  Tag01Icon,
+  Task01Icon,
+  UserMultipleIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { format } from "date-fns";
 
 import {
   assignCardMemberAction,
   createCommentAction,
   removeCardMemberAction,
+  updateCardCoverAction,
+  setCardCoverAction,
   updateCardDetailsAction,
   updateCardDueDateAction,
   updateCardEstimateAction,
+  updateCardPriorityAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Dialog,
   DialogClose,
   DialogContent,
-  DialogHeader,
+  DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { CardAttachments } from "@/components/boards/card-attachments";
+import { CardChecklistsSection, type ChecklistData } from "@/components/boards/card-checklists-section";
 import { CardLabelsSection, type LabelChip } from "@/components/boards/card-labels-section";
 import type { CardDetailRecord } from "@/lib/card";
 import type { CommentRecord } from "@/lib/comment";
 import type { ActivityRecord } from "@/lib/activity";
 import type { AttachmentRecord } from "@/lib/attachment";
 import type { CardMemberRecord, AssignableWorkspaceMemberRecord } from "@/lib/card-member";
-import { cn } from "@/lib/utils";
+import { cn, getInitials } from "@/lib/utils";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
+import { useMentionAutocomplete } from "./use-mention-autocomplete";
 
 const estimateOptions = ["", "1", "2", "4", "8", "16"] as const;
 
 function toDateInputValue(date: Date | null): string {
   return date ? date.toISOString().slice(0, 10) : "";
 }
+
+// The due-date wire format stays the "YYYY-MM-DD" string the existing
+// updateCardDueDateAction expects (z.coerce.date()). Parse/format it in *local*
+// terms so the calendar shows the day the string names regardless of timezone.
+function parseDateInputValue(value: string): Date | undefined {
+  if (!value) return undefined;
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return undefined;
+  return new Date(year, month - 1, day);
+}
+
+function toDueDateValue(date: Date): string {
+  return format(date, "yyyy-MM-dd");
+}
+
+function MemberAvatar({
+  name,
+  image,
+  size = "default",
+  className,
+}: {
+  name: string;
+  image?: string | null;
+  size?: "default" | "sm" | "lg";
+  className?: string;
+}) {
+  return (
+    <Avatar size={size} className={className}>
+      {image ? <AvatarImage src={image} alt={name} /> : null}
+      <AvatarFallback>{getInitials(name)}</AvatarFallback>
+    </Avatar>
+  );
+}
+
 
 type UIComment = {
   id: string;
@@ -63,6 +129,7 @@ type CardDetailSheetProps = {
   boardId: string;
   boardLabels: LabelChip[];
   cardLabelIds: string[];
+  checklists: ChecklistData[];
   canEdit: boolean;
   canComment: boolean;
 };
@@ -78,6 +145,7 @@ export function CardDetailSheet({
   boardId,
   boardLabels,
   cardLabelIds,
+  checklists,
   canEdit,
   canComment,
 }: CardDetailSheetProps) {
@@ -96,6 +164,17 @@ export function CardDetailSheet({
     storeSelectedCard && card && storeSelectedCard.card.id === card.id
       ? storeSelectedCard.activity
       : initialActivity;
+  // Members render only here (not on the card face), so they live-update from
+  // the store's selectedCard when this is the open card — mirroring comments.
+  // This is what makes a remote assign/remove appear without a reload (US-011).
+  const liveAssignees =
+    storeSelectedCard && card && storeSelectedCard.card.id === card.id
+      ? storeSelectedCard.assignees
+      : assignees;
+  const liveAssignableMembers: AssignableWorkspaceMemberRecord[] =
+    storeSelectedCard && card && storeSelectedCard.card.id === card.id
+      ? storeSelectedCard.assignableMembers.map((m) => ({ ...m, role: "" }))
+      : assignableMembers;
 
   if (!card) {
     return null;
@@ -103,6 +182,18 @@ export function CardDetailSheet({
 
   const currentCard = card;
   const isOpen = open && dismissedCardId !== currentCard.id;
+
+  // Bind the hero title/description to the live store value (not the stale server
+  // prop) so a remote rename or description edit isn't clobbered when the field
+  // blurs (US-043). Comments/activity/members already merge from the store above.
+  const liveCard: CardDetailRecord =
+    storeSelectedCard && storeSelectedCard.card.id === currentCard.id
+      ? {
+          ...currentCard,
+          title: storeSelectedCard.card.title,
+          description: storeSelectedCard.card.description,
+        }
+      : currentCard;
 
   function handleClose() {
     setDismissedCardId(currentCard.id);
@@ -123,18 +214,34 @@ export function CardDetailSheet({
         }
       }}
     >
-      <DialogContent className="h-[min(88vh,760px)] max-w-[min(96vw,1120px)] overflow-hidden p-0">
+      <DialogContent
+        className="h-[min(88vh,760px)] max-w-[min(96vw,1120px)] overflow-hidden p-0"
+        onEscapeKeyDown={(e) => {
+          // While the hero title is being edited, Escape reverts the field
+          // (handled on the input) and must NOT close the dialog. Cancel Radix's
+          // dismiss here — the supported API — only when the title input holds an
+          // unsaved edit; otherwise Escape closes the dialog as usual (US-043).
+          const active = document.activeElement as HTMLInputElement | null;
+          if (
+            active?.id === "card-detail-title" &&
+            active.value !== liveCard.title
+          ) {
+            e.preventDefault();
+          }
+        }}
+      >
         <CardDetailDialogBody
           key={currentCard.id}
-          card={currentCard}
+          card={liveCard}
           comments={liveComments}
           activity={liveActivity}
           attachments={attachments}
-          assignees={assignees}
-          assignableMembers={assignableMembers}
+          assignees={liveAssignees}
+          assignableMembers={liveAssignableMembers}
           boardId={boardId}
           boardLabels={boardLabels}
           cardLabelIds={cardLabelIds}
+          checklists={checklists}
           canEdit={canEdit}
           canComment={canComment}
         />
@@ -149,10 +256,14 @@ type CardDetailDialogBodyProps = {
   activity: UIActivity[];
   attachments: AttachmentRecord[];
   assignees: CardMemberRecord[];
+  // Role-less: the dropdown renders name/email only, and the live store snapshot
+  // (selectedCard.assignableMembers) carries no role. AssignableWorkspaceMemberRecord
+  // from the server prop is structurally assignable here (US-011).
   assignableMembers: AssignableWorkspaceMemberRecord[];
   boardId: string;
   boardLabels: LabelChip[];
   cardLabelIds: string[];
+  checklists: ChecklistData[];
   canEdit: boolean;
   canComment: boolean;
 };
@@ -167,6 +278,7 @@ function CardDetailDialogBody({
   boardId,
   boardLabels,
   cardLabelIds,
+  checklists,
   canEdit,
   canComment,
 }: CardDetailDialogBodyProps) {
@@ -177,24 +289,95 @@ function CardDetailDialogBody({
     card.estimateHours?.toString() ?? "",
   );
   const [draftDueDate, setDraftDueDate] = useState(toDateInputValue(card.dueDate));
+  const [dueDateOpen, setDueDateOpen] = useState(false);
+  const [draftPriority, setDraftPriority] = useState(card.priority ?? "NONE");
+  const coverInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
+  const selectedDueDate = parseDateInputValue(draftDueDate);
 
-  const isDirty =
-    draftTitle.trim() !== card.title || draftDescription !== (card.description ?? "");
+  // The hero title/description bind to the live store value (passed in via
+  // `card`). Reflect a remote edit into the draft whenever the local user isn't
+  // actively typing that field, so the next blur can't clobber a remote rename
+  // (US-043). This is the React "adjust state during render" pattern (guarded by
+  // a baseline so it can't loop) — not an effect — and the focus flags keep an
+  // in-progress local edit from being overwritten mid-keystroke.
+  const [titleEditing, setTitleEditing] = useState(false);
+  const [descriptionEditing, setDescriptionEditing] = useState(false);
+
+  const [titleBaseline, setTitleBaseline] = useState(card.title);
+  if (card.title !== titleBaseline) {
+    setTitleBaseline(card.title);
+    if (!titleEditing) setDraftTitle(card.title);
+  }
+
+  const liveDescription = card.description ?? "";
+  const [descriptionBaseline, setDescriptionBaseline] = useState(liveDescription);
+  if (liveDescription !== descriptionBaseline) {
+    setDescriptionBaseline(liveDescription);
+    if (!descriptionEditing) setDraftDescription(liveDescription);
+  }
+
+  // Action-row affordances scroll the matching editor into view inside the left
+  // column and move focus to its primary control, so the document-style "Add to
+  // card" row is keyboard-operable and every editor stays reachable (US-043).
+  function focusSection(sectionId: string, focusId?: string) {
+    const section = document.getElementById(sectionId);
+    if (!section) return;
+    section.scrollIntoView({ behavior: "smooth", block: "start" });
+    const target = focusId
+      ? document.getElementById(focusId)
+      : section.querySelector<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        );
+    target?.focus({ preventScroll: true });
+  }
+
   const assignedMemberIds = new Set(assignees.map((member) => member.id));
   const availableMembers = assignableMembers.filter(
     (member) => !assignedMemberIds.has(member.id),
   );
 
-  function handleSave() {
+  // Covers may only be sourced from this card's own image attachments
+  // (the server rejects anything else — US-018 anti-tracking-pixel contract).
+  const imageAttachments = attachments.filter((attachment) =>
+    attachment.fileType.startsWith("image/"),
+  );
+
+  function submitCover(coverImage: string) {
+    setError("");
+    const fd = new FormData();
+    fd.set("cardId", card.id);
+    fd.set("coverImage", coverImage);
+    startTransition(async () => {
+      const result = await updateCardCoverAction(fd);
+      if (!result.success) setError(result.error);
+      else router.refresh();
+    });
+  }
+
+  // Unified save model (US-032): every field autosaves, so the three competing
+  // save surfaces (Save changes/Reset, Save estimate, Save due date) are gone.
+  // Title + description persist on blur; estimate, due date, and priority commit
+  // on change — matching the Priority control that already autosaved.
+  function saveDetails(nextTitle: string, nextDescription: string) {
     if (isPending) {
       return;
     }
 
-    const trimmedTitle = draftTitle.trim();
+    const trimmedTitle = nextTitle.trim();
     if (!trimmedTitle) {
-      setError("Title is required");
+      // Title is required — revert to the last persisted value rather than
+      // leaving the card in an unsaveable empty state.
+      setDraftTitle(card.title);
+      setError("Title cannot be empty — reverted to the previous title.");
+      return;
+    }
+
+    if (
+      trimmedTitle === card.title &&
+      nextDescription === (card.description ?? "")
+    ) {
       return;
     }
 
@@ -203,7 +386,7 @@ function CardDetailDialogBody({
     const formData = new FormData();
     formData.set("cardId", card.id);
     formData.set("title", trimmedTitle);
-    formData.set("description", draftDescription);
+    formData.set("description", nextDescription);
 
     startTransition(async () => {
       const result = await updateCardDetailsAction(formData);
@@ -213,29 +396,22 @@ function CardDetailDialogBody({
     });
   }
 
-  function handleCancel() {
-    setDraftTitle(card.title);
-    setDraftDescription(card.description ?? "");
-    setDraftEstimateHours(card.estimateHours?.toString() ?? "");
-    setDraftDueDate(toDateInputValue(card.dueDate));
-    setError("");
-  }
-
-  function handleSaveEstimate() {
+  function saveEstimate(nextEstimate: string) {
     if (!canEdit || isPending) {
       return;
     }
 
     const formData = new FormData();
     formData.set("cardId", card.id);
-    if (draftEstimateHours) {
-      formData.set("estimateHours", draftEstimateHours);
+    if (nextEstimate) {
+      formData.set("estimateHours", nextEstimate);
     }
 
     startTransition(async () => {
       const result = await updateCardEstimateAction(formData);
       if (!result.success) {
         setError(result.error);
+        setDraftEstimateHours(card.estimateHours?.toString() ?? "");
         return;
       }
       setError("");
@@ -243,21 +419,22 @@ function CardDetailDialogBody({
     });
   }
 
-  function handleSaveDueDate() {
+  function saveDueDate(nextDueDate: string) {
     if (!canEdit || isPending) {
       return;
     }
 
     const formData = new FormData();
     formData.set("cardId", card.id);
-    if (draftDueDate) {
-      formData.set("dueDate", draftDueDate);
+    if (nextDueDate) {
+      formData.set("dueDate", nextDueDate);
     }
 
     startTransition(async () => {
       const result = await updateCardDueDateAction(formData);
       if (!result.success) {
         setError(result.error);
+        setDraftDueDate(toDateInputValue(card.dueDate));
         return;
       }
       setError("");
@@ -315,162 +492,304 @@ function CardDetailDialogBody({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="flex items-start justify-between gap-4 border-b px-6 py-5">
-        <DialogHeader className="space-y-2">
-          <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            <span className="rounded-full bg-muted px-2 py-1">Card</span>
-            <span>Board detail</span>
-          </div>
-          <DialogTitle className="text-2xl font-semibold tracking-tight">
-            {canEdit ? "Edit card" : "Card details"}
-          </DialogTitle>
-          <p className="text-sm text-muted-foreground">
-            Review this card, update its description, and prepare the space for collaboration.
-          </p>
-        </DialogHeader>
+      {/* Document-style header: the title is the hero (inline-editable), with an
+          "Add to card" action row beneath it — no breadcrumb, no "Edit card"
+          heading, no uppercase TITLE label (US-043). The Dialog still needs an
+          accessible name/description for Radix + screen readers, supplied
+          visually-hidden below. */}
+      <DialogTitle className="sr-only">{card.title || "Card details"}</DialogTitle>
+      <DialogDescription className="sr-only">
+        Card details and editors. Edit the title, description, labels, dates,
+        checklist, members, attachments, and post comments.
+      </DialogDescription>
 
-        <DialogClose asChild>
-          <Button type="button" variant="ghost" size="sm">
-            Close
-          </Button>
-        </DialogClose>
+      <div className="space-y-3 border-b px-6 py-4">
+        <div className="flex items-start justify-between gap-3">
+          {canEdit ? (
+            <input
+              id="card-detail-title"
+              aria-label="Card title"
+              value={draftTitle}
+              onChange={(e) => {
+                setDraftTitle(e.target.value);
+                setError("");
+              }}
+              onFocus={(e) => {
+                setTitleEditing(true);
+                // Radix's auto-focus-on-open (and a Tab into the field) selects
+                // the whole title, so a stray keystroke would wipe it. After the
+                // browser settles, collapse a full selection to the caret-at-end;
+                // a click that places its own caret is left untouched (US-043).
+                const el = e.currentTarget;
+                requestAnimationFrame(() => {
+                  if (
+                    el.value.length > 0 &&
+                    el.selectionStart === 0 &&
+                    el.selectionEnd === el.value.length
+                  ) {
+                    const end = el.value.length;
+                    el.setSelectionRange(end, end);
+                  }
+                });
+              }}
+              onBlur={() => {
+                setTitleEditing(false);
+                saveDetails(draftTitle, draftDescription);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                } else if (e.key === "Escape") {
+                  // Revert the field to the live value, in place (keep focus so
+                  // the caret stays put). The dialog is kept open by the
+                  // DialogContent onEscapeKeyDown guard above (US-043).
+                  setDraftTitle(card.title);
+                  setError("");
+                }
+              }}
+              disabled={isPending}
+              className="-mx-2 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2 py-1 text-2xl font-semibold tracking-tight outline-none hover:bg-muted/50 focus-visible:border-ring focus-visible:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-60"
+            />
+          ) : (
+            <h2 className="min-w-0 flex-1 px-0 py-1 text-2xl font-semibold tracking-tight">
+              {card.title}
+            </h2>
+          )}
+
+          <div className="flex shrink-0 items-center gap-2 pt-1.5">
+            {/* Save/error status lives inline in the header (Google-Docs style) so
+                it takes no vertical room — it used to be an empty min-h spacer at
+                the top of the column that pushed the Description down (US-043). */}
+            <span
+              aria-live="polite"
+              title={error || (isPending ? "Saving…" : undefined)}
+              className={cn(
+                "max-w-[14rem] truncate text-xs",
+                error ? "text-destructive" : "text-muted-foreground",
+              )}
+            >
+              {error ? error : isPending ? "Saving…" : null}
+            </span>
+
+            <DialogClose asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Close card"
+              >
+                <HugeiconsIcon icon={Cancel01Icon} size={18} strokeWidth={2} />
+              </Button>
+            </DialogClose>
+          </div>
+        </div>
+
+        {canEdit ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mr-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Add to card
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => focusSection("card-section-labels")}
+            >
+              <HugeiconsIcon icon={Tag01Icon} size={16} strokeWidth={2} />
+              Labels
+            </Button>
+            {/* Order mirrors the body section order (Labels → Checklist →
+                Priority → Dates) so clicking the row left-to-right scrolls
+                monotonically down, never up-then-down (US-043). */}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => focusSection("card-section-checklist")}
+            >
+              <HugeiconsIcon icon={Task01Icon} size={16} strokeWidth={2} />
+              Checklist
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => focusSection("card-section-priority", "card-priority")}
+            >
+              <HugeiconsIcon icon={Flag03Icon} size={16} strokeWidth={2} />
+              Priority
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => focusSection("card-section-dates", "card-due-date")}
+            >
+              <HugeiconsIcon icon={Calendar03Icon} size={16} strokeWidth={2} />
+              Dates
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => focusSection("card-section-members")}
+            >
+              <HugeiconsIcon icon={UserMultipleIcon} size={16} strokeWidth={2} />
+              Members
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => focusSection("card-section-attachments")}
+            >
+              <HugeiconsIcon icon={Attachment01Icon} size={16} strokeWidth={2} />
+              Attachment
+            </Button>
+
+            {/* Cover demoted from a top-of-column panel to a secondary action
+                (US-043). Both paths preserved: pick an existing image attachment
+                or upload a new one, including the zero-attachments case. */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button type="button" variant="outline" size="sm">
+                  <HugeiconsIcon icon={Image01Icon} size={16} strokeWidth={2} />
+                  Cover
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-72 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold">Cover</p>
+                  {card.coverImage ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={isPending}
+                      onClick={() => submitCover("")}
+                    >
+                      Remove
+                    </Button>
+                  ) : null}
+                </div>
+
+                {card.coverImage ? (
+                  <img
+                    src={card.coverImage}
+                    alt="Cover preview"
+                    className="h-16 w-full rounded object-cover"
+                  />
+                ) : null}
+
+                {imageAttachments.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-muted-foreground">
+                      Choose from attachments
+                    </p>
+                    <div className="grid grid-cols-3 gap-2">
+                      {imageAttachments.map((attachment) => {
+                        const isCurrent = attachment.fileUrl === card.coverImage;
+                        return (
+                          <button
+                            key={attachment.id}
+                            type="button"
+                            disabled={isPending}
+                            title={attachment.fileName}
+                            onClick={() => submitCover(attachment.fileUrl)}
+                            className={cn(
+                              "relative aspect-video overflow-hidden rounded border-2 transition",
+                              isCurrent
+                                ? "border-primary"
+                                : "border-transparent hover:border-muted-foreground/40",
+                            )}
+                          >
+                            <img
+                              src={attachment.fileUrl}
+                              alt={attachment.fileName}
+                              className="h-full w-full object-cover"
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    No image attachments yet. Upload one below to use as a cover.
+                  </p>
+                )}
+
+                <input
+                  type="file"
+                  ref={coverInputRef}
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setError("");
+                    const fd = new FormData();
+                    fd.set("cardId", card.id);
+                    fd.set("file", file);
+                    startTransition(async () => {
+                      const result = await setCardCoverAction(fd);
+                      if (!result.success) setError(result.error);
+                      else router.refresh();
+                    });
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  disabled={isPending}
+                  onClick={() => coverInputRef.current?.click()}
+                >
+                  Upload new image
+                </Button>
+              </PopoverContent>
+            </Popover>
+          </div>
+        ) : null}
       </div>
+
+      {card.coverImage ? (
+        <div className="relative">
+          <img
+            src={card.coverImage}
+            alt="Card cover"
+            className="h-48 w-full object-cover"
+          />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background via-background/10 to-transparent" />
+        </div>
+      ) : null}
 
       <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1.65fr)_minmax(320px,1fr)]">
         <div className="min-h-0 overflow-y-auto px-6 py-6">
           <div className="space-y-6">
-            {error ? <p className="text-sm text-destructive">{error}</p> : null}
-
             <section className="space-y-3">
-              <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Title
-                </p>
-                {canEdit ? (
-                  <Input
-                    id="card-detail-title"
-                    value={draftTitle}
-                    onChange={(e) => {
-                      setDraftTitle(e.target.value);
-                      setError("");
-                    }}
-                    disabled={isPending}
-                    className="h-11 text-lg font-semibold"
-                  />
-                ) : (
-                  <h2 className="text-2xl font-semibold tracking-tight">{card.title}</h2>
-                )}
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <ActionChip label="Add" />
-                <ActionChip label="Checklist" />
-                <ActionChip label="Members" />
-              </div>
-            </section>
-
-            <CardLabelsSection
-              cardId={card.id}
-              boardId={boardId}
-              boardLabels={boardLabels}
-              cardLabelIds={cardLabelIds}
-              canEdit={canEdit}
-            />
-
-            <section className="grid gap-3 rounded-lg border bg-muted/20 p-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <label
-                  htmlFor="card-estimate-hours"
-                  className="text-sm font-semibold"
-                >
-                  Estimate
-                </label>
-                <select
-                  id="card-estimate-hours"
-                  value={draftEstimateHours}
-                  onChange={(event) => {
-                    setDraftEstimateHours(event.target.value);
-                    setError("");
-                  }}
-                  disabled={!canEdit || isPending || Boolean(card.completedAt)}
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                >
-                  {estimateOptions.map((option) => (
-                    <option key={option || "none"} value={option}>
-                      {option ? `${option}h` : "No estimate"}
-                    </option>
-                  ))}
-                </select>
-                {card.completedAt ? (
-                  <p className="text-xs text-muted-foreground">
-                    Locked after first completion.
-                  </p>
-                ) : null}
-                {canEdit ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={
-                      isPending ||
-                      Boolean(card.completedAt) ||
-                      draftEstimateHours === (card.estimateHours?.toString() ?? "")
-                    }
-                    onClick={handleSaveEstimate}
-                  >
-                    Save estimate
-                  </Button>
-                ) : null}
-              </div>
-
-              <div className="space-y-2">
-                <label htmlFor="card-due-date" className="text-sm font-semibold">
-                  Due date
-                </label>
-                <Input
-                  id="card-due-date"
-                  type="date"
-                  value={draftDueDate}
-                  onChange={(event) => {
-                    setDraftDueDate(event.target.value);
-                    setError("");
-                  }}
-                  disabled={!canEdit || isPending}
-                />
-                {canEdit ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={isPending || draftDueDate === toDateInputValue(card.dueDate)}
-                    onClick={handleSaveDueDate}
-                  >
-                    Save due date
-                  </Button>
-                ) : null}
-              </div>
-            </section>
-
-            <section className="space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-base font-semibold">Description</h3>
-                <span className="text-xs text-muted-foreground">
-                  {canEdit ? "Editable" : "Read only"}
-                </span>
-              </div>
+              <h3 className="text-base font-semibold">Description</h3>
 
               {canEdit ? (
-                <textarea
+                <Textarea
                   id="card-detail-description"
                   value={draftDescription}
                   onChange={(e) => {
                     setDraftDescription(e.target.value);
                     setError("");
                   }}
+                  onFocus={() => setDescriptionEditing(true)}
+                  onBlur={() => {
+                    setDescriptionEditing(false);
+                    saveDetails(draftTitle, draftDescription);
+                  }}
                   disabled={isPending}
                   rows={10}
                   placeholder="Add a more detailed description..."
-                  className="flex min-h-44 w-full rounded-lg border border-input bg-transparent px-4 py-3 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  className="min-h-44"
                 />
               ) : (
                 <div className="min-h-44 rounded-lg border bg-muted/20 px-4 py-3 text-sm whitespace-pre-wrap">
@@ -479,7 +798,178 @@ function CardDetailDialogBody({
               )}
             </section>
 
-            <section className="space-y-3">
+            <div id="card-section-labels">
+              <CardLabelsSection
+                cardId={card.id}
+                boardId={boardId}
+                boardLabels={boardLabels}
+                cardLabelIds={cardLabelIds}
+                canEdit={canEdit}
+              />
+            </div>
+
+            <div id="card-section-checklist">
+              <CardChecklistsSection
+                cardId={card.id}
+                checklists={checklists}
+                canEdit={canEdit}
+              />
+            </div>
+
+            <section
+              id="card-section-priority"
+              className="space-y-3 rounded-lg border bg-muted/20 p-4"
+            >
+              <div className="space-y-2">
+                <label htmlFor="card-priority" className="text-sm font-semibold">
+                  Priority
+                </label>
+                <Select
+                  value={draftPriority}
+                  onValueChange={(value) => {
+                    setDraftPriority(value);
+                    setError("");
+                    const fd = new FormData();
+                    fd.set("cardId", card.id);
+                    fd.set("priority", value);
+                    startTransition(async () => {
+                      const result = await updateCardPriorityAction(fd);
+                      if (!result.success) {
+                        setError(result.error);
+                        setDraftPriority(card.priority ?? "NONE");
+                      } else router.refresh();
+                    });
+                  }}
+                  disabled={!canEdit || isPending}
+                >
+                  <SelectTrigger id="card-priority" className="w-full">
+                    <SelectValue placeholder="No priority" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NONE">No priority</SelectItem>
+                    <SelectItem value="URGENT">🔴 Urgent</SelectItem>
+                    <SelectItem value="HIGH">🟠 High</SelectItem>
+                    <SelectItem value="MEDIUM">🟡 Medium</SelectItem>
+                    <SelectItem value="LOW">🔵 Low</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </section>
+
+            <section
+              id="card-section-dates"
+              className="grid gap-3 rounded-lg border bg-muted/20 p-4 sm:grid-cols-2"
+            >
+              <div className="space-y-2">
+                <label
+                  htmlFor="card-estimate-hours"
+                  className="text-sm font-semibold"
+                >
+                  Estimate
+                </label>
+                <Select
+                  value={draftEstimateHours === "" ? "none" : draftEstimateHours}
+                  onValueChange={(value) => {
+                    const next = value === "none" ? "" : value;
+                    setDraftEstimateHours(next);
+                    setError("");
+                    saveEstimate(next);
+                  }}
+                  disabled={!canEdit || isPending || Boolean(card.completedAt)}
+                >
+                  <SelectTrigger id="card-estimate-hours" className="w-full">
+                    <SelectValue placeholder="No estimate" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {estimateOptions.map((option) => (
+                      <SelectItem key={option || "none"} value={option || "none"}>
+                        {option ? `${option}h` : "No estimate"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {card.completedAt ? (
+                  <p className="text-xs text-muted-foreground">
+                    Locked after first completion.
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="space-y-2">
+                <span id="card-due-date-label" className="text-sm font-semibold">
+                  Due date
+                </span>
+                <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="card-due-date"
+                      type="button"
+                      variant="outline"
+                      disabled={!canEdit || isPending}
+                      aria-labelledby="card-due-date-label card-due-date"
+                      aria-label={
+                        selectedDueDate
+                          ? `Due date: ${format(selectedDueDate, "PPP")}. Change due date`
+                          : "Set due date"
+                      }
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !selectedDueDate && "text-muted-foreground",
+                      )}
+                    >
+                      <HugeiconsIcon
+                        icon={Calendar03Icon}
+                        size={16}
+                        strokeWidth={2}
+                        className="mr-2 shrink-0"
+                      />
+                      {selectedDueDate
+                        ? format(selectedDueDate, "PPP")
+                        : "No due date"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      autoFocus
+                      selected={selectedDueDate}
+                      defaultMonth={selectedDueDate}
+                      onSelect={(date) => {
+                        if (!date) {
+                          return;
+                        }
+                        const next = toDueDateValue(date);
+                        setDraftDueDate(next);
+                        setError("");
+                        saveDueDate(next);
+                        setDueDateOpen(false);
+                      }}
+                    />
+                    {draftDueDate ? (
+                      <div className="border-t p-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="w-full justify-center"
+                          disabled={!canEdit || isPending}
+                          onClick={() => {
+                            setDraftDueDate("");
+                            setError("");
+                            saveDueDate("");
+                            setDueDateOpen(false);
+                          }}
+                        >
+                          Clear due date
+                        </Button>
+                      </div>
+                    ) : null}
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </section>
+
+            <section id="card-section-members" className="space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-base font-semibold">Members</h3>
                 <span className="text-xs text-muted-foreground">
@@ -500,9 +990,12 @@ function CardDetailDialogBody({
                       key={member.id}
                       className="flex items-center justify-between rounded-lg border bg-background px-3 py-2"
                     >
-                      <div>
-                        <div className="text-sm font-medium">{member.name}</div>
-                        <div className="text-xs text-muted-foreground">{member.email}</div>
+                      <div className="flex min-w-0 items-center gap-3">
+                        <MemberAvatar name={member.name} image={member.image} />
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium">{member.name}</div>
+                          <div className="truncate text-xs text-muted-foreground">{member.email}</div>
+                        </div>
                       </div>
                       {canEdit ? (
                         <Button
@@ -536,14 +1029,19 @@ function CardDetailDialogBody({
                         <Button
                           key={member.id}
                           variant="outline"
-                          size="sm"
-                          className="w-full justify-start"
+                          className="h-auto w-full justify-start gap-3 py-2"
                           disabled={isPending}
                           onClick={() => {
                             handleAssignMember(member.id);
                           }}
                         >
-                          {member.name} ({member.email})
+                          <MemberAvatar name={member.name} image={member.image} size="sm" />
+                          <span className="flex min-w-0 flex-col text-left">
+                            <span className="truncate text-sm font-medium">{member.name}</span>
+                            <span className="truncate text-xs font-normal text-muted-foreground">
+                              {member.email}
+                            </span>
+                          </span>
                         </Button>
                       ))}
                     </div>
@@ -552,47 +1050,13 @@ function CardDetailDialogBody({
               ) : null}
             </section>
 
-            <CardAttachments
-              cardId={card.id}
-              attachments={attachments}
-              canEdit={canEdit}
-            />
-
-            <section className="space-y-3 rounded-lg border bg-muted/20 p-4">
-              <h3 className="text-sm font-semibold">Card metadata</h3>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <MetaBlock
-                  label="Estimate"
-                  value={card.estimateHours ? `${card.estimateHours}h` : "Unestimated"}
-                />
-                <MetaBlock
-                  label="Due date"
-                  value={draftDueDate || "No due date"}
-                />
-              </div>
-            </section>
-
-            {canEdit && (
-              <div className="flex items-center gap-2 border-t pt-4">
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={isPending || !isDirty}
-                  onClick={handleSave}
-                >
-                  {isPending ? "Saving..." : "Save changes"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={isPending || !isDirty}
-                  onClick={handleCancel}
-                >
-                  Reset
-                </Button>
-              </div>
-            )}
+            <div id="card-section-attachments">
+              <CardAttachments
+                cardId={card.id}
+                attachments={attachments}
+                canEdit={canEdit}
+              />
+            </div>
           </div>
         </div>
 
@@ -607,7 +1071,7 @@ function CardDetailDialogBody({
               </div>
             </div>
 
-            <CommentComposer cardId={card.id} canComment={canComment} />
+            <CommentComposer cardId={card.id} canComment={canComment} assignableMembers={assignableMembers} />
 
             {comments.length === 0 && activity.length === 0 ? (
               <div className="rounded-lg border bg-background p-4">
@@ -621,7 +1085,7 @@ function CardDetailDialogBody({
                   <div className="space-y-3">
                     <h4 className="text-sm font-semibold">Comments</h4>
                     {comments.map((comment) => (
-                      <CommentItem key={comment.id} comment={comment} />
+                      <CommentItem key={comment.id} comment={comment} memberNames={assignableMembers.map((m) => m.name)} />
                     ))}
                   </div>
                 )}
@@ -643,50 +1107,38 @@ function CardDetailDialogBody({
   );
 }
 
-type ActionChipProps = {
-  label: string;
-};
-
-function ActionChip({ label }: ActionChipProps) {
-  return (
-    <button
-      type="button"
-      disabled
-      className={cn(
-        "rounded-md border bg-background px-3 py-2 text-sm text-muted-foreground",
-        "disabled:cursor-default disabled:opacity-100",
-      )}
-    >
-      {label}
-    </button>
-  );
-}
-
-type MetaBlockProps = {
-  label: string;
-  value: string;
-};
-
-function MetaBlock({ label, value }: MetaBlockProps) {
-  return (
-    <div className="space-y-1 rounded-md border bg-background p-3">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
-      <p className="text-sm">{value}</p>
-    </div>
-  );
-}
-
 type CommentComposerProps = {
   cardId: string;
   canComment: boolean;
+  assignableMembers: AssignableWorkspaceMemberRecord[];
 };
 
-function CommentComposer({ cardId, canComment }: CommentComposerProps) {
+function CommentComposer({ cardId, canComment, assignableMembers }: CommentComposerProps) {
   const [content, setContent] = useState("");
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const {
+    open: isMentionOpen,
+    items: mentionItems,
+    activeIndex: mentionActiveIndex,
+    setActiveIndex: setMentionActiveIndex,
+    setFloating: setMentionFloating,
+    floatingStyles: mentionFloatingStyles,
+    listboxId: mentionListboxId,
+    optionId: mentionOptionId,
+    selectMember: selectMentionMember,
+    comboboxProps: mentionComboboxProps,
+  } = useMentionAutocomplete({
+    members: assignableMembers,
+    value: content,
+    setValue: (value) => {
+      setContent(value);
+      setError("");
+    },
+    textareaRef,
+  });
 
   function handleSubmit() {
     if (!content.trim()) {
@@ -712,22 +1164,66 @@ function CommentComposer({ cardId, canComment }: CommentComposerProps) {
 
   return (
     <div className="space-y-2">
-      <textarea
+      <Textarea
+        ref={textareaRef}
         value={content}
-        onChange={(e) => {
-          setContent(e.target.value);
-          setError("");
-        }}
         disabled={isPending || !canComment}
         rows={3}
         placeholder={canComment ? "Write a comment..." : "You do not have permission to comment on this card."}
-        className="flex min-h-20 w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        className="min-h-20"
+        {...mentionComboboxProps}
       />
+      {isMentionOpen
+        ? createPortal(
+            <div
+              ref={setMentionFloating}
+              style={mentionFloatingStyles}
+              id={mentionListboxId}
+              role="listbox"
+              aria-label="Mention a member"
+              // pointer-events-auto: the list is portaled to <body>, which Radix
+              // Dialog marks pointer-events:none while open; re-enable it here or
+              // clicks fall through to the textarea behind the (inert) backdrop.
+              className="pointer-events-auto z-50 w-56 overflow-y-auto rounded-lg border bg-popover text-popover-foreground shadow-lg"
+            >
+              {mentionItems.length === 0 ? (
+                <div className="px-3 py-2 text-sm text-muted-foreground">
+                  No matches
+                </div>
+              ) : (
+                mentionItems.map((member, index) => (
+                  <div
+                    key={member.id}
+                    id={mentionOptionId(index)}
+                    role="option"
+                    aria-selected={index === mentionActiveIndex}
+                    // Keep textarea focus on click so selection + caret restore work.
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setMentionActiveIndex(index)}
+                    onClick={() => selectMentionMember(member)}
+                    className={cn(
+                      "flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm transition-colors",
+                      index === mentionActiveIndex
+                        ? "bg-accent text-accent-foreground"
+                        : "text-popover-foreground",
+                    )}
+                  >
+                    <MemberAvatar name={member.name} image={member.image} size="sm" />
+                    <span className="flex-1 truncate">{member.name}</span>
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                      {member.role}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>,
+            document.body,
+          )
+        : null}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       {canComment && (
         <Button
           type="button"
-          size="sm"
           disabled={isPending || !content.trim()}
           onClick={handleSubmit}
         >
@@ -740,16 +1236,66 @@ function CommentComposer({ cardId, canComment }: CommentComposerProps) {
 
 type CommentItemProps = {
   comment: UIComment;
+  memberNames: string[];
 };
 
-function CommentItem({ comment }: CommentItemProps) {
-  const initials = comment.user.name
-    .split(" ")
-    .map((n) => n[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
+function renderMentionContent(content: string, memberNames: string[]) {
+  if (!memberNames.length) return content;
 
+  const lowerNames = memberNames.map((n) => n.toLowerCase());
+  const result: React.ReactNode[] = [];
+  let i = 0;
+  let plainStart = 0;
+
+  function flushPlain(end: number) {
+    if (end > plainStart) {
+      result.push(content.slice(plainStart, end));
+      plainStart = end;
+    }
+  }
+
+  while (i < content.length) {
+    if (content[i] === "@" && i + 1 < content.length) {
+      let bestMatch: { name: string; endIndex: number } | null = null;
+
+      for (let j = 0; j < memberNames.length; j++) {
+        const name = memberNames[j];
+        const lowerName = lowerNames[j];
+        const afterAt = content.slice(i + 1);
+        if (afterAt.toLowerCase().startsWith(lowerName)) {
+          const endIdx = i + 1 + name.length;
+          const nextChar = content[endIdx];
+          if (!nextChar || !/[a-zA-Z]/.test(nextChar)) {
+            if (!bestMatch || name.length > bestMatch.name.length) {
+              bestMatch = { name, endIndex: endIdx };
+            }
+          }
+        }
+      }
+
+      if (bestMatch) {
+        flushPlain(i);
+        result.push(
+          <span
+            key={i}
+            className="rounded bg-[var(--chart-2)]/10 px-0.5 font-medium text-[var(--chart-2)]"
+          >
+            @{bestMatch.name}
+          </span>
+        );
+        i = bestMatch.endIndex;
+        plainStart = i;
+        continue;
+      }
+    }
+    i++;
+  }
+
+  flushPlain(content.length);
+  return result;
+}
+
+function CommentItem({ comment, memberNames }: CommentItemProps) {
   const date = new Date(comment.createdAt).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
@@ -760,15 +1306,13 @@ function CommentItem({ comment }: CommentItemProps) {
   return (
     <div className="rounded-lg border bg-background p-3">
       <div className="flex items-start gap-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
-          {initials}
-        </div>
+        <MemberAvatar name={comment.user.name} image={comment.user.image} />
         <div className="min-w-0 space-y-1">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium">{comment.user.name}</span>
             <span className="text-xs text-muted-foreground">{date}</span>
           </div>
-          <p className="whitespace-pre-wrap text-sm">{comment.content}</p>
+          <p className="whitespace-pre-wrap text-sm">{renderMentionContent(comment.content, memberNames)}</p>
         </div>
       </div>
     </div>
@@ -780,13 +1324,6 @@ type ActivityItemProps = {
 };
 
 function ActivityItem({ activity }: ActivityItemProps) {
-  const initials = activity.user.name
-    .split(" ")
-    .map((n) => n[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-
   const date = new Date(activity.createdAt).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
@@ -799,9 +1336,7 @@ function ActivityItem({ activity }: ActivityItemProps) {
   return (
     <div className="rounded-lg border bg-background p-3">
       <div className="flex items-start gap-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
-          {initials}
-        </div>
+        <MemberAvatar name={activity.user.name} image={activity.user.image} />
         <div className="min-w-0 space-y-1">
           <p className="text-sm">
             <span className="font-medium">{activity.user.name}</span>{" "}

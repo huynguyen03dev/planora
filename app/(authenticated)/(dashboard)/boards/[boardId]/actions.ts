@@ -8,11 +8,26 @@ import { getBoardById } from "@/lib/board";
 import {
   updateCardDetails,
   getCardWithListAndBoard,
+  getArchivedCardWithListAndBoard,
   reorderCardWithinListByNeighbors,
   getCardWithListAndMembers,
+  type CardDetailRecord,
+  updateCardCover,
+  updateCardPriority,
 } from "@/lib/card";
 import { createComment } from "@/lib/comment";
-import { createAttachment } from "@/lib/attachment";
+import { createAttachment, getAttachmentsByCardId } from "@/lib/attachment";
+import {
+  type ChecklistWithItems,
+  type ChecklistItemRecord,
+  getChecklistWithCard,
+  getChecklistItemWithCard,
+  createChecklist,
+  deleteChecklist,
+  createChecklistItem,
+  setChecklistItemCompleted,
+  deleteChecklistItem,
+} from "@/lib/checklist";
 import {
   type LabelRecord,
   createLabel,
@@ -22,6 +37,7 @@ import {
   removeCardLabel,
   getLabelWithBoard,
   getCardLabels,
+  getCardIdsWithLabel,
 } from "@/lib/label";
 import {
   createList,
@@ -33,6 +49,7 @@ import {
 import { createActivityEntry } from "@/lib/activity";
 import {
   type CardMemberRecord,
+  getCardMembers,
 } from "@/lib/card-member";
 import { hasWorkspacePermission } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
@@ -47,9 +64,10 @@ import {
   emitCardUpdated,
   emitCardArchived,
   emitCardLabelsUpdated,
+  emitCardMembersUpdated,
   emitCommentCreated,
 } from "@/lib/realtime/server";
-import { notifyCardAssigned, notifyCommentOnCard } from "@/lib/notification";
+import { notifyCardAssigned, notifyCommentOnCard, notifyMentioned } from "@/lib/notification";
 import {
   createListSchema,
   updateListSchema,
@@ -57,6 +75,7 @@ import {
   reorderListSchema,
   createCardSchema,
   archiveCardSchema,
+  restoreCardSchema,
   reorderCardSchema,
   moveCardSchema,
   updateCardDetailsSchema,
@@ -67,14 +86,23 @@ import {
   updateListIsDoneSchema,
   updateCardEstimateSchema,
   updateCardDueDateSchema,
+  updateCardPrioritySchema,
+  updateCardCoverSchema,
+  setCardCoverSchema,
   createLabelSchema,
   updateLabelSchema,
   deleteLabelSchema,
   addCardLabelSchema,
   removeCardLabelSchema,
+  createChecklistSchema,
+  deleteChecklistSchema,
+  createChecklistItemSchema,
+  toggleChecklistItemSchema,
+  deleteChecklistItemSchema,
 } from "@/lib/schemas";
 import {
   buildCardArchivedEvent,
+  buildCardRestoredEvent,
   buildCardCompletedEvent,
   buildCardCreatedEvent,
     buildCardDeletedEvent,
@@ -216,6 +244,10 @@ type ArchiveCardResult =
   | { success: true }
   | { success: false; error: string };
 
+type RestoreCardResult =
+  | { success: true }
+  | { success: false; error: string };
+
 type ReorderListResult =
   | { success: true }
   | { success: false; error: string };
@@ -240,6 +272,10 @@ type UpdateCardDueDateResult =
   | { success: true }
   | { success: false; error: string };
 
+
+type UpdateCardPriorityResult =
+  | { success: true; card: CardDetailRecord }
+  | { success: false; error: string };
 export async function createListAction(
   formData: FormData,
 ): Promise<CreateListResult> {
@@ -623,6 +659,84 @@ export async function archiveCardAction(
   }
 }
 
+export async function restoreCardAction(
+  formData: FormData,
+): Promise<RestoreCardResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = restoreCardSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const { userId } = await verifySession();
+
+  const { cardId } = parsed.data;
+
+  // Archived-aware resolver: getCardWithListAndBoard filters archivedAt:null and
+  // could never find a card to restore.
+  const result = await getArchivedCardWithListAndBoard(cardId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canRestoreCard = await hasWorkspacePermission(result.board.workspaceId, {
+    card: ["delete"],
+  });
+
+  if (!canRestoreCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  try {
+    await db.$transaction(async (tx) => {
+      const card = await tx.card.update({
+        where: {
+          id: cardId,
+          archivedAt: { not: null },
+        },
+        data: { archivedAt: null },
+        select: {
+          id: true,
+          estimateHours: true,
+          dueDate: true,
+          members: {
+            select: { userId: true },
+            orderBy: { assignedAt: "asc" },
+          },
+        },
+      });
+      await recordCardHistoryEvents(tx, [
+        buildCardRestoredEvent(
+          result.board.workspaceId,
+          result.board.id,
+          card.id,
+          {
+            memberIds: card.members.map((member) => member.userId),
+            estimateHours: card.estimateHours,
+            dueDate: toIsoOrNull(card.dueDate),
+          },
+          userId,
+        ),
+      ]);
+    });
+    revalidatePath(`/boards/${result.list.boardId}`);
+    // Reappear on other viewers' boards — reuses the tested card:created reducer.
+    emitCardCreated(result.list.boardId, {
+      card: {
+        id: result.card.id,
+        listId: result.card.listId,
+        title: result.card.title,
+        position: result.card.position,
+      },
+    });
+    emitAnalyticsRefresh(result.board.workspaceId);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to restore card. Please try again." };
+  }
+}
+
 export async function reorderListAction(
   formData: FormData,
 ): Promise<ReorderListResult> {
@@ -838,6 +952,10 @@ export async function updateCardDueDateAction(
 
     if (previousIso !== nextIso) {
       await db.$transaction(async (tx) => {
+        // HIGH-1: Invalidate any existing reminders so the new date gets a
+        // fresh DUE_SOON and cleared dates cancel unsent reminders.
+        await tx.cardReminder.deleteMany({ where: { cardId } });
+
         await tx.card.update({
           where: {
             id: cardId,
@@ -895,6 +1013,202 @@ export async function updateCardDueDateAction(
     return { success: true };
   } catch {
     return { success: false, error: "Failed to update due date. Please try again." };
+  }
+}
+
+export async function updateCardPriorityAction(
+  formData: FormData,
+): Promise<UpdateCardPriorityResult> {
+  const rawData = Object.fromEntries(formData);
+  const priorityValue = rawData.priority === "NONE" ? null : rawData.priority;
+
+  const parsed = updateCardPrioritySchema.safeParse({
+    cardId: rawData.cardId,
+    priority: priorityValue,
+  });
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  await verifySession();
+  const { cardId, priority } = parsed.data;
+
+  const result = await getCardWithListAndBoard(cardId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(result.board.workspaceId, {
+    card: ["update"],
+  });
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  try {
+    const card = await updateCardPriority(cardId, priority);
+    revalidatePath(`/boards/${result.list.boardId}`);
+    return { success: true, card };
+  } catch {
+    return { success: false, error: "Failed to update priority. Please try again." };
+  }
+}
+
+type UpdateCardCoverResult =
+  | { success: true; card: CardDetailRecord }
+  | { success: false; error: string };
+
+export async function updateCardCoverAction(
+  formData: FormData,
+): Promise<UpdateCardCoverResult> {
+  const coverImage = formData.get("coverImage");
+  const coverImageValue = coverImage === "" ? null : coverImage;
+
+  const parsed = updateCardCoverSchema.safeParse({
+    cardId: formData.get("cardId"),
+    coverImage: coverImageValue,
+  });
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  await verifySession();
+  const { cardId, coverImage: parsedCoverImage } = parsed.data;
+
+  const result = await getCardWithListAndBoard(cardId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(result.board.workspaceId, {
+    card: ["update"],
+  });
+
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  // Security: a cover URL must point to one of this card's own attachments.
+  // External URLs are rejected — they would let an editor plant a tracking
+  // pixel that fires for every board viewer (US-018 contract). Removal (null)
+  // is always allowed.
+  if (parsedCoverImage !== null) {
+    const attachments = await getAttachmentsByCardId(cardId);
+    const isOwnAttachment = attachments.some(
+      (attachment) => attachment.fileUrl === parsedCoverImage,
+    );
+    if (!isOwnAttachment) {
+      return {
+        success: false,
+        error: "Cover image must be one of this card's attachments.",
+      };
+    }
+  }
+
+  try {
+    const card = await updateCardCover(cardId, parsedCoverImage);
+    revalidatePath(`/boards/${result.list.boardId}`);
+    return { success: true, card };
+  } catch {
+    return { success: false, error: "Failed to update card cover. Please try again." };
+  }
+}
+
+type SetCardCoverResult =
+  | { success: true; card: CardDetailRecord }
+  | { success: false; error: string };
+
+export async function setCardCoverAction(
+  formData: FormData,
+): Promise<SetCardCoverResult> {
+  const cardId = formData.get("cardId");
+  const file = formData.get("file");
+
+  if (!cardId || typeof cardId !== "string" || !file || !(file instanceof File)) {
+    return { success: false, error: "Invalid request" };
+  }
+
+  const parsed = setCardCoverSchema.safeParse({ cardId, file });
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  const { userId: actorUserId } = await verifySession();
+
+  const { cardId: parsedCardId } = parsed.data;
+
+  const cardResult = await getCardWithListAndBoard(parsedCardId);
+  if (!cardResult || cardResult.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(cardResult.board.workspaceId, {
+    card: ["update"],
+  });
+
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  let cloudinaryResult;
+  try {
+    cloudinaryResult = await uploadToCloudinary({ file });
+  } catch (error) {
+    console.error("Cloudinary upload failed:", error);
+    return { success: false, error: "Failed to upload file to cloud storage. Please try again." };
+  }
+
+  try {
+    await createAttachment({
+      cardId: parsedCardId,
+      userId: actorUserId,
+      fileName: file.name,
+      fileUrl: cloudinaryResult.secureUrl,
+      fileType: file.type,
+      fileSize: file.size,
+      cloudinaryPublicId: cloudinaryResult.publicId,
+      cloudinaryResourceType: cloudinaryResult.resourceType,
+    });
+
+    await createActivityEntry({
+      workspaceId: cardResult.board.workspaceId,
+      boardId: cardResult.board.id,
+      cardId: parsedCardId,
+      userId: actorUserId,
+      action: "CREATED",
+      entityType: "ATTACHMENT",
+      metadata: {
+        fileName: file.name,
+        fileSize: file.size,
+      },
+    });
+
+    const card = await updateCardCover(parsedCardId, cloudinaryResult.secureUrl);
+    revalidatePath(`/boards/${cardResult.board.id}`);
+    return { success: true, card };
+  } catch (error) {
+    console.error("Failed to set card cover:", error);
+    try {
+      const { v2: cloudinary } = await import("cloudinary");
+      const config = (await import("@/lib/cloudinary")).getCloudinaryConfig();
+      cloudinary.config({
+        cloud_name: config.cloudName,
+        api_key: config.apiKey,
+        api_secret: config.apiSecret,
+      });
+      await cloudinary.uploader.destroy(cloudinaryResult.publicId, {
+        resource_type: cloudinaryResult.resourceType,
+      });
+      console.log("Cleaned up orphaned Cloudinary file:", cloudinaryResult.publicId);
+    } catch (cleanupError) {
+      console.error("Failed to clean up Cloudinary file:", cleanupError);
+    }
+    return { success: false, error: "Failed to set card cover. Please try again." };
   }
 }
 
@@ -1196,6 +1510,16 @@ export async function createCommentAction(
         commenterUserId: userId,
         commenterName: user?.name ?? "Unknown",
       });
+      await notifyMentioned({
+        content,
+        cardId,
+        cardTitle: result.card.title,
+        boardId: result.list.boardId,
+        boardTitle: boardForTitle?.title ?? "Untitled board",
+        commenterUserId: userId,
+        commenterName: user?.name ?? "Unknown",
+        workspaceId: result.board.workspaceId,
+      });
     } catch (notificationError) {
       console.error("Failed to send comment notifications:", notificationError);
     }
@@ -1404,6 +1728,10 @@ export async function assignCardMemberAction(
     revalidatePath(`/boards/${cardResult.board.id}`);
     if (assignment.changed) {
       emitAnalyticsRefresh(cardResult.board.workspaceId);
+      // Live-broadcast the new assignee set so any board viewer with this card's
+      // detail sheet open updates without a reload (US-011). In-place / live.
+      const members = await getCardMembers(cardId);
+      emitCardMembersUpdated(cardResult.board.id, { cardId, members });
     }
     return {
       success: true,
@@ -1499,6 +1827,10 @@ export async function removeCardMemberAction(
     revalidatePath(`/boards/${cardResult.board.id}`);
     if (removal.changed) {
       emitAnalyticsRefresh(cardResult.board.workspaceId);
+      // Live-broadcast the trimmed assignee set so an open detail sheet on
+      // another client drops the member without a reload (US-011). In-place / live.
+      const members = await getCardMembers(cardId);
+      emitCardMembersUpdated(cardResult.board.id, { cardId, members });
     }
     return { success: true, changed: removal.changed };
   } catch (error) {
@@ -1642,6 +1974,26 @@ function firstFieldError(error: { flatten: () => { fieldErrors: Record<string, s
   return Object.values(error.flatten().fieldErrors)[0]?.[0] ?? "Validation failed";
 }
 
+/**
+ * Broadcast a label-set change to every affected card on a board. A label
+ * rename/recolor/delete touches the denormalized label snapshot on each card
+ * carrying it, so we re-emit the existing in-place `card:labels-updated` event
+ * (the same one attach/detach uses) once per affected card with its current
+ * label set. O(N) in the cards carrying the label — fine at board scale, and it
+ * reuses the proven live-apply reducer rather than introducing a new event type
+ * (US-010). For a delete, pass the card ids captured BEFORE the row cascade and
+ * call after the delete commits, so each re-read reflects the removed label.
+ */
+async function broadcastLabelChange(boardId: string, cardIds: string[]): Promise<void> {
+  for (const cardId of cardIds) {
+    const labels = await getCardLabels(cardId);
+    emitCardLabelsUpdated(boardId, {
+      cardId,
+      labels: labels.map((label) => ({ id: label.id, name: label.name, color: label.color })),
+    });
+  }
+}
+
 export async function createLabelAction(
   formData: FormData,
 ): Promise<CreateLabelResult> {
@@ -1700,6 +2052,10 @@ export async function updateLabelAction(
 
   try {
     const updated = await updateLabel(labelId, { name, color });
+    // The renamed/recolored label is still attached to the same cards; refresh
+    // each card's chip snapshot live on every observer (US-010).
+    const affectedCardIds = await getCardIdsWithLabel(labelId);
+    await broadcastLabelChange(label.boardId, affectedCardIds);
     revalidatePath(`/boards/${label.boardId}`);
     return { success: true, label: updated };
   } catch (error) {
@@ -1732,7 +2088,13 @@ export async function deleteLabelAction(
   }
 
   try {
+    // Capture affected cards BEFORE the delete — the CardLabel rows cascade away
+    // with the label, so afterwards we could not learn which cards to refresh.
+    const affectedCardIds = await getCardIdsWithLabel(labelId);
     await deleteLabel(labelId);
+    // Each re-read now returns the card's label set minus the deleted label, so
+    // the chip disappears live on every observer (US-010).
+    await broadcastLabelChange(label.boardId, affectedCardIds);
     revalidatePath(`/boards/${label.boardId}`);
     return { success: true };
   } catch (error) {
@@ -1824,5 +2186,213 @@ export async function removeCardLabelAction(
   } catch (error) {
     console.error("Failed to remove label from card:", error);
     return { success: false, error: "Failed to remove label. Please try again." };
+  }
+}
+
+/* ─── Checklist actions (card content; reuse card:["update"]) ──────────────
+ *
+ * Checklists are card content, like labels — they reuse the `card:["update"]`
+ * permission (viewer denied; editor/admin allowed), so there is no dedicated
+ * `checklist` permission statement. They render only in the card detail sheet,
+ * so slice 1 revalidates the board path rather than emitting a realtime event;
+ * cross-client live sync is a tracked follow-up. Rename + reorder are deferred
+ * (positions are float-gap assigned on create so they slot in later).
+ */
+
+type CreateChecklistResult =
+  | { success: true; checklist: ChecklistWithItems }
+  | { success: false; error: string };
+
+type DeleteChecklistResult =
+  | { success: true }
+  | { success: false; error: string };
+
+type CreateChecklistItemResult =
+  | { success: true; item: ChecklistItemRecord }
+  | { success: false; error: string };
+
+type ToggleChecklistItemResult =
+  | { success: true; item: ChecklistItemRecord }
+  | { success: false; error: string };
+
+type DeleteChecklistItemResult =
+  | { success: true }
+  | { success: false; error: string };
+
+export async function createChecklistAction(
+  formData: FormData,
+): Promise<CreateChecklistResult> {
+  const parsed = createChecklistSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { success: false, error: firstFieldError(parsed.error) };
+  }
+
+  const { userId } = await verifySession();
+  const { cardId, title } = parsed.data;
+
+  const result = await getCardWithListAndBoard(cardId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(result.board.workspaceId, {
+    card: ["update"],
+  });
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  try {
+    const checklist = await createChecklist({ cardId, title });
+    await createActivityEntry({
+      workspaceId: result.board.workspaceId,
+      boardId: result.list.boardId,
+      cardId,
+      userId,
+      action: "CREATED",
+      entityType: "CHECKLIST",
+      metadata: { checklistId: checklist.id, title },
+    });
+    revalidatePath(`/boards/${result.list.boardId}`);
+    return { success: true, checklist };
+  } catch {
+    return { success: false, error: "Failed to create checklist. Please try again." };
+  }
+}
+
+export async function deleteChecklistAction(
+  formData: FormData,
+): Promise<DeleteChecklistResult> {
+  const parsed = deleteChecklistSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { success: false, error: firstFieldError(parsed.error) };
+  }
+
+  const { userId } = await verifySession();
+  const { checklistId } = parsed.data;
+
+  const scope = await getChecklistWithCard(checklistId);
+  if (!scope || scope.board.archivedAt || scope.cardArchived) {
+    return { success: false, error: "Checklist not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(scope.board.workspaceId, {
+    card: ["update"],
+  });
+  if (!canUpdateCard) {
+    return { success: false, error: "Checklist not found" };
+  }
+
+  try {
+    await deleteChecklist(checklistId);
+    await createActivityEntry({
+      workspaceId: scope.board.workspaceId,
+      boardId: scope.boardId,
+      cardId: scope.cardId,
+      userId,
+      action: "DELETED",
+      entityType: "CHECKLIST",
+      metadata: { checklistId },
+    });
+    revalidatePath(`/boards/${scope.boardId}`);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to delete checklist. Please try again." };
+  }
+}
+
+export async function createChecklistItemAction(
+  formData: FormData,
+): Promise<CreateChecklistItemResult> {
+  const parsed = createChecklistItemSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { success: false, error: firstFieldError(parsed.error) };
+  }
+
+  await verifySession();
+  const { checklistId, title } = parsed.data;
+
+  const scope = await getChecklistWithCard(checklistId);
+  if (!scope || scope.board.archivedAt || scope.cardArchived) {
+    return { success: false, error: "Checklist not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(scope.board.workspaceId, {
+    card: ["update"],
+  });
+  if (!canUpdateCard) {
+    return { success: false, error: "Checklist not found" };
+  }
+
+  try {
+    const item = await createChecklistItem({ checklistId, title });
+    revalidatePath(`/boards/${scope.boardId}`);
+    return { success: true, item };
+  } catch {
+    return { success: false, error: "Failed to add item. Please try again." };
+  }
+}
+
+export async function toggleChecklistItemAction(
+  formData: FormData,
+): Promise<ToggleChecklistItemResult> {
+  const parsed = toggleChecklistItemSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { success: false, error: firstFieldError(parsed.error) };
+  }
+
+  await verifySession();
+  const { itemId, isCompleted } = parsed.data;
+
+  const scope = await getChecklistItemWithCard(itemId);
+  if (!scope || scope.board.archivedAt || scope.cardArchived) {
+    return { success: false, error: "Item not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(scope.board.workspaceId, {
+    card: ["update"],
+  });
+  if (!canUpdateCard) {
+    return { success: false, error: "Item not found" };
+  }
+
+  try {
+    const item = await setChecklistItemCompleted(itemId, isCompleted);
+    revalidatePath(`/boards/${scope.boardId}`);
+    return { success: true, item };
+  } catch {
+    return { success: false, error: "Failed to update item. Please try again." };
+  }
+}
+
+export async function deleteChecklistItemAction(
+  formData: FormData,
+): Promise<DeleteChecklistItemResult> {
+  const parsed = deleteChecklistItemSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { success: false, error: firstFieldError(parsed.error) };
+  }
+
+  await verifySession();
+  const { itemId } = parsed.data;
+
+  const scope = await getChecklistItemWithCard(itemId);
+  if (!scope || scope.board.archivedAt || scope.cardArchived) {
+    return { success: false, error: "Item not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(scope.board.workspaceId, {
+    card: ["update"],
+  });
+  if (!canUpdateCard) {
+    return { success: false, error: "Item not found" };
+  }
+
+  try {
+    await deleteChecklistItem(itemId);
+    revalidatePath(`/boards/${scope.boardId}`);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to delete item. Please try again." };
   }
 }

@@ -17,12 +17,14 @@ type WorkspaceSummary = {
 type BoardsPageWrapperProps = {
   workspaces: WorkspaceSummary[];
   boards: WorkspaceBoard[];
+  starredBoardIds: string[];
   selectedWorkspaceId: string | null;
 };
 
 export function BoardsPageWrapper({
   workspaces,
   boards,
+  starredBoardIds,
   selectedWorkspaceId,
 }: BoardsPageWrapperProps) {
   const router = useRouter();
@@ -40,6 +42,7 @@ export function BoardsPageWrapper({
       <BoardsPageClient
         workspaces={workspaces}
         boards={boards}
+        starredBoardIds={starredBoardIds}
         selectedWorkspaceId={selectedWorkspaceId}
         onOpenModal={handleOpenModal}
       />

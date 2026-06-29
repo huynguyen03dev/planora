@@ -13,9 +13,9 @@ function makeLists(): ListWithCards[] {
       isDone: false,
       position: 16384,
       cards: [
-        { id: "card-A", listId: "list-1", title: "A", position: 16384, labels: [] },
-        { id: "card-B", listId: "list-1", title: "B", position: 32768, labels: [] },
-        { id: "card-C", listId: "list-1", title: "C", position: 49152, labels: [] },
+        { id: "card-A", listId: "list-1", title: "A", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
+        { id: "card-B", listId: "list-1", title: "B", position: 32768, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
+        { id: "card-C", listId: "list-1", title: "C", position: 49152, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
       ],
     },
     {
@@ -25,8 +25,8 @@ function makeLists(): ListWithCards[] {
       isDone: false,
       position: 32768,
       cards: [
-        { id: "card-D", listId: "list-2", title: "D", position: 16384, labels: [] },
-        { id: "card-E", listId: "list-2", title: "E", position: 32768, labels: [] },
+        { id: "card-D", listId: "list-2", title: "D", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
+        { id: "card-E", listId: "list-2", title: "E", position: 32768, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
       ],
     },
     {

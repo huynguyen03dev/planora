@@ -2,7 +2,9 @@
 
 ## Status
 
-proposed
+done — closed 2026-06-26. Definition of Done met: Themes A + B shipped with
+proof, Theme C resolved. Theme D (Scale & Platform) is explicitly outside this
+initiative's DoD and is deferred as on-demand follow-ups (see Closure below).
 
 ## Type
 
@@ -109,7 +111,7 @@ Proposed epics in **bold**; create the epic dir when its first child is cut.
 
 | ID | Candidate story | Lane (est.) | Notes |
 | --- | --- | --- | --- |
-| US-020 | Card-list virtualization → DnD INP <200ms on large boards | high-risk | US-004 left residual at ~435ms; virtualization is the deferred lever. |
+| US-020 | Card-list virtualization → DnD INP <200ms on large boards | high-risk | **Deferred — see decision `0010`.** Measured 2026-06-26: desktop drag is "good" (<200ms) at every realistic size up to 150 cards; the need is mobile/mid-tier only. Re-scoped to couple with US-021; cheap `content-visibility` lever first, windowing only if needed. US-004's ~435ms reproduces at 4× CPU throttle. |
 | US-021 | Mobile / responsive board | normal | No responsive story today; large share of kanban usage is mobile. |
 | US-022 | Board-level membership + shareable/public boards | high-risk | Access is workspace-only; Trello separates board members. |
 | US-023 | Attachment hardening — file-type/size validation, scanning, orphan cleanup | high-risk | Untrusted upload path. |
@@ -162,3 +164,36 @@ Proposed epics in **bold**; create the epic dir when its first child is cut.
 Initiative-level proof is the union of its children's proofs. The initiative is
 "done" when Themes A + B are shipped with proof rows in `docs/TEST_MATRIX.md` and
 Theme C items are each either shipped or explicitly cut via a decision record.
+
+## Closure (2026-06-26)
+
+DoD met. Shipped:
+
+- **Theme A — Trust & Safety:** US-006 (Server Action security tests), US-007
+  (RBAC matrix), US-008 (CI gate), US-009 (two-client realtime E2E), US-010
+  (label realtime propagation). The mutation boundary — auth, RBAC, and
+  workspace-isolation — is proven and gates merges in CI.
+- **Theme B — Daily-use Parity:** in-board filtering (US-013) + search (US-014),
+  checklists (US-015), archive/restore (US-016), due-date reminder scheduler
+  (US-020), @mention parsing + autocomplete + email (US-017/018/019 mention line),
+  email sender identity (US-026).
+- **Theme C — Retire Half-built Schema:** card priority (US-017) and cover images
+  (US-018) shipped via PR #30; board stars (US-019) via #29. No enum/column was
+  cut — all three half-built schemas now have a working surface.
+
+Additionally **US-021 (mobile / responsive board)** — a Theme D candidate —
+shipped early via #32.
+
+**Theme D (Scale & Platform) deferred, not cancelled.** None of its remaining
+candidates is a launch gate at current scale: virtualization is premature
+(no large-board evidence), board-level membership and bulk-ops are on-demand
+features rather than debt, attachment hardening's cheap parts (type/size
+validation, orphan cleanup, shared `fileSchema`) already landed with US-018, and
+ops-readiness (rate limiting, monitoring) is the one item worth revisiting before
+a real public launch. Each re-enters intake individually if/when pulled.
+
+**Known residual (proof gap, not feature gap):** per `docs/TEST_MATRIX.md`,
+Server Action *business logic* and *all React components* remain unit/E2E
+untested — only the security boundary is proven. This is a documented, accepted
+tradeoff; new UI work inherits manual-QA-only coverage until an RTL/component
+harness is added.

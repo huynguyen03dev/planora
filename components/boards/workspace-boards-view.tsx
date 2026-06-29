@@ -1,6 +1,9 @@
 import { useState } from "react";
 import Link from "next/link";
 
+import { Button } from "@/components/ui/button";
+import type { WorkspaceBoard } from "@/lib/workspace";
+
 import { BoardCard } from "./board-card";
 import { CreateBoardModal } from "./create-board-modal";
 import { workspaceBadgeGradient } from "./styles";
@@ -11,17 +14,15 @@ type WorkspaceBoardsViewProps = {
     name: string;
     slug: string;
   };
-  boards: {
-    id: string;
-    title: string;
-    backgroundColor?: string | null;
-  }[];
+  boards: WorkspaceBoard[];
+  starredBoardIds?: string[];
   canCreateBoard: boolean;
 };
 
 export function WorkspaceBoardsView({
   workspace,
   boards,
+  starredBoardIds = [],
   canCreateBoard,
 }: WorkspaceBoardsViewProps) {
   const [isCreateBoardOpen, setCreateBoardOpen] = useState(false);
@@ -52,24 +53,24 @@ export function WorkspaceBoardsView({
         </Link>
       </div>
 
-      <div className="flex flex-wrap gap-4">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(13rem,1fr))] gap-4">
         {boards.map((board) => (
           <BoardCard
             key={board.id}
-            id={board.id}
-            title={board.title}
-            backgroundColor={board.backgroundColor}
+            {...board}
+            starred={starredBoardIds.includes(board.id)}
           />
         ))}
 
         {canCreateBoard ? (
-          <button
+          <Button
             type="button"
-            className="flex h-24 w-44 items-center justify-center rounded-lg border-2 border-dashed border-muted text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+            variant="outline"
+            className="h-full min-h-32 w-full rounded-lg border-2 border-dashed border-muted bg-transparent text-sm font-normal text-muted-foreground shadow-none hover:border-primary/50 hover:bg-transparent hover:text-foreground"
             onClick={() => setCreateBoardOpen(true)}
           >
             + Create board
-          </button>
+          </Button>
         ) : null}
       </div>
 

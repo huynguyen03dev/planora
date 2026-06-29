@@ -43,6 +43,21 @@ export async function getCardLabels(cardId: string): Promise<LabelRecord[]> {
   return rows.map((row) => row.label);
 }
 
+/**
+ * Card ids currently carrying a label. Used to fan out a `card:labels-updated`
+ * event to every affected card when a label is renamed/recolored or deleted
+ * (each card's denormalized label snapshot must be refreshed on observers). For
+ * a delete, call this BEFORE deleting — the CardLabel rows cascade away with it.
+ */
+export async function getCardIdsWithLabel(labelId: string): Promise<string[]> {
+  const rows = await db.cardLabel.findMany({
+    where: { labelId },
+    select: { cardId: true },
+  });
+
+  return rows.map((row) => row.cardId);
+}
+
 /** Load a label with its board + workspace for permission scoping. */
 export async function getLabelWithBoard(
   labelId: string,

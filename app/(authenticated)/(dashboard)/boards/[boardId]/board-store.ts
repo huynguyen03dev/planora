@@ -3,9 +3,11 @@
 import { create } from "zustand";
 
 import type {
+  BoardPresencePayload,
   CardArchivedPayload,
   CardCreatedPayload,
   CardLabelsUpdatedPayload,
+  CardMembersUpdatedPayload,
   CardMovedPayload,
   CardUpdatedPayload,
   CommentCreatedPayload,
@@ -13,6 +15,7 @@ import type {
   ListDeletedPayload,
   ListMovedPayload,
   ListUpdatedPayload,
+  Watcher,
 } from "@/lib/realtime/types";
 
 export type CardLabel = {
@@ -32,7 +35,16 @@ export type ListWithCards = {
     listId: string;
     title: string;
     position: number;
+    coverImage: string | null;
+    priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
+    dueDate: Date | null;
+    completedAt: Date | null;
     labels: CardLabel[];
+    members: Array<{ id: string; name: string; image: string | null }>;
+    memberCount: number;
+    checklistDone: number;
+    checklistTotal: number;
+    commentCount: number;
   }>;
 };
 
@@ -45,6 +57,8 @@ export type SelectedCardData = {
     estimateHours: number | null;
     dueDate: Date | null;
     completedAt: Date | null;
+    coverImage: string | null;
+    priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
     updatedAt: Date;
   };
   comments: Array<{
@@ -99,15 +113,32 @@ type BoardStore = {
   socketConnected: boolean;
   isDragging: boolean;
   pendingResync: boolean;
+  /** Users currently viewing this board (live presence). Deduped, server-driven. */
+  watchers: Watcher[];
+  /** Client-only view filter: card label ids to keep visible (OR). Empty = show all. */
+  filterLabelIds: string[];
+  /** Client-only card search: title substring (case-insensitive). Empty = show all. */
+  searchQuery: string;
+  /** Board-level "expand labels" preference (US-044): false = compact color bars,
+   *  true = full text pills. One decision shared by every card; held here (not in
+   *  per-card local state) so it survives realtime re-renders and never flickers
+   *  during a drag. */
+  expandLabels: boolean;
 
   setBoardId: (boardId: string) => void;
   setLists: (lists: ListWithCards[]) => void;
   setSelectedCardId: (cardId: string | null) => void;
   setSelectedCard: (card: SelectedCardData | null) => void;
   setSocketConnected: (connected: boolean) => void;
+  /** Seed presence with the current viewer to avoid an empty-avatar flash; no-op if already populated. */
+  seedWatchers: (watchers: Watcher[]) => void;
   setDragging: (dragging: boolean) => void;
   markResyncPending: () => void;
   consumeResync: () => boolean;
+  toggleLabelFilter: (labelId: string) => void;
+  clearFilters: () => void;
+  setSearchQuery: (query: string) => void;
+  toggleExpandLabels: () => void;
   reset: () => void;
 
   applyRemoteCardMoved: (payload: CardMovedPayload) => void;
@@ -119,7 +150,9 @@ type BoardStore = {
   applyRemoteCardUpdated: (payload: CardUpdatedPayload) => void;
   applyRemoteCardArchived: (payload: CardArchivedPayload) => void;
   applyRemoteCardLabelsUpdated: (payload: CardLabelsUpdatedPayload) => void;
+  applyRemoteCardMembersUpdated: (payload: CardMembersUpdatedPayload) => void;
   applyRemoteCommentCreated: (payload: CommentCreatedPayload) => void;
+  applyRemotePresence: (payload: BoardPresencePayload) => void;
 };
 
 export const useBoardStore = create<BoardStore>((set, get) => ({
@@ -130,6 +163,10 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
   socketConnected: false,
   isDragging: false,
   pendingResync: false,
+  watchers: [],
+  filterLabelIds: [],
+  searchQuery: "",
+  expandLabels: false,
 
   setBoardId: (boardId) => set({ boardId }),
 
@@ -140,6 +177,13 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
   setSelectedCard: (card) => set({ selectedCard: card }),
 
   setSocketConnected: (connected) => set({ socketConnected: connected }),
+
+  // Seed presence with a known baseline (the current viewer) so the header isn't
+  // blank before the first server broadcast. The caller keys this on boardId, so
+  // it runs once per board — resetting to just yourself on a board switch, while
+  // the authoritative `board:presence` broadcast (deduped by user id) fills in
+  // everyone else a moment later.
+  seedWatchers: (watchers) => set({ watchers }),
 
   setDragging: (dragging) => set({ isDragging: dragging }),
 
@@ -159,6 +203,24 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     return pending;
   },
 
+  // View-only label filter (no server round-trip). Toggling a label adds/removes
+  // it from the keep-visible set; the board hides non-matching cards via CSS.
+  toggleLabelFilter: (labelId) => set((state) => ({
+    filterLabelIds: state.filterLabelIds.includes(labelId)
+      ? state.filterLabelIds.filter((id) => id !== labelId)
+      : [...state.filterLabelIds, labelId],
+  })),
+
+  clearFilters: () => set({ filterLabelIds: [] }),
+
+  // View-only card search (no server round-trip). ListColumn hides cards whose
+  // title does not contain the query, ANDed with the label filter.
+  setSearchQuery: (query) => set({ searchQuery: query }),
+
+  // Board-wide compact↔expanded label toggle. One flag, every card reads it, so
+  // there is no per-card state to reset mid-drag (US-044).
+  toggleExpandLabels: () => set((state) => ({ expandLabels: !state.expandLabels })),
+
   reset: () => set({
     boardId: null,
     lists: [],
@@ -167,7 +229,22 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     socketConnected: false,
     isDragging: false,
     pendingResync: false,
+    watchers: [],
+    filterLabelIds: [],
+    searchQuery: "",
+    expandLabels: false,
   }),
+
+  // Live presence: replace the watcher list with the server's authoritative set.
+  // Guarded on boardId like every applyRemote* — during A→B navigation the socket
+  // is briefly in both rooms, so a stale board-A payload can arrive after switching.
+  applyRemotePresence: (payload) => {
+    if (get().boardId !== payload.boardId) {
+      return;
+    }
+
+    set({ watchers: payload.watchers });
+  },
 
   applyRemoteCardMoved: (payload) => {
     const { boardId } = get();
@@ -374,9 +451,22 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
 
         return {
           ...list,
-          cards: [...list.cards, { ...payload.card, labels: [] }].sort(
-            (a, b) => a.position - b.position,
-          ),
+          cards: [
+            ...list.cards,
+            {
+              ...payload.card,
+              coverImage: null,
+              priority: null,
+              dueDate: null,
+              completedAt: null,
+              labels: [],
+              members: [],
+              memberCount: 0,
+              checklistDone: 0,
+              checklistTotal: 0,
+              commentCount: 0,
+            },
+          ].sort((a, b) => a.position - b.position),
         };
       });
 
@@ -478,13 +568,21 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       }
 
       // Self-echo dedupe: if the card already carries this exact label set (same
-      // ids, same order), the store is current (the actor's own echo after
-      // router.refresh already reseeded it). No-op to skip a redundant re-render.
+      // ids, names, colors, same order), the store is current (the actor's own
+      // echo after router.refresh already reseeded it). No-op to skip a redundant
+      // re-render. The name/color comparison matters: a label rename/recolor
+      // keeps the id set unchanged, so an id-only check would wrongly swallow it
+      // and leave stale chips (US-010).
       const current = owningList.cards.find((card) => card.id === payload.cardId);
       if (
         current &&
         current.labels.length === payload.labels.length &&
-        current.labels.every((label, index) => label.id === payload.labels[index].id)
+        current.labels.every(
+          (label, index) =>
+            label.id === payload.labels[index].id &&
+            label.name === payload.labels[index].name &&
+            label.color === payload.labels[index].color,
+        )
       ) {
         return state;
       }
@@ -503,6 +601,52 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       });
 
       return { lists: newLists };
+    });
+  },
+
+  applyRemoteCardMembersUpdated: (payload) => {
+    // Members render only in the open card detail sheet (never on the list
+    // array), so this is in-place / live and scoped to the currently-open card.
+    const { boardId, selectedCardId, selectedCard } = get();
+
+    if (boardId !== payload.boardId || selectedCardId !== payload.cardId || !selectedCard) {
+      return;
+    }
+
+    set((state) => {
+      if (!state.selectedCard || state.selectedCard.card.id !== payload.cardId) {
+        return state;
+      }
+
+      // Self-echo dedupe: identical assignee id set (same order) → no-op so the
+      // actor's own echo (after router.refresh already reseeded) skips a re-render.
+      const currentIds = state.selectedCard.assignees.map((member) => member.id);
+      const nextIds = payload.members.map((member) => member.id);
+      if (
+        currentIds.length === nextIds.length &&
+        currentIds.every((id, index) => id === nextIds[index])
+      ) {
+        return state;
+      }
+
+      // Recompute "assignable" (the Add-members pool) from everyone currently
+      // known on this card — assignees ∪ assignable — minus the new assignees, so
+      // a remotely-removed member returns to the pool and a remotely-added one
+      // leaves it, all without a server round-trip.
+      const nextAssigneeIds = new Set(nextIds);
+      const pool = new Map<string, SelectedCardData["assignableMembers"][number]>();
+      for (const member of [...state.selectedCard.assignees, ...state.selectedCard.assignableMembers]) {
+        pool.set(member.id, member);
+      }
+      const nextAssignable = [...pool.values()].filter((member) => !nextAssigneeIds.has(member.id));
+
+      return {
+        selectedCard: {
+          ...state.selectedCard,
+          assignees: payload.members,
+          assignableMembers: nextAssignable,
+        },
+      };
     });
   },
 

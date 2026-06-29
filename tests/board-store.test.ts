@@ -329,7 +329,7 @@ describe("applyRemoteListDeleted", () => {
   it("removes the list and its cards", () => {
     const lists = makeLists();
     lists[0].cards = [
-      { id: "card-1", listId: "list-1", title: "A", position: 16384, labels: [] },
+      { id: "card-1", listId: "list-1", title: "A", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
     ];
     useBoardStore.setState({ boardId: "board-1", lists });
 
@@ -370,11 +370,11 @@ describe("applyRemoteListDeleted", () => {
 function makeListsWithCards(): ListWithCards[] {
   const lists = makeLists();
   lists[0].cards = [
-    { id: "card-a", listId: "list-1", title: "Alpha", position: 16384, labels: [] },
-    { id: "card-c", listId: "list-1", title: "Charlie", position: 49152, labels: [] },
+    { id: "card-a", listId: "list-1", title: "Alpha", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
+    { id: "card-c", listId: "list-1", title: "Charlie", position: 49152, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
   ];
   lists[1].cards = [
-    { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, labels: [] },
+    { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
   ];
   return lists;
 }
@@ -395,6 +395,8 @@ const selectedCardFor = (cardId: string, title: string) => ({
     estimateHours: null,
     dueDate: null,
     completedAt: null,
+    coverImage: null,
+    priority: null,
     updatedAt: new Date(),
   },
   comments: [],
@@ -449,10 +451,10 @@ describe("applyRemoteCardMoved", () => {
     // canonical float-gap position and MUST apply to correct it — otherwise a
     // later remote re-sort would misorder the board.
     const lists = makeListsWithCards();
-    lists[0].cards = [{ id: "card-c", listId: "list-1", title: "Charlie", position: 49152, labels: [] }];
+    lists[0].cards = [{ id: "card-c", listId: "list-1", title: "Charlie", position: 49152, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 }];
     lists[1].cards = [
-      { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, labels: [] },
-      { id: "card-a", listId: "list-2", title: "Alpha", position: 99999, labels: [] },
+      { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
+      { id: "card-a", listId: "list-2", title: "Alpha", position: 99999, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
     ];
     useBoardStore.setState({ boardId: "board-1", lists });
 
@@ -723,6 +725,25 @@ describe("applyRemoteCardLabelsUpdated", () => {
     expect(useBoardStore.getState().lists).toBe(listsBefore);
   });
 
+  it("applies a rename/recolor even when the label id set is unchanged (US-010)", () => {
+    const lists = makeListsWithCards();
+    lists[0].cards[0].labels = [RED];
+    useBoardStore.setState({ boardId: "board-1", lists });
+    const listsBefore = useBoardStore.getState().lists;
+
+    // Same id, new name + color (a label rename/recolor re-emitted per card).
+    const RENAMED = { id: "label-red", name: "Critical", color: "#E2B203" };
+    useBoardStore.getState().applyRemoteCardLabelsUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      labels: [RENAMED],
+    });
+
+    // Must NOT be deduped as a self-echo: the chip snapshot updates in place.
+    expect(useBoardStore.getState().lists).not.toBe(listsBefore);
+    expect(cardsIn("list-1").find((card) => card.id === "card-a")!.labels).toEqual([RENAMED]);
+  });
+
   it("is a no-op when the payload boardId does not match", () => {
     useBoardStore.setState({ boardId: "board-1", lists: makeListsWithCards() });
 
@@ -745,5 +766,111 @@ describe("applyRemoteCardLabelsUpdated", () => {
     });
 
     expect(cardsIn("list-1").map((card) => card.id)).toEqual(["card-a", "card-c"]);
+  });
+});
+
+describe("applyRemoteCardMembersUpdated", () => {
+  const ALICE = { id: "u-alice", name: "Alice", email: "alice@x", image: null };
+  const BOB = { id: "u-bob", name: "Bob", email: "bob@x", image: null };
+
+  beforeEach(() => {
+    useBoardStore.getState().reset();
+  });
+
+  function openCardWith(
+    assignees: Array<{ id: string; name: string; email: string; image: string | null }>,
+    assignableMembers: Array<{ id: string; name: string; email: string; image: string | null }>,
+  ) {
+    const selectedCard = { ...selectedCardFor("card-a", "Card A"), assignees, assignableMembers };
+    useBoardStore.setState({
+      boardId: "board-1",
+      lists: makeListsWithCards(),
+      selectedCardId: "card-a",
+      selectedCard,
+    });
+  }
+
+  it("adds a remotely-assigned member to the open card and drops them from the assignable pool", () => {
+    openCardWith([], [ALICE, BOB]);
+
+    useBoardStore.getState().applyRemoteCardMembersUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      members: [BOB],
+    });
+
+    const sel = useBoardStore.getState().selectedCard!;
+    expect(sel.assignees).toEqual([BOB]);
+    // BOB left the pool; ALICE remains assignable.
+    expect(sel.assignableMembers.map((m) => m.id)).toEqual(["u-alice"]);
+  });
+
+  it("returns a remotely-removed member to the assignable pool", () => {
+    openCardWith([BOB], [ALICE]);
+
+    useBoardStore.getState().applyRemoteCardMembersUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      members: [],
+    });
+
+    const sel = useBoardStore.getState().selectedCard!;
+    expect(sel.assignees).toEqual([]);
+    // BOB returns to the pool alongside ALICE (deduped, no duplicates).
+    expect(sel.assignableMembers.map((m) => m.id).sort()).toEqual(["u-alice", "u-bob"]);
+  });
+
+  it("self-echo dedupe: no-op when the assignee id set already matches (same ref kept)", () => {
+    openCardWith([BOB], [ALICE]);
+    const before = useBoardStore.getState().selectedCard;
+
+    useBoardStore.getState().applyRemoteCardMembersUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      members: [BOB],
+    });
+
+    expect(useBoardStore.getState().selectedCard).toBe(before);
+  });
+
+  it("is a no-op when the event targets a different card than the open one", () => {
+    openCardWith([], [ALICE, BOB]);
+
+    useBoardStore.getState().applyRemoteCardMembersUpdated({
+      boardId: "board-1",
+      cardId: "card-other",
+      members: [BOB],
+    });
+
+    expect(useBoardStore.getState().selectedCard!.assignees).toEqual([]);
+  });
+
+  it("is a no-op when no card detail is open", () => {
+    useBoardStore.setState({
+      boardId: "board-1",
+      lists: makeListsWithCards(),
+      selectedCardId: null,
+      selectedCard: null,
+    });
+
+    useBoardStore.getState().applyRemoteCardMembersUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      members: [BOB],
+    });
+
+    expect(useBoardStore.getState().selectedCard).toBeNull();
+  });
+
+  it("is a no-op when the payload boardId does not match", () => {
+    openCardWith([], [ALICE, BOB]);
+
+    useBoardStore.getState().applyRemoteCardMembersUpdated({
+      boardId: "board-2",
+      cardId: "card-a",
+      members: [BOB],
+    });
+
+    expect(useBoardStore.getState().selectedCard!.assignees).toEqual([]);
   });
 });

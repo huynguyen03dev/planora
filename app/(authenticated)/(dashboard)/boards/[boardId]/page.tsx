@@ -4,7 +4,7 @@ import { BoardContent } from "@/app/(authenticated)/(dashboard)/boards/[boardId]
 import { BoardStoreProvider } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store-provider";
 import { BoardHeader } from "@/components/boards/board-header";
 import { CardDetailSheet } from "@/components/boards/card-detail-sheet";
-import { getBoardById } from "@/lib/board";
+import { getBoardById, getStarredBoardIds } from "@/lib/board";
 import {
   getBoardPagePermissionsForRole,
   getWorkspaceRole,
@@ -23,6 +23,10 @@ import { getCardMembers, getAssignableWorkspaceMembers } from "@/lib/card-member
 import type { CardMemberRecord, AssignableWorkspaceMemberRecord } from "@/lib/card-member";
 import { getBoardLabels, getCardLabels } from "@/lib/label";
 import type { LabelRecord } from "@/lib/label";
+import { getCardChecklists } from "@/lib/checklist";
+import type { ChecklistWithItems } from "@/lib/checklist";
+import { getArchivedCards } from "@/lib/card";
+import type { ArchivedCardRecord } from "@/lib/card";
 
 type BoardPageProps = {
   params: Promise<{ boardId: string }>;
@@ -37,7 +41,7 @@ export default async function BoardPage({
   params,
   searchParams,
 }: BoardPageProps) {
-  const { userId } = await verifySession();
+  const { userId, user } = await verifySession();
   const { boardId } = await params;
   const resolvedSearchParams = await searchParams;
 
@@ -70,11 +74,17 @@ export default async function BoardPage({
       ? rawCardId
       : null;
 
-  // Load lists + board labels first (needed regardless of card selection)
-  const [lists, boardLabels] = await Promise.all([
+  // Load lists + board labels first (needed regardless of card selection).
+  // Archived cards only matter to users who can restore them (editor/admin).
+  const [lists, boardLabels, archivedCards, starredBoardIds] = await Promise.all([
     getListsByBoardId(boardId),
     getBoardLabels(boardId),
+    canArchiveCard
+      ? getArchivedCards(boardId)
+      : Promise.resolve([] as ArchivedCardRecord[]),
+    getStarredBoardIds(userId),
   ]);
+  const isBoardStarred = starredBoardIds.includes(board.id);
 
   // Initialize data variables
   let selectedCard = null;
@@ -84,6 +94,7 @@ export default async function BoardPage({
   let assignees: CardMemberRecord[] = [];
   let assignableMembers: AssignableWorkspaceMemberRecord[] = [];
   let cardLabels: LabelRecord[] = [];
+  let checklists: ChecklistWithItems[] = [];
 
   // If a card ID is provided, load card details and related data
   if (selectedCardId) {
@@ -102,12 +113,14 @@ export default async function BoardPage({
         cardActivity,
         cardAssignees,
         cardLabelRecords,
+        cardChecklists,
       ] = await Promise.all([
         getCommentsByCardId(selectedCard.id),
         getAttachmentsByCardId(selectedCard.id),
         getActivityByCardId(selectedCard.id),
         getCardMembers(selectedCard.id),
         getCardLabels(selectedCard.id),
+        getCardChecklists(selectedCard.id),
       ]);
 
       comments = cardComments;
@@ -115,6 +128,7 @@ export default async function BoardPage({
       activity = cardActivity;
       assignees = cardAssignees;
       cardLabels = cardLabelRecords;
+      checklists = cardChecklists;
       
       // Load assignable members only if the current user can edit cards
       if (canEditCard) {
@@ -136,7 +150,16 @@ export default async function BoardPage({
       listId: card.listId,
       title: card.title,
       position: card.position,
+      coverImage: card.coverImage,
+      priority: card.priority,
+      dueDate: card.dueDate,
+      completedAt: card.completedAt,
       labels: card.labels,
+      members: card.members,
+      memberCount: card.memberCount,
+      checklistDone: card.checklistDone,
+      checklistTotal: card.checklistTotal,
+      commentCount: card.commentCount,
     })),
   }));
 
@@ -150,6 +173,8 @@ export default async function BoardPage({
           estimateHours: selectedCard.estimateHours,
           dueDate: selectedCard.dueDate,
           completedAt: selectedCard.completedAt,
+          coverImage: selectedCard.coverImage,
+          priority: selectedCard.priority,
           updatedAt: selectedCard.updatedAt,
         },
         comments: comments.map((c) => ({
@@ -195,6 +220,7 @@ export default async function BoardPage({
       lists={listsWithCards}
       selectedCardId={selectedCardId}
       selectedCard={selectedCardData}
+      currentViewer={{ id: user.id, name: user.name, image: user.image ?? null, role }}
       canEdit={canEditList}
       canDelete={canDeleteList}
       canCreateList={canCreateList}
@@ -202,7 +228,7 @@ export default async function BoardPage({
       canEditCard={canEditCard}
       canArchiveCard={canArchiveCard}
     >
-      <div className="flex h-full min-h-0 flex-1 flex-col p-6">
+      <div className="flex h-full min-h-0 flex-1 flex-col p-3 sm:p-6">
         <BoardHeader
           board={{
             id: board.id,
@@ -211,6 +237,13 @@ export default async function BoardPage({
           }}
           canEdit={canEditBoard}
           canDelete={canDeleteBoard}
+          canArchiveCard={canArchiveCard}
+          archivedCards={archivedCards.map((card) => ({
+            id: card.id,
+            title: card.title,
+            listTitle: card.listTitle,
+          }))}
+          starred={isBoardStarred}
         />
 
         <div
@@ -241,6 +274,7 @@ export default async function BoardPage({
           boardId={board.id}
           boardLabels={boardLabels}
           cardLabelIds={cardLabels.map((label) => label.id)}
+          checklists={checklists}
           canEdit={canEditCard}
           canComment={canComment}
         />

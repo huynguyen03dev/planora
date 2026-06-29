@@ -12,6 +12,19 @@ carry rich metadata. All mutations are Server Actions under
 - Soft-deleted via `archivedAt`; deletion cascades to lists, cards, labels,
   stars, and activity.
 - Users can **star** a board (favorite) — `BoardStar`, unique per user+board.
+- The boards overview lays board tiles out in a **responsive auto-fill grid**
+  that fills the available row width (fluid tiles, min ~13rem per column) rather
+  than fixed-width tiles clinging to a narrow left column on wide screens
+  (US-038). Presentation only.
+- Each board tile shows **information density** — a colored identity header
+  (title + star) plus a footer with **list count · card count**, a
+  **last-activity** relative timestamp, and a capped **assignee avatar stack**
+  (`+N` overflow) — instead of a bare color block (US-037). These are read-only
+  aggregates added to the overview payload: card count aggregates across the
+  board's lists, last-activity is `max(board, list, card updatedAt)`, and members
+  are the distinct assignees across the board's non-archived cards (resolved via
+  a bounded `cardMember → card → list` join, not a per-card fetch). No data,
+  contract, or auth change.
 
 ## Lists
 
@@ -30,22 +43,49 @@ carry rich metadata. All mutations are Server Actions under
   cover image, `archivedAt` (soft delete).
 - Actions: `createCardAction`, `updateCardDetailsAction` (title/description),
   `updateCardEstimateAction`, `updateCardDueDateAction`, `archiveCardAction`,
-  `reorderCardAction`, `moveCardAction`.
+  `restoreCardAction`, `reorderCardAction`, `moveCardAction`.
 - **Estimate rule:** once a card has completed once, its estimate cannot be
   changed (audited as `ESTIMATE_CHANGED` history). Workspaces may require an
   estimate before a card can be marked done (`requireEstimateBeforeDone`).
 - **Move semantics:** `moveCardAction` relocates a card across lists and applies
   the auto-completion/reopen logic based on the target list's `isDone`.
+- **Archive & restore:** `archiveCardAction` soft-archives (sets `archivedAt`,
+  records a `CARD_ARCHIVED` history event, emits `card:archived` to remove it
+  live). `restoreCardAction` is the inverse — it clears `archivedAt`, records a
+  `CARD_RESTORED` event, and re-emits `card:created` so the card reappears live
+  for other viewers. Both reuse `card:["delete"]` (editor/admin; viewer denied).
+  Restore resolves the card through an **archived-aware** scope resolver
+  (`getArchivedCardWithListAndBoard`, requires `archivedAt: not null`) — the
+  default `getCardWithListAndBoard` filters archived cards out. The board header
+  exposes an **Archived cards** view (editor/admin only) listing the board's
+  archived cards with their original list and a Restore button (US-016).
+  Cards-only for now — list and board (closed-boards) restore are deferred
+  follow-ups; permanent (hard) delete from the archive view is not yet built.
 
 ## Card metadata
 
 | Feature | Model | Action(s) | Notes |
 | --- | --- | --- | --- |
-| Assignees | `CardMember` | `assignCardMemberAction`, `removeCardMemberAction` | Workspace members only; assignment notifies + emails |
-| Labels | `Label` / `CardLabel` | `createLabelAction`, `updateLabelAction`, `deleteLabelAction`, `addCardLabelAction`, `removeCardLabelAction` | Board-scoped, named + colored (palette from `BOARD_COLORS`); attached per card. Label-set CRUD reuses `board:["update"]`, attach/detach reuse `card:["update"]` — no dedicated `label` permission statement (US-005). Managed in the card detail sheet; colored chips render on the card face in the board view; attach/detach broadcast live via the `card:labels-updated` socket event (label-set CRUD propagates via revalidate). |
-| Checklists | `Checklist` / `ChecklistItem` | — | Ordered items with `isCompleted` |
-| Comments | `Comment` | `createCommentAction` | Notifies + emails; applied live over socket |
+| Assignees | `CardMember` | `assignCardMemberAction`, `removeCardMemberAction` | Workspace members only; assignment notifies + emails; assign/remove broadcast live via `card:members-updated` so an open card detail sheet on another client updates without reload (US-011). Members render in the detail sheet **and** as a capped avatar stack on the card face (up to 3 + a `+N` overflow), surfaced from the board-view payload (US-030). |
+| Labels | `Label` / `CardLabel` | `createLabelAction`, `updateLabelAction`, `deleteLabelAction`, `addCardLabelAction`, `removeCardLabelAction` | Board-scoped, named + colored (palette from `BOARD_COLORS`); attached per card. Label-set CRUD reuses `board:["update"]`, attach/detach reuse `card:["update"]` — no dedicated `label` permission statement (US-005). Managed in the card detail sheet; colored chips render on the card face in the board view; attach/detach broadcast live via the `card:labels-updated` socket event; label rename/recolor/delete fan that same event out per affected card so chips refresh live for other viewers (US-010). |
+| Checklists | `Checklist` / `ChecklistItem` | `createChecklistAction`, `deleteChecklistAction`, `createChecklistItemAction`, `toggleChecklistItemAction`, `deleteChecklistItemAction` | Card content; reuse `card:["update"]` (viewer denied) — no dedicated `checklist` permission. Ordered items with `isCompleted`, float-gap positioned. Deleting a checklist cascades to its items. Rendered in the card detail sheet (US-015); the card face shows checklist progress (`done/total`) from the board-view payload (US-030). Rename/reorder and cross-client realtime are deferred follow-ups (slice 1 revalidates rather than emitting). |
+| Comments | `Comment` | `createCommentAction` | Notifies + emails; applied live over socket. The card face shows the comment count from the board-view payload (US-030). |
 | Attachments | `Attachment` | `uploadAttachmentAction` | Cloudinary-hosted; orphan cleanup on failure |
+
+### Card face (board view)
+
+Beyond labels and the priority chip, the card face renders a metadata row from
+the board-view payload (US-030, decision 0011): a **due-date badge** with state
+(`overdue` / `today` / `soon` / `upcoming`, and `done` once `completedAt` is set —
+a completed card never reads as overdue), **assignee avatars** (capped stack +
+`+N` overflow), **checklist progress** (`done/total`), and the **comment count**.
+Each is icon + text with an accessible label (never colour-only). The row is
+omitted entirely when a card has none of these. Values reflect on the viewer's
+next board render/refresh; dedicated live broadcast of these fields is a
+follow-up (they behave like priority/cover today). The counts are aggregated
+server-side over FK-indexed columns so the board-load query stays bounded. The
+priority chip and the metadata badges use design-system colour utilities (not
+raw hex) so they stay legible in both light and dark mode (US-036).
 
 ## Ordering (Float gap positioning)
 
@@ -70,6 +110,46 @@ normalizes positions on overflow. The neighbour math is pure and unit-tested in
   story `US-004`. On very large columns (~90+ cards) the residual cost is DOM
   layout / `@hello-pangea/dnd` measurement, not React re-renders — windowing is
   a tracked follow-up, not done here.
+
+## Filtering & search
+
+- Two board-header controls narrow the visible cards, client-side and per-viewer:
+  a **label filter** (US-013) and a **title search** (US-014). Both are live with
+  no reload, no server round-trip, and no Server Action; neither mutates data nor
+  is shared with other viewers.
+- **Label filter:** options are the labels actually in use on the board; selecting
+  one or more shows only cards carrying at least one of them (OR). The control is
+  hidden when the board has no labels.
+- **Search:** a header box narrows to cards whose **title** contains the typed
+  text (case-insensitive substring), live as you type; a clear (✕) button resets
+  it. Search is **title-only** in slice 1 — the board-view card payload carries
+  `title` and `labels` but not `description` (that lives in the detail sheet), so
+  searching the description is a follow-up that first enriches the card payload.
+- **Composition:** search and the label filter combine via **AND** — a card is
+  visible only if it matches the query *and* the active label filter.
+- Non-matching cards are **hidden (CSS), not removed** from the rendered list, so
+  `@hello-pangea/dnd`'s index space stays aligned with the store's `cards` array
+  and drop positions are never corrupted (see `lib/dnd/apply-drop.ts`).
+- A list whose cards are all narrowed out (by filter and/or search) shows a
+  "No cards match" hint instead of the empty "No cards yet" placeholder.
+- Filtering by **assignee** and **due date** is a planned follow-up slice. The
+  board-view card payload now carries `dueDate` and a capped `assignees` list
+  (plus checklist progress and comment count) for the card face (US-030), so the
+  data those filters need already exists — only the filter UI/logic remains.
+
+## Responsive / mobile (US-021)
+
+The authenticated shell and board view are usable at phone width with no
+horizontal page overflow — only the board canvas scrolls sideways, inside its
+own region. Lists are **fluid-width on phones** (`~80vw`, capped at the `20rem`
+desktop column) so the next list peeks into view and signals horizontal scroll;
+at the `sm:` breakpoint and up they return to the fixed `w-80` (320px) desktop
+width, so desktop renders unchanged. Page/canvas/header padding and the board
+title scale down on small screens. This is a presentation-only concern (pure
+Tailwind breakpoints, no JS viewport detection, no data/contract change).
+Drag-and-drop is untouched — width is the only thing that changes, so the
+`@hello-pangea/dnd` index space and `apply-drop` math (and the long-press touch
+sensor) behave exactly as on desktop.
 
 ## Activity
 

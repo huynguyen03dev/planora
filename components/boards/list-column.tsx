@@ -11,6 +11,7 @@ import {
   updateListIsDoneAction,
   deleteListAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
+import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
 import { ListCardItem } from "@/components/boards/list-card-item";
 import { useInlineTitleEditor } from "@/components/boards/use-inline-title-editor";
 import {
@@ -34,6 +35,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
+import { cardMatchesFilter, cardMatchesQuery } from "@/lib/board-filter";
 import { cn } from "@/lib/utils";
 
 type ListColumnProps = {
@@ -47,7 +49,16 @@ type ListColumnProps = {
       listId: string;
       title: string;
       position: number;
+      coverImage: string | null;
+      priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
+      dueDate: Date | null;
+      completedAt: Date | null;
       labels: Array<{ id: string; name: string; color: string }>;
+      members: Array<{ id: string; name: string; image: string | null }>;
+      memberCount: number;
+      checklistDone: number;
+      checklistTotal: number;
+      commentCount: number;
     }>;
   };
   index: number;
@@ -73,6 +84,20 @@ function ListColumnComponent({
   canSortCards,
   onOpenCard,
 }: ListColumnProps) {
+  // Client-only label filter + title search. Cards are HIDDEN (not removed) when
+  // they don't match, so @hello-pangea/dnd's index space stays aligned with the
+  // store's `cards` array and drop positions are never corrupted (see
+  // lib/dnd/apply-drop). The two narrowing controls compose via AND.
+  const filterLabelIds = useBoardStore((s) => s.filterLabelIds);
+  const searchQuery = useBoardStore((s) => s.searchQuery);
+  const filter = { labelIds: filterLabelIds };
+  const narrowing = filterLabelIds.length > 0 || searchQuery.trim().length > 0;
+  const isCardVisible = (card: ListColumnProps["list"]["cards"][number]) =>
+    cardMatchesFilter(card, filter) && cardMatchesQuery(card, searchQuery);
+  const visibleCount = narrowing
+    ? list.cards.filter(isCardVisible).length
+    : list.cards.length;
+
   const [newCardTitle, setNewCardTitle] = useState("");
   const [addCardExpanded, setAddCardExpanded] = useState(false);
   const [addCardError, setAddCardError] = useState("");
@@ -184,7 +209,11 @@ function ListColumnComponent({
             {...provided.draggableProps}
             style={provided.draggableProps.style}
             className={cn(
-              "flex w-80 shrink-0 flex-col gap-2 rounded-lg bg-muted p-3",
+              // Fluid on phones (~80vw so the next list peeks → signals
+              // horizontal scroll), capped at and reverting to the 20rem desktop
+              // width at sm:. Width is the only responsive change — the dnd index
+              // space and apply-drop math are untouched.
+              "flex w-[80vw] max-w-[20rem] shrink-0 flex-col gap-2 rounded-lg bg-muted p-3 sm:w-80 sm:max-w-none",
               snapshot.isDragging && "shadow-xl ring-2 ring-primary/30",
             )}
           >
@@ -327,10 +356,16 @@ function ListColumnComponent({
                         canEdit={canEditCard}
                         canArchive={canArchiveCard}
                         canDrag={canSortCards}
+                        hidden={narrowing && !isCardVisible(card)}
                         onOpenCard={onOpenCard}
                       />
                     ))}
                   </div>
+                  {narrowing && list.cards.length > 0 && visibleCount === 0 ? (
+                    <p className="px-1 py-2 text-xs text-muted-foreground">
+                      No cards match
+                    </p>
+                  ) : null}
                   {dropProvided.placeholder}
                 </div>
               )}

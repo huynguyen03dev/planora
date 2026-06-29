@@ -4,6 +4,8 @@ import db from "@/lib/prisma";
 import { emitNotificationNew } from "@/lib/realtime/server";
 import { sendEmail } from "@/lib/email";
 import { AssignEmail } from "@/emails/assign-email";
+import { MentionEmail } from "@/emails/mention-email";
+import { DueDateEmail } from "@/emails/due-date-email";
 
 export type NotificationRecord = {
   id: string;
@@ -22,6 +24,9 @@ export async function getUnreadNotificationCount(userId: string): Promise<number
     where: {
       userId,
       isRead: false,
+      // INVITE notifications are surfaced directly from the invitation table in
+      // the unified inbox, so they are excluded here to avoid double-counting.
+      type: { not: "INVITE" },
     },
   });
 }
@@ -31,7 +36,9 @@ export async function getNotificationsForUser(
   options?: { limit?: number },
 ): Promise<NotificationRecord[]> {
   return db.notification.findMany({
-    where: { userId },
+    // INVITE notifications are surfaced directly from the invitation table in
+    // the unified inbox; exclude them so the feed never double-lists an invite.
+    where: { userId, type: { not: "INVITE" } },
     orderBy: { createdAt: "desc" },
     take: options?.limit ?? 50,
     select: {
@@ -85,7 +92,7 @@ async function createNotification(data: {
   const notification = await db.notification.create({
     data: {
       userId: data.userId,
-      type: data.type as "ASSIGNED" | "COMMENT" | "INVITE",
+      type: data.type as "ASSIGNED" | "COMMENT" | "INVITE" | "MENTIONED" | "DUE_DATE",
       title: data.title,
       message: data.message,
       linkUrl: data.linkUrl ?? null,
@@ -161,6 +168,7 @@ export async function notifyCardAssigned(data: {
           assignedByName: data.assignedByName,
           cardLink: `${appUrl}/boards/${data.boardId}`,
         }),
+        fromName: `${data.assignedByName} (Planora)`,
       });
     }
   } catch (error) {
@@ -216,24 +224,180 @@ export async function notifyCommentOnCard(data: {
   );
 }
 
+export async function notifyMentioned(data: {
+  content: string;
+  cardId: string;
+  cardTitle: string;
+  boardId: string;
+  boardTitle: string;
+  commenterUserId: string;
+  commenterName: string;
+  workspaceId: string;
+}): Promise<void> {
+  try {
+    // Fetch all workspace members (typical workspace < 500 members — fine to
+    // load in one query and match in JS).
+    const members = await db.workspaceMember.findMany({
+      where: { organizationId: data.workspaceId },
+      select: {
+        userId: true,
+        user: { select: { name: true, email: true } },
+      },
+    });
+
+    if (members.length === 0) return;
+
+    // Build a set of resolved user IDs by scanning the content for @memberName
+    // patterns. Uses the same algorithm as renderMentionContent: find each '@',
+    // then try to match the longest member name that follows it with a word
+    // boundary after.
+    const content = data.content;
+    const memberMap = new Map<string, { userId: string; name: string; email: string | null }>();
+    for (const m of members) {
+      if (m.user.name) memberMap.set(m.user.name.toLowerCase(), { userId: m.userId, name: m.user.name, email: m.user.email ?? null });
+    }
+
+    const resolvedUserIds = new Set<string>();
+    let i = 0;
+    while (i < content.length) {
+      if (content[i] === "@" && i + 1 < content.length) {
+        let bestUserId: string | null = null;
+        let bestEnd = 0;
+
+        for (const [lowerName, { userId, name }] of memberMap) {
+          const afterAt = content.slice(i + 1);
+          if (afterAt.toLowerCase().startsWith(lowerName)) {
+            const endIdx = i + 1 + name.length;
+            const nextChar = content[endIdx];
+            if (nextChar === undefined || !/[a-zA-Z]/.test(nextChar)) {
+              if (name.length > (bestEnd - i - 1)) {
+                bestUserId = userId;
+                bestEnd = endIdx;
+              }
+            }
+          }
+        }
+
+        if (bestUserId) {
+          resolvedUserIds.add(bestUserId);
+          i = bestEnd;
+          continue;
+        }
+      }
+      i++;
+    }
+
+    // Filter out commenter
+    resolvedUserIds.delete(data.commenterUserId);
+
+    if (resolvedUserIds.size === 0) return;
+
+    await Promise.all(
+      Array.from(resolvedUserIds).map((userId) =>
+        createNotification({
+          userId,
+          type: "MENTIONED",
+          title: `Mentioned in "${data.cardTitle}"`,
+          message: `${data.commenterName} mentioned you in a comment on "${data.cardTitle}" in "${data.boardTitle}".`,
+          linkUrl: `/boards/${data.boardId}`,
+        }),
+      ),
+    );
+
+    // Best-effort mention emails
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    for (const userId of resolvedUserIds) {
+      const member = Array.from(memberMap.values()).find((m) => m.userId === userId);
+      if (!member?.email) continue;
+
+      try {
+        await sendEmail({
+          to: member.email,
+          subject: `You were mentioned in "${data.cardTitle}"`,
+          react: MentionEmail({
+            mentionedByName: data.commenterName,
+            cardTitle: data.cardTitle,
+            boardName: data.boardTitle,
+            cardLink: `${appUrl}/boards/${data.boardId}`,
+          }),
+          fromName: `${data.commenterName} mentioned you (Planora)`,
+        });
+      } catch (emailError) {
+        console.error("[notification] Failed to send mention email:", emailError);
+      }
+    }
+  } catch (error) {
+    console.error("[notification] Failed to send mention notifications:", error);
+  }
+}
+
 export async function notifyInvited(data: {
   invitedEmail: string;
   inviterName: string;
   workspaceName: string;
 }): Promise<void> {
-  // Only create in-app notification if the invited user has an account
-  const user = await db.user.findUnique({
-    where: { email: data.invitedEmail },
-    select: { id: true },
-  });
+  // Intentionally a no-op. Pending workspace invitations are now surfaced
+  // directly in the unified inbox (the notification bell) from the invitation
+  // table, with inline Accept / Decline actions — see lib/notifications/inbox.ts
+  // and the /api/invitations/pending route. Creating a separate INVITE
+  // notification row here would duplicate that signal, so we no longer do it.
+  // The signature is preserved so existing callers in the invite flow keep
+  // working without change.
+  void data;
+}
 
-  if (!user) return;
+export async function notifyDueDate(data: {
+  userId: string;
+  cardId: string;
+  cardTitle: string;
+  boardId: string;
+  boardTitle: string;
+  milestone: "DUE_SOON" | "OVERDUE";
+  dueDate: Date;
+}): Promise<void> {
+  const milestoneLabel = data.milestone === "DUE_SOON" ? "due soon" : "overdue";
+  const title = `"${data.cardTitle}" is ${milestoneLabel}`;
+  const message =
+    data.milestone === "DUE_SOON"
+      ? `The card "${data.cardTitle}" on "${data.boardTitle}" is due soon.`
+      : `The card "${data.cardTitle}" on "${data.boardTitle}" is overdue.`;
 
-  await createNotification({
-    userId: user.id,
-    type: "INVITE",
-    title: `Invited to "${data.workspaceName}"`,
-    message: `${data.inviterName} invited you to join the workspace "${data.workspaceName}".`,
-    linkUrl: "/invitations",
-  });
+  try {
+    const notification = await createNotification({
+      userId: data.userId,
+      type: "DUE_DATE",
+      title,
+      message,
+      linkUrl: `/boards/${data.boardId}`,
+    });
+
+    // Best-effort email
+    try {
+      const user = await db.user.findUnique({
+        where: { id: data.userId },
+        select: { email: true, name: true },
+      });
+
+      if (user) {
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+        await sendEmail({
+          to: user.email,
+          subject: title,
+          react: DueDateEmail({
+            milestone: data.milestone,
+            cardTitle: data.cardTitle,
+            boardName: data.boardTitle,
+            cardLink: `${appUrl}/boards/${data.boardId}`,
+          }),
+        });
+      }
+    } catch (emailError) {
+      console.error("[notification] Failed to send due-date email:", emailError);
+    }
+
+    void notification;
+  } catch (error) {
+    // Re-throw so the caller (scheduler) can roll back the CardReminder claim
+    throw error;
+  }
 }

@@ -1,23 +1,125 @@
-import Link from "next/link";
+"use client";
 
-import { defaultBoardGradient } from "./styles";
+import { useTransition } from "react";
+import Link from "next/link";
+import { formatDistanceToNow } from "date-fns";
+import { StarIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+
+import { toggleBoardStarAction } from "@/app/(authenticated)/(dashboard)/boards/actions";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarGroup,
+  AvatarGroupCount,
+  AvatarImage,
+} from "@/components/ui/avatar";
+import { getBoardTheme } from "@/lib/constants";
+import { getInitials } from "@/lib/utils";
+import type { WorkspaceBoardMember } from "@/lib/workspace";
 
 type BoardCardProps = {
   id: string;
   title: string;
   backgroundColor?: string | null;
+  starred?: boolean;
+  listCount: number;
+  cardCount: number;
+  lastActivityAt: Date;
+  members: WorkspaceBoardMember[];
+  memberCount: number;
 };
 
-export function BoardCard({ id, title, backgroundColor }: BoardCardProps) {
-  const backgroundStyle = backgroundColor ?? defaultBoardGradient;
+export function BoardCard({
+  id,
+  title,
+  backgroundColor,
+  starred = false,
+  listCount,
+  cardCount,
+  lastActivityAt,
+  members,
+  memberCount,
+}: BoardCardProps) {
+  const [isPending, startTransition] = useTransition();
+  const backgroundStyle = getBoardTheme(backgroundColor).header;
+  const starDisplay = starred || isPending;
+  const memberOverflow = Math.max(0, memberCount - members.length);
+
+  function handleToggleStar(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    startTransition(async () => {
+      await toggleBoardStarAction(id);
+    });
+  }
 
   return (
-    <Link
-      href={`/boards/${id}`}
-      className="block h-24 w-44 rounded-lg p-3 transition-opacity hover:opacity-90"
-      style={{ background: backgroundStyle }}
-    >
-      <span className="line-clamp-2 text-sm font-medium text-white">{title}</span>
-    </Link>
+    <div className="group relative">
+      <Link
+        href={`/boards/${id}`}
+        className="block overflow-hidden rounded-lg border bg-card transition-shadow hover:shadow-md"
+      >
+        <div className="relative h-20 p-3" style={{ background: backgroundStyle }}>
+          <span className="line-clamp-2 pr-7 text-sm font-medium text-white">
+            {title}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+          <div className="min-w-0 space-y-0.5">
+            <p className="text-xs text-muted-foreground">
+              {listCount} {listCount === 1 ? "list" : "lists"} · {cardCount}{" "}
+              {cardCount === 1 ? "card" : "cards"}
+            </p>
+            <p
+              className="truncate text-xs text-muted-foreground"
+              suppressHydrationWarning
+            >
+              Updated {formatDistanceToNow(lastActivityAt, { addSuffix: true })}
+            </p>
+          </div>
+
+          {memberCount > 0 ? (
+            <AvatarGroup className="shrink-0">
+              {members.map((member) => (
+                <Avatar key={member.id} size="sm">
+                  {member.image ? (
+                    <AvatarImage src={member.image} alt={member.name} />
+                  ) : null}
+                  <AvatarFallback>{getInitials(member.name)}</AvatarFallback>
+                </Avatar>
+              ))}
+              {memberOverflow > 0 ? (
+                <AvatarGroupCount
+                  className="text-xs"
+                  aria-label={`${memberOverflow} more`}
+                >
+                  +{memberOverflow}
+                </AvatarGroupCount>
+              ) : null}
+            </AvatarGroup>
+          ) : null}
+        </div>
+      </Link>
+
+      <button
+        type="button"
+        onClick={handleToggleStar}
+        disabled={isPending}
+        aria-label={starDisplay ? "Unstar board" : "Star board"}
+        className={`absolute right-2 top-2 rounded p-0.5 transition-all ${
+          starDisplay
+            ? "text-yellow-400 hover:text-yellow-300"
+            : "text-white/40 hover:text-yellow-300/70"
+        }`}
+      >
+        <HugeiconsIcon
+          icon={StarIcon}
+          className="size-[18px] drop-shadow-sm"
+          fill={starDisplay ? "currentColor" : "none"}
+        />
+      </button>
+    </div>
   );
 }

@@ -132,6 +132,34 @@ export async function dragCardToNextList(page: Page, cardId: string): Promise<vo
 }
 
 /**
+ * Keyboard-reorder a LIST one slot to the left. Lists are a horizontal droppable
+ * whose drag handle ("Drag list") carries the same `data-rfd-drag-handle-draggable-id`
+ * attribute (= list.id) the card helpers use, so liftCard/moveLifted/dropCard are
+ * reused verbatim — the keyboard sensor is draggable-type agnostic. Emits the
+ * STRUCTURAL `list:moved`.
+ */
+export async function dragListLeft(page: Page, listId: string): Promise<void> {
+  await liftCard(page, listId);
+  await moveLifted(page, "ArrowLeft");
+  await dropCard(page);
+}
+
+/** Left edge (x) of a list column — used to assert relative list order. */
+export async function listColumnX(page: Page, listId: string): Promise<number> {
+  const box = await listColumnById(page, listId).boundingBox();
+  return box?.x ?? -1;
+}
+
+// ── Comments (composer in the open card detail sheet) ─────────────────────
+
+/** Post a comment in the open card detail sheet; resolves once the composer clears. */
+export async function postComment(page: Page, text: string): Promise<void> {
+  await page.getByPlaceholder("Write a comment...").fill(text);
+  await page.getByRole("button", { name: /post comment/i }).click();
+  await expect(page.getByPlaceholder("Write a comment...")).toHaveValue("");
+}
+
+/**
  * Archive a card via its actions menu (mouse only — no keyboard sensor, so it
  * never disturbs another page's in-flight keyboard drag). Scoped to the card by
  * id via the draggable wrapper. Emits a structural `card:archived`.
@@ -164,6 +192,76 @@ export async function renameOpenCard(page: Page, newTitle: string): Promise<void
   await save.click();
   await expect(save).toHaveText(/save changes/i);
   await expect(save).toBeDisabled();
+}
+
+// ── Label management (in the open card detail sheet) ──────────────────────
+// Label-set CRUD lives in the card detail sheet's "Board labels" list
+// (card-labels-section.tsx): each label is an <li> with Edit / Delete controls.
+// Driving rename/delete here exercises the real updateLabelAction /
+// deleteLabelAction — the Server Actions whose realtime emit US-010 adds.
+
+/** The board-labels list row for a label, scoped by its current name. */
+function boardLabelRow(page: Page, labelName: string) {
+  return page.locator("li").filter({ hasText: labelName });
+}
+
+/**
+ * Rename a board label via the open card detail sheet: Edit → fill name → Save.
+ * Resolves once the editor has closed (the action resolved and router.refresh
+ * reseeded the sheet), i.e. the `card:labels-updated` fan-out has been emitted.
+ */
+export async function renameBoardLabel(
+  page: Page,
+  currentName: string,
+  newName: string,
+): Promise<void> {
+  await boardLabelRow(page, currentName).getByRole("button", { name: /^edit$/i }).click();
+  const nameInput = page.getByPlaceholder("Label name");
+  await nameInput.fill(newName);
+  await page.getByRole("button", { name: /^save$/i }).click();
+  await expect(nameInput).toHaveCount(0);
+}
+
+/**
+ * Delete a board label via the open card detail sheet. Resolves once the label
+ * row is gone (the delete resolved), i.e. the fan-out has been emitted.
+ */
+export async function deleteBoardLabel(page: Page, name: string): Promise<void> {
+  await boardLabelRow(page, name).getByRole("button", { name: /^delete$/i }).click();
+  await expect(boardLabelRow(page, name)).toHaveCount(0);
+}
+
+// ── Card members (in the open card detail sheet) ──────────────────────────
+// Members render ONLY in the card detail sheet (never on the card face), so the
+// realtime proof observes the open sheet. assignCardMemberAction /
+// removeCardMemberAction are the actions whose realtime emit US-011 adds.
+
+/** The "Members" section of the open card detail sheet. */
+export function cardMembersSection(page: Page) {
+  return page
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: "Members", exact: true }) });
+}
+
+/**
+ * Assigned-member "Remove" buttons in the open sheet — exactly one per assignee
+ * (editor-only; the "Add members" list uses name+email buttons, not "Remove").
+ * Count is therefore the live assignee count.
+ */
+export function assignedMemberRemoveButtons(page: Page) {
+  return cardMembersSection(page).getByRole("button", { name: /^remove$/i });
+}
+
+/** Assign a member to the open card via the "Add members" list, matched by name/email. */
+export async function assignMemberInOpenCard(page: Page, match: string | RegExp): Promise<void> {
+  await cardMembersSection(page)
+    .getByRole("button", { name: typeof match === "string" ? new RegExp(match) : match })
+    .click();
+}
+
+/** Remove the first assigned member from the open card (clicks their "Remove"). */
+export async function removeFirstMemberInOpenCard(page: Page): Promise<void> {
+  await assignedMemberRemoveButtons(page).first().click();
 }
 
 // ── List/card scoping locators (strict, id-based) ─────────────────────────

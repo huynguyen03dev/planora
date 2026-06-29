@@ -17,6 +17,7 @@ type WorkspaceSummary = {
 type BoardsPageClientProps = {
   workspaces: WorkspaceSummary[];
   boards: WorkspaceBoard[];
+  starredBoardIds: string[];
   selectedWorkspaceId: string | null;
   onOpenModal: () => void;
 };
@@ -24,6 +25,7 @@ type BoardsPageClientProps = {
 export function BoardsPageClient({
   workspaces,
   boards,
+  starredBoardIds,
   selectedWorkspaceId,
   onOpenModal,
 }: BoardsPageClientProps) {
@@ -43,17 +45,18 @@ export function BoardsPageClient({
     <>
       <div className="flex flex-1 flex-col md:flex-row">
         <BoardsSidebar workspaces={workspaces} />
-        <main className="flex-1 p-6">
+        <main className="flex-1 p-4 sm:p-6">
           {selectedWorkspace ? (
             <WorkspaceBoardsView
               workspace={selectedWorkspace}
               boards={boards.filter(
                 (board) => board.workspaceId === selectedWorkspace.id,
               )}
+              starredBoardIds={starredBoardIds}
               canCreateBoard={selectedWorkspace.canCreateBoard}
             />
           ) : (
-            <BoardsOverview workspaces={workspaces} boards={boards} />
+            <BoardsOverview workspaces={workspaces} boards={boards} starredBoardIds={starredBoardIds} />
           )}
         </main>
       </div>

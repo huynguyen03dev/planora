@@ -58,9 +58,11 @@ const h = vi.hoisted(() => {
     getBoardById: fn(),
     getListWithBoard: fn(),
     getCardWithListAndBoard: fn(),
+    getArchivedCardWithListAndBoard: fn(),
     getCardWithListAndMembers: fn(),
     getLabelWithBoard: fn(),
     getCardLabels: fn(),
+    getCardIdsWithLabel: fn(),
     // lib write seams
     createList: fn(),
     updateListTitle: fn(),
@@ -71,6 +73,7 @@ const h = vi.hoisted(() => {
     createComment: fn(),
     createAttachment: fn(),
     createActivityEntry: fn(),
+    notifyMentioned: fn(),
     createLabel: fn(),
     updateLabel: fn(),
     deleteLabel: fn(),
@@ -83,7 +86,8 @@ const h = vi.hoisted(() => {
       $transaction: vi.fn(),
       card: { update: vi.fn() },
       workspace: { findUnique: vi.fn() },
-      workspaceMember: { findFirst: vi.fn() },
+      workspaceMember: { findFirst: vi.fn(), findMany: vi.fn() },
+      notification: { create: vi.fn() },
       cardMember: { findUnique: vi.fn() },
       user: { findUnique: vi.fn() },
       board: { findUnique: vi.fn() },
@@ -118,6 +122,7 @@ vi.mock("@/lib/list", () => ({
 }));
 vi.mock("@/lib/card", () => ({
   getCardWithListAndBoard: h.getCardWithListAndBoard,
+  getArchivedCardWithListAndBoard: h.getArchivedCardWithListAndBoard,
   getCardWithListAndMembers: h.getCardWithListAndMembers,
   updateCardDetails: h.updateCardDetails,
   reorderCardWithinListByNeighbors: h.reorderCardWithinListByNeighbors,
@@ -125,6 +130,7 @@ vi.mock("@/lib/card", () => ({
 vi.mock("@/lib/label", () => ({
   getLabelWithBoard: h.getLabelWithBoard,
   getCardLabels: h.getCardLabels,
+  getCardIdsWithLabel: h.getCardIdsWithLabel,
   createLabel: h.createLabel,
   updateLabel: h.updateLabel,
   deleteLabel: h.deleteLabel,
@@ -134,7 +140,7 @@ vi.mock("@/lib/label", () => ({
 vi.mock("@/lib/comment", () => ({ createComment: h.createComment }));
 vi.mock("@/lib/attachment", () => ({ createAttachment: h.createAttachment }));
 vi.mock("@/lib/activity", () => ({ createActivityEntry: h.createActivityEntry }));
-vi.mock("@/lib/notification", () => ({ notifyCardAssigned: vi.fn(), notifyCommentOnCard: vi.fn() }));
+vi.mock("@/lib/notification", () => ({ notifyCardAssigned: vi.fn(), notifyCommentOnCard: vi.fn(), notifyMentioned: h.notifyMentioned }));
 vi.mock("@/lib/cloudinary", () => ({
   validateFileForUpload: h.validateFileForUpload,
   uploadToCloudinary: h.uploadToCloudinary,
@@ -155,6 +161,7 @@ import {
   deleteListAction,
   createCardAction,
   archiveCardAction,
+  restoreCardAction,
   reorderListAction,
   reorderCardAction,
   updateCardEstimateAction,
@@ -375,6 +382,51 @@ describe("archiveCardAction (card:delete)", () => {
     signInAs("u", WS_A, "editor");
     h.getCardWithListAndBoard.mockResolvedValue(cardWithListAndBoardFixture(WS_A));
     await archiveCardAction(form());
+    expect(h.db.$transaction).toHaveBeenCalled();
+  });
+});
+
+describe("restoreCardAction (card:delete)", () => {
+  const form = () => formData({ cardId: CARD_ID });
+  // Resolver requires an archived card; mirror cardWithListAndBoardFixture shape.
+  const archivedFixture = (ws: string) => cardWithListAndBoardFixture(ws);
+  it("A1 auth", async () => {
+    signOut();
+    await expect(restoreCardAction(form())).rejects.toThrow();
+    expectNoWrites(...writeSeams);
+  });
+  it("A2 viewer denied", async () => {
+    signInAs("u", WS_A, "viewer");
+    h.getArchivedCardWithListAndBoard.mockResolvedValue(archivedFixture(WS_A));
+    expect(await restoreCardAction(form())).toEqual({ success: false, error: "Card not found" });
+    expectNoWrites(...writeSeams);
+  });
+  it("A3 WS-B admin denied", async () => {
+    signInAs("u", WS_B, "admin");
+    h.getArchivedCardWithListAndBoard.mockResolvedValue(archivedFixture(WS_A));
+    expect(await restoreCardAction(form())).toEqual({ success: false, error: "Card not found" });
+    expectNoWrites(...writeSeams);
+  });
+  it("guard: archived board → not found, no write", async () => {
+    signInAs("u", WS_A, "editor");
+    const fixture = archivedFixture(WS_A);
+    h.getArchivedCardWithListAndBoard.mockResolvedValue({
+      ...fixture,
+      board: { ...fixture.board, archivedAt: new Date() },
+    });
+    expect(await restoreCardAction(form())).toEqual({ success: false, error: "Card not found" });
+    expectNoWrites(...writeSeams);
+  });
+  it("guard: not-archived/foreign id (resolver null) → not found, no write", async () => {
+    signInAs("u", WS_A, "editor");
+    h.getArchivedCardWithListAndBoard.mockResolvedValue(null);
+    expect(await restoreCardAction(form())).toEqual({ success: false, error: "Card not found" });
+    expectNoWrites(...writeSeams);
+  });
+  it("allow: WS-A editor reaches $transaction", async () => {
+    signInAs("u", WS_A, "editor");
+    h.getArchivedCardWithListAndBoard.mockResolvedValue(archivedFixture(WS_A));
+    await restoreCardAction(form());
     expect(h.db.$transaction).toHaveBeenCalled();
   });
 });
@@ -603,6 +655,35 @@ describe("createCommentAction (viewer IS allowed to comment)", () => {
     expect(await createCommentAction(form())).toEqual({ success: true, commentId: "cm" });
     expect(h.createComment).toHaveBeenCalled();
   });
+
+  it("calls notifyMentioned with @mention content", async () => {
+    signInAs("u", WS_A, "viewer");
+    h.getCardWithListAndBoard.mockResolvedValue(cardWithListAndBoardFixture(WS_A));
+    h.createComment.mockResolvedValue({ id: "cm", content: "@alice hello", createdAt: new Date(), updatedAt: null });
+    h.createActivityEntry.mockResolvedValue({ id: "a", action: "COMMENTED", createdAt: new Date() });
+    h.db.user.findUnique.mockResolvedValue({ name: "U", image: null });
+    h.db.board.findUnique.mockResolvedValue({ title: "B" });
+    expect(await createCommentAction(formData({ cardId: CARD_ID, content: "@alice hello" }))).toEqual({ success: true, commentId: "cm" });
+    expect(h.notifyMentioned).toHaveBeenCalled();
+    const callArg = h.notifyMentioned.mock.calls[0][0];
+    expect(callArg.content).toBe("@alice hello");
+    expect(callArg.cardId).toBe(CARD_ID);
+    expect(callArg.workspaceId).toBe(WS_A);
+  });
+
+  it("calls notifyMentioned without mention content (no-op)", async () => {
+    signInAs("u", WS_A, "viewer");
+    h.getCardWithListAndBoard.mockResolvedValue(cardWithListAndBoardFixture(WS_A));
+    h.createComment.mockResolvedValue({ id: "cm", content: "plain text", createdAt: new Date(), updatedAt: null });
+    h.createActivityEntry.mockResolvedValue({ id: "a", action: "COMMENTED", createdAt: new Date() });
+    h.db.user.findUnique.mockResolvedValue({ name: "U", image: null });
+    h.db.board.findUnique.mockResolvedValue({ title: "B" });
+    expect(await createCommentAction(formData({ cardId: CARD_ID, content: "plain text" }))).toEqual({ success: true, commentId: "cm" });
+    expect(h.notifyMentioned).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "plain text", cardId: CARD_ID }),
+    );
+    expect(h.createComment).toHaveBeenCalled();
+  });
 });
 
 describe("uploadAttachmentAction (card:update)", () => {
@@ -756,6 +837,7 @@ describe("updateLabelAction (board:update)", () => {
     signInAs("u", WS_A, "editor");
     h.getLabelWithBoard.mockResolvedValue(labelWithBoardFixture(WS_A, { labelId: LABEL_ID }));
     h.updateLabel.mockResolvedValue({ id: LABEL_ID, boardId: BOARD_A, name: "Bug", color: COLOR });
+    h.getCardIdsWithLabel.mockResolvedValue([]); // label-change fan-out (US-010): no cards to refresh here
     await updateLabelAction(form());
     expect(h.updateLabel).toHaveBeenCalled();
   });
@@ -783,6 +865,7 @@ describe("deleteLabelAction (board:update)", () => {
   it("allow: WS-A editor", async () => {
     signInAs("u", WS_A, "editor");
     h.getLabelWithBoard.mockResolvedValue(labelWithBoardFixture(WS_A, { labelId: LABEL_ID }));
+    h.getCardIdsWithLabel.mockResolvedValue([]); // captured before delete (US-010); none here
     h.deleteLabel.mockResolvedValue(undefined);
     await deleteLabelAction(form());
     expect(h.deleteLabel).toHaveBeenCalled();
