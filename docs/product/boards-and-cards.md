@@ -70,7 +70,9 @@ Each is icon + text with an accessible label (never colour-only). The row is
 omitted entirely when a card has none of these. Values reflect on the viewer's
 next board render/refresh; dedicated live broadcast of these fields is a
 follow-up (they behave like priority/cover today). The counts are aggregated
-server-side over FK-indexed columns so the board-load query stays bounded.
+server-side over FK-indexed columns so the board-load query stays bounded. The
+priority chip and the metadata badges use design-system colour utilities (not
+raw hex) so they stay legible in both light and dark mode (US-036).
 
 ## Ordering (Float gap positioning)
 
