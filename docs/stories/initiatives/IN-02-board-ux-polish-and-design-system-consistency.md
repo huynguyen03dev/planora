@@ -4,9 +4,9 @@
 
 in progress — opened 2026-06-26. **Shipped: US-028, US-029** (Theme A) **·
 US-030** (Theme B — complete, 2026-06-29) **· US-031, US-032, US-033** (Theme C —
-complete, 2026-06-29) **· US-034, US-035, US-040** (Theme D core) — all manual
-QA. Remaining: US-036/US-039 (Theme D), US-037/US-038 (Theme E) — reservations
-awaiting individual intake.
+complete, 2026-06-29) **· US-034, US-035, US-036, US-040** (Theme D) — all manual
+QA. Remaining: US-039 (Theme D, date picker), US-037/US-038 (Theme E) —
+reservations awaiting individual intake.
 
 ## Type
 
@@ -156,7 +156,7 @@ Next free id at authoring time is **US-028**.
 | US-035 | Replace hand-rolled UI with primitives: create-board buttons → `Button`; raw `<textarea>` → `Textarea`; member/comment/activity/mention rows → `Avatar` list | normal | ✅ **shipped 2026-06-26.** `card-detail-sheet.tsx`, `workspace-boards-view.tsx`, `workspace-section.tsx`. **Two listed swaps deliberately not done:** `@mention`→`Popover` (Radix Popover steals focus → breaks inline caret autocomplete; adopted `Avatar` inside the existing custom dropdown instead) and native date input→date picker (**deferred to US-039** — needs a `Calendar` primitive + `react-day-picker` dep US-034 didn't install). `workspace-item.tsx:32` was a sidebar disclosure toggle (initiative mislabel), left as-is. Manual QA desktop+375px. Story: `…/US-035-adopt-shadcn-primitives.md`. |
 | US-039 | Date picker: add `Calendar` primitive (+ `react-day-picker`) and replace the native `<input type="date">` in the card dialog | normal | **Spun off from US-035.** Needs the new primitive + dependency; `<input type="date">` is accessible today, so this is an enhancement, not a fix. |
 | US-040 | Production-grade `@mention` autocomplete: Floating UI positioning (flip/shift/auto-update) + full keyboard a11y + listbox ARIA, extracted to a reusable hook + caret util | normal | ✅ **shipped 2026-06-27.** Replaces the US-035/intake-#19 hand-rolled caret positioning. New `lib/caret-coordinates.ts` + `components/boards/use-mention-autocomplete.ts`; added `@floating-ui/react-dom` as a direct dep (was transitive via `radix-ui`); portaled to `body` (dialog has a `transform`). Keyboard (Arrow/Enter/Tab/Escape) + `aria-activedescendant`, no focus steal, flips above near viewport bottom. Manual QA. Story: `…/US-040-mention-autocomplete-floating-ui.md`. |
-| US-036 | Tokenize raw color literals: priority hex (`list-card-item.tsx:32-40`) and `border-white/*` / `bg-white/*` opacity literals (`board-header.tsx`) → CSS tokens; verify AA contrast | normal | Unblocks correct dark-mode + theming. |
+| US-036 | Tokenize raw color literals: priority hex (`list-card-item.tsx:32-40`) and `border-white/*` / `bg-white/*` opacity literals (`board-header.tsx`) → CSS tokens; verify AA contrast | normal | ✅ **shipped 2026-06-29.** `list-card-item.tsx`. `PRIORITY_CONFIG` raw hex + inline `style` → Tailwind palette utilities with `dark:` variants (`bg-red-500/10 text-red-700 dark:text-red-400`, …) — fixes dark-mode contrast (old dark `-700` fg was near-invisible on a dark card); light mode unchanged. **`board-header.tsx` white overlays deliberately kept:** they sit on the always-dark colour gradient (`boardTheme.header`, theme-independent), so white-on-colour is the correct AA-passing on-colour pattern — tokenizing them would flip with the theme and regress (rationale in the story). No field/action/schema change. Manual QA light + dark; 64 unit tests green. Intake #25. Story: `…/US-036-tokenize-priority-colors.md`. |
 
 ### Theme E — Boards-overview polish (P2, tiny/normal)
 

@@ -40,17 +40,31 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
-// Priority chip: soft tinted bg + dark icon/text. Distinct from solid label
+// Priority chip: soft tinted bg + tinted icon/text. Distinct from solid label
 // pills (different visual language) and accessible — icon + text, never
-// color-only. Foreground uses darkened hues so amber/yellow still meets contrast.
-const PRIORITY_CONFIG: Record<
-  string,
-  { label: string; tint: string; fg: string }
-> = {
-  URGENT: { label: "Urgent", tint: "#EF44441A", fg: "#B91C1C" },
-  HIGH: { label: "High", tint: "#F973161A", fg: "#C2410C" },
-  MEDIUM: { label: "Medium", tint: "#EAB3081A", fg: "#B45309" },
-  LOW: { label: "Low", tint: "#3B82F61A", fg: "#1D4ED8" },
+// color-only. Colors are Tailwind palette utilities (not raw hex) so the chip
+// follows the token system and adapts in dark mode — lighter foreground over a
+// slightly stronger tint keeps contrast on the darker card surface (US-036).
+const PRIORITY_CONFIG: Record<string, { label: string; className: string }> = {
+  URGENT: {
+    label: "Urgent",
+    className: "bg-red-500/10 text-red-700 dark:bg-red-500/15 dark:text-red-400",
+  },
+  HIGH: {
+    label: "High",
+    className:
+      "bg-orange-500/10 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400",
+  },
+  MEDIUM: {
+    label: "Medium",
+    className:
+      "bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400",
+  },
+  LOW: {
+    label: "Low",
+    className:
+      "bg-blue-500/10 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400",
+  },
 };
 
 function getInitials(name: string): string {
@@ -298,11 +312,10 @@ function ListCardItemComponent({
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       {card.priority ? (
                         <span
-                          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium"
-                          style={{
-                            backgroundColor: PRIORITY_CONFIG[card.priority].tint,
-                            color: PRIORITY_CONFIG[card.priority].fg,
-                          }}
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium",
+                            PRIORITY_CONFIG[card.priority].className,
+                          )}
                         >
                           <HugeiconsIcon
                             icon={Flag01Icon}
