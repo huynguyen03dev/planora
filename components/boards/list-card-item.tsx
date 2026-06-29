@@ -38,7 +38,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
+import { cn, getInitials } from "@/lib/utils";
 
 // Priority chip: soft tinted bg + tinted icon/text. Distinct from solid label
 // pills (different visual language) and accessible — icon + text, never
@@ -66,15 +66,6 @@ const PRIORITY_CONFIG: Record<string, { label: string; className: string }> = {
       "bg-blue-500/10 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400",
   },
 };
-
-function getInitials(name: string): string {
-  return name
-    .split(" ")
-    .map((part) => part[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-}
 
 function startOfDay(date: Date): Date {
   const copy = new Date(date);
