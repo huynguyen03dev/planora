@@ -4,7 +4,7 @@ import { BoardContent } from "@/app/(authenticated)/(dashboard)/boards/[boardId]
 import { BoardStoreProvider } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store-provider";
 import { BoardHeader } from "@/components/boards/board-header";
 import { CardDetailSheet } from "@/components/boards/card-detail-sheet";
-import { getBoardById } from "@/lib/board";
+import { getBoardById, getStarredBoardIds } from "@/lib/board";
 import {
   getBoardPagePermissionsForRole,
   getWorkspaceRole,
@@ -76,13 +76,15 @@ export default async function BoardPage({
 
   // Load lists + board labels first (needed regardless of card selection).
   // Archived cards only matter to users who can restore them (editor/admin).
-  const [lists, boardLabels, archivedCards] = await Promise.all([
+  const [lists, boardLabels, archivedCards, starredBoardIds] = await Promise.all([
     getListsByBoardId(boardId),
     getBoardLabels(boardId),
     canArchiveCard
       ? getArchivedCards(boardId)
       : Promise.resolve([] as ArchivedCardRecord[]),
+    getStarredBoardIds(userId),
   ]);
+  const isBoardStarred = starredBoardIds.includes(board.id);
 
   // Initialize data variables
   let selectedCard = null;
@@ -233,6 +235,7 @@ export default async function BoardPage({
             title: card.title,
             listTitle: card.listTitle,
           }))}
+          starred={isBoardStarred}
         />
 
         <div

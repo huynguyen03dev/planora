@@ -1,8 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { StarIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 
-import { updateBoardAction } from "@/app/(authenticated)/(dashboard)/boards/actions";
+import {
+  toggleBoardStarAction,
+  updateBoardAction,
+} from "@/app/(authenticated)/(dashboard)/boards/actions";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
 import { BoardFilter } from "@/components/boards/board-filter";
 import { BoardSearch } from "@/components/boards/board-search";
@@ -23,6 +28,7 @@ type BoardHeaderProps = {
   canDelete: boolean;
   canArchiveCard: boolean;
   archivedCards: ArchivedCardData[];
+  starred: boolean;
 };
 
 export function BoardHeader({
@@ -31,12 +37,31 @@ export function BoardHeader({
   canDelete,
   canArchiveCard,
   archivedCards,
+  starred,
 }: BoardHeaderProps) {
   const [draftTitle, setDraftTitle] = useState(board.title);
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
   const skipBlurSaveRef = useRef(false);
+
+  // Optimistic star state; pending also reads as starred so the toggle feels
+  // instant (mirrors the boards-overview BoardCard star).
+  const [isStarred, setIsStarred] = useState(starred);
+  const [starPending, startStarTransition] = useTransition();
+
+  function handleToggleStar() {
+    setIsStarred((prev) => !prev);
+    startStarTransition(async () => {
+      const result = await toggleBoardStarAction(board.id);
+      if (result.success) {
+        setIsStarred(result.starred);
+      } else {
+        // Revert on failure.
+        setIsStarred((prev) => !prev);
+      }
+    });
+  }
 
   const socketConnected = useBoardStore((s) => s.socketConnected);
   const [showReconnecting, setShowReconnecting] = useState(false);
@@ -175,10 +200,19 @@ export function BoardHeader({
             type="button"
             variant="outline"
             size="icon-sm"
-            className="rounded-full border-white/40 bg-white/15 text-white hover:bg-white/25"
-            aria-label="Toggle board favorite"
+            onClick={handleToggleStar}
+            disabled={starPending}
+            aria-pressed={isStarred}
+            aria-label={isStarred ? "Unstar board" : "Star board"}
+            className={`rounded-full border-white/40 bg-white/15 hover:bg-white/25 ${
+              isStarred ? "text-yellow-400 hover:text-yellow-300" : "text-white"
+            }`}
           >
-            *
+            <HugeiconsIcon
+              icon={StarIcon}
+              className="size-[18px] drop-shadow-sm"
+              fill={isStarred ? "currentColor" : "none"}
+            />
           </Button>
 
           <BoardSearch />
