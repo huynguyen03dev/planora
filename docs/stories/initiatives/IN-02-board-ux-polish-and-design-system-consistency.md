@@ -5,8 +5,8 @@
 in progress — opened 2026-06-26. **Shipped: US-028, US-029** (Theme A) **·
 US-030** (Theme B — complete, 2026-06-29) **· US-031, US-032, US-033** (Theme C —
 complete, 2026-06-29) **· US-034, US-035, US-036, US-039, US-040** (Theme D — complete,
-2026-06-29) — all manual QA. Remaining: US-037/US-038 (Theme E) — reservations
-awaiting individual intake.
+2026-06-29) **· US-038** (Theme E, 2026-06-29) — all manual QA. Remaining:
+US-037 (Theme E) — reservation awaiting individual intake.
 
 ## Type
 
@@ -163,7 +163,7 @@ Next free id at authoring time is **US-028**.
 | ID | Candidate story | Lane (est.) | Notes |
 | --- | --- | --- | --- |
 | US-037 | Board cards show info density (list/card count, last-updated, member avatars) instead of empty color blocks | normal | Low information density today. |
-| US-038 | Boards grid uses the full row width (cards cling to a narrow left column at ≥1440px) | tiny | Layout-only. |
+| US-038 | Boards grid uses the full row width (cards cling to a narrow left column at ≥1440px) | tiny | ✅ **shipped 2026-06-29.** Three board-tile containers (`boards-overview.tsx`, `workspace-section.tsx`, `workspace-boards-view.tsx`) switched from fixed-width `flex flex-wrap` to a responsive auto-fill grid (`minmax(13rem,1fr)`); tiles + create-board button made fluid (`w-44`→`w-full`); loading skeleton matched. Measured 5 even columns of ~229px at 1512px (was fixed 176px left-clinging); no overflow at 375px; light+dark QA; 514 tests green. Story: `docs/stories/epics/E02-board-experience/US-038-boards-grid-full-width.md`. Intake #27. |
 
 ## Recommended Sequencing
 

@@ -29,7 +29,7 @@ export function BoardsOverview({ workspaces, boards, starredBoardIds }: BoardsOv
           <h2 className="text-sm font-medium text-muted-foreground">
             ⭐ Starred
           </h2>
-          <div className="flex flex-wrap gap-4">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(13rem,1fr))] gap-4">
             {starredBoards.map((board) => (
               <BoardCard
                 key={board.id}
