@@ -119,6 +119,11 @@ type BoardStore = {
   filterLabelIds: string[];
   /** Client-only card search: title substring (case-insensitive). Empty = show all. */
   searchQuery: string;
+  /** Board-level "expand labels" preference (US-044): false = compact color bars,
+   *  true = full text pills. One decision shared by every card; held here (not in
+   *  per-card local state) so it survives realtime re-renders and never flickers
+   *  during a drag. */
+  expandLabels: boolean;
 
   setBoardId: (boardId: string) => void;
   setLists: (lists: ListWithCards[]) => void;
@@ -133,6 +138,7 @@ type BoardStore = {
   toggleLabelFilter: (labelId: string) => void;
   clearFilters: () => void;
   setSearchQuery: (query: string) => void;
+  toggleExpandLabels: () => void;
   reset: () => void;
 
   applyRemoteCardMoved: (payload: CardMovedPayload) => void;
@@ -160,6 +166,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
   watchers: [],
   filterLabelIds: [],
   searchQuery: "",
+  expandLabels: false,
 
   setBoardId: (boardId) => set({ boardId }),
 
@@ -210,6 +217,10 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
   // title does not contain the query, ANDed with the label filter.
   setSearchQuery: (query) => set({ searchQuery: query }),
 
+  // Board-wide compact↔expanded label toggle. One flag, every card reads it, so
+  // there is no per-card state to reset mid-drag (US-044).
+  toggleExpandLabels: () => set((state) => ({ expandLabels: !state.expandLabels })),
+
   reset: () => set({
     boardId: null,
     lists: [],
@@ -221,6 +232,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     watchers: [],
     filterLabelIds: [],
     searchQuery: "",
+    expandLabels: false,
   }),
 
   // Live presence: replace the watcher list with the server's authoritative set.
