@@ -556,17 +556,32 @@ function CardDetailDialogBody({
             </h2>
           )}
 
-          <DialogClose asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Close card"
-              className="shrink-0"
+          <div className="flex shrink-0 items-center gap-2 pt-1.5">
+            {/* Save/error status lives inline in the header (Google-Docs style) so
+                it takes no vertical room — it used to be an empty min-h spacer at
+                the top of the column that pushed the Description down (US-043). */}
+            <span
+              aria-live="polite"
+              title={error || (isPending ? "Saving…" : undefined)}
+              className={cn(
+                "max-w-[14rem] truncate text-xs",
+                error ? "text-destructive" : "text-muted-foreground",
+              )}
             >
-              <HugeiconsIcon icon={Cancel01Icon} size={18} strokeWidth={2} />
-            </Button>
-          </DialogClose>
+              {error ? error : isPending ? "Saving…" : null}
+            </span>
+
+            <DialogClose asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Close card"
+              >
+                <HugeiconsIcon icon={Cancel01Icon} size={18} strokeWidth={2} />
+              </Button>
+            </DialogClose>
+          </div>
         </div>
 
         {canEdit ? (
@@ -742,14 +757,6 @@ function CardDetailDialogBody({
       <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1.65fr)_minmax(320px,1fr)]">
         <div className="min-h-0 overflow-y-auto px-6 py-6">
           <div className="space-y-6">
-            <div aria-live="polite" className="min-h-5">
-              {error ? (
-                <p className="text-sm text-destructive">{error}</p>
-              ) : isPending ? (
-                <p className="text-sm text-muted-foreground">Saving…</p>
-              ) : null}
-            </div>
-
             <section className="space-y-3">
               <h3 className="text-base font-semibold">Description</h3>
 
