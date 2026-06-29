@@ -246,8 +246,6 @@ function CardDetailDialogBody({
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
 
-  const isDirty =
-    draftTitle.trim() !== card.title || draftDescription !== (card.description ?? "");
   const assignedMemberIds = new Set(assignees.map((member) => member.id));
   const availableMembers = assignableMembers.filter(
     (member) => !assignedMemberIds.has(member.id),
@@ -271,14 +269,28 @@ function CardDetailDialogBody({
     });
   }
 
-  function handleSave() {
+  // Unified save model (US-032): every field autosaves, so the three competing
+  // save surfaces (Save changes/Reset, Save estimate, Save due date) are gone.
+  // Title + description persist on blur; estimate, due date, and priority commit
+  // on change — matching the Priority control that already autosaved.
+  function saveDetails(nextTitle: string, nextDescription: string) {
     if (isPending) {
       return;
     }
 
-    const trimmedTitle = draftTitle.trim();
+    const trimmedTitle = nextTitle.trim();
     if (!trimmedTitle) {
-      setError("Title is required");
+      // Title is required — revert to the last persisted value rather than
+      // leaving the card in an unsaveable empty state.
+      setDraftTitle(card.title);
+      setError("Title cannot be empty — reverted to the previous title.");
+      return;
+    }
+
+    if (
+      trimmedTitle === card.title &&
+      nextDescription === (card.description ?? "")
+    ) {
       return;
     }
 
@@ -287,7 +299,7 @@ function CardDetailDialogBody({
     const formData = new FormData();
     formData.set("cardId", card.id);
     formData.set("title", trimmedTitle);
-    formData.set("description", draftDescription);
+    formData.set("description", nextDescription);
 
     startTransition(async () => {
       const result = await updateCardDetailsAction(formData);
@@ -297,29 +309,22 @@ function CardDetailDialogBody({
     });
   }
 
-  function handleCancel() {
-    setDraftTitle(card.title);
-    setDraftDescription(card.description ?? "");
-    setDraftEstimateHours(card.estimateHours?.toString() ?? "");
-    setDraftDueDate(toDateInputValue(card.dueDate));
-    setError("");
-  }
-
-  function handleSaveEstimate() {
+  function saveEstimate(nextEstimate: string) {
     if (!canEdit || isPending) {
       return;
     }
 
     const formData = new FormData();
     formData.set("cardId", card.id);
-    if (draftEstimateHours) {
-      formData.set("estimateHours", draftEstimateHours);
+    if (nextEstimate) {
+      formData.set("estimateHours", nextEstimate);
     }
 
     startTransition(async () => {
       const result = await updateCardEstimateAction(formData);
       if (!result.success) {
         setError(result.error);
+        setDraftEstimateHours(card.estimateHours?.toString() ?? "");
         return;
       }
       setError("");
@@ -327,21 +332,22 @@ function CardDetailDialogBody({
     });
   }
 
-  function handleSaveDueDate() {
+  function saveDueDate(nextDueDate: string) {
     if (!canEdit || isPending) {
       return;
     }
 
     const formData = new FormData();
     formData.set("cardId", card.id);
-    if (draftDueDate) {
-      formData.set("dueDate", draftDueDate);
+    if (nextDueDate) {
+      formData.set("dueDate", nextDueDate);
     }
 
     startTransition(async () => {
       const result = await updateCardDueDateAction(formData);
       if (!result.success) {
         setError(result.error);
+        setDraftDueDate(toDateInputValue(card.dueDate));
         return;
       }
       setError("");
@@ -434,7 +440,13 @@ function CardDetailDialogBody({
       <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1.65fr)_minmax(320px,1fr)]">
         <div className="min-h-0 overflow-y-auto px-6 py-6">
           <div className="space-y-6">
-            {error ? <p className="text-sm text-destructive">{error}</p> : null}
+            <div aria-live="polite" className="min-h-5">
+              {error ? (
+                <p className="text-sm text-destructive">{error}</p>
+              ) : isPending ? (
+                <p className="text-sm text-muted-foreground">Saving…</p>
+              ) : null}
+            </div>
 
             <section className="space-y-3">
               <div className="space-y-2">
@@ -449,17 +461,13 @@ function CardDetailDialogBody({
                       setDraftTitle(e.target.value);
                       setError("");
                     }}
+                    onBlur={() => saveDetails(draftTitle, draftDescription)}
                     disabled={isPending}
                     className="h-11 text-lg font-semibold"
                   />
                 ) : (
                   <h2 className="text-2xl font-semibold tracking-tight">{card.title}</h2>
                 )}
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <ActionChip label="Add" />
-                <ActionChip label="Members" />
               </div>
             </section>
 
@@ -479,6 +487,7 @@ function CardDetailDialogBody({
                     setDraftDescription(e.target.value);
                     setError("");
                   }}
+                  onBlur={() => saveDetails(draftTitle, draftDescription)}
                   disabled={isPending}
                   rows={10}
                   placeholder="Add a more detailed description..."
@@ -648,8 +657,10 @@ function CardDetailDialogBody({
                 <Select
                   value={draftEstimateHours === "" ? "none" : draftEstimateHours}
                   onValueChange={(value) => {
-                    setDraftEstimateHours(value === "none" ? "" : value);
+                    const next = value === "none" ? "" : value;
+                    setDraftEstimateHours(next);
                     setError("");
+                    saveEstimate(next);
                   }}
                   disabled={!canEdit || isPending || Boolean(card.completedAt)}
                 >
@@ -669,21 +680,6 @@ function CardDetailDialogBody({
                     Locked after first completion.
                   </p>
                 ) : null}
-                {canEdit ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={
-                      isPending ||
-                      Boolean(card.completedAt) ||
-                      draftEstimateHours === (card.estimateHours?.toString() ?? "")
-                    }
-                    onClick={handleSaveEstimate}
-                  >
-                    Save estimate
-                  </Button>
-                ) : null}
               </div>
 
               <div className="space-y-2">
@@ -695,22 +691,13 @@ function CardDetailDialogBody({
                   type="date"
                   value={draftDueDate}
                   onChange={(event) => {
-                    setDraftDueDate(event.target.value);
+                    const next = event.target.value;
+                    setDraftDueDate(next);
                     setError("");
+                    saveDueDate(next);
                   }}
                   disabled={!canEdit || isPending}
                 />
-                {canEdit ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={isPending || draftDueDate === toDateInputValue(card.dueDate)}
-                    onClick={handleSaveDueDate}
-                  >
-                    Save due date
-                  </Button>
-                ) : null}
               </div>
             </section>
 
@@ -800,28 +787,6 @@ function CardDetailDialogBody({
               attachments={attachments}
               canEdit={canEdit}
             />
-
-            {canEdit && (
-              <div className="flex items-center gap-2 border-t pt-4">
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={isPending || !isDirty}
-                  onClick={handleSave}
-                >
-                  {isPending ? "Saving..." : "Save changes"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={isPending || !isDirty}
-                  onClick={handleCancel}
-                >
-                  Reset
-                </Button>
-              </div>
-            )}
           </div>
         </div>
 
@@ -869,25 +834,6 @@ function CardDetailDialogBody({
         </aside>
       </div>
     </div>
-  );
-}
-
-type ActionChipProps = {
-  label: string;
-};
-
-function ActionChip({ label }: ActionChipProps) {
-  return (
-    <button
-      type="button"
-      disabled
-      className={cn(
-        "rounded-md border bg-background px-3 py-2 text-sm text-muted-foreground",
-        "disabled:cursor-default disabled:opacity-100",
-      )}
-    >
-      {label}
-    </button>
   );
 }
 
