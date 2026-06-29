@@ -51,7 +51,14 @@ type ListColumnProps = {
       position: number;
       coverImage: string | null;
       priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
+      dueDate: Date | null;
+      completedAt: Date | null;
       labels: Array<{ id: string; name: string; color: string }>;
+      members: Array<{ id: string; name: string; image: string | null }>;
+      memberCount: number;
+      checklistDone: number;
+      checklistTotal: number;
+      commentCount: number;
     }>;
   };
   index: number;

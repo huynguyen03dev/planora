@@ -330,6 +330,7 @@ model Checklist {
 
   items ChecklistItem[]
 
+  @@index([cardId])
   @@map("checklist")
 }
 
@@ -342,6 +343,7 @@ model ChecklistItem {
   position    Float
   createdAt   DateTime  @default(now())
 
+  @@index([checklistId])
   @@map("checklistItem")
 }
 
@@ -355,6 +357,7 @@ model Comment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([cardId])
   @@map("comment")
 }
 

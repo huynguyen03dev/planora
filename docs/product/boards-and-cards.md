@@ -53,11 +53,24 @@ carry rich metadata. All mutations are Server Actions under
 
 | Feature | Model | Action(s) | Notes |
 | --- | --- | --- | --- |
-| Assignees | `CardMember` | `assignCardMemberAction`, `removeCardMemberAction` | Workspace members only; assignment notifies + emails; assign/remove broadcast live via `card:members-updated` so an open card detail sheet on another client updates without reload (US-011). Members render in the detail sheet only, not the card face. |
+| Assignees | `CardMember` | `assignCardMemberAction`, `removeCardMemberAction` | Workspace members only; assignment notifies + emails; assign/remove broadcast live via `card:members-updated` so an open card detail sheet on another client updates without reload (US-011). Members render in the detail sheet **and** as a capped avatar stack on the card face (up to 3 + a `+N` overflow), surfaced from the board-view payload (US-030). |
 | Labels | `Label` / `CardLabel` | `createLabelAction`, `updateLabelAction`, `deleteLabelAction`, `addCardLabelAction`, `removeCardLabelAction` | Board-scoped, named + colored (palette from `BOARD_COLORS`); attached per card. Label-set CRUD reuses `board:["update"]`, attach/detach reuse `card:["update"]` — no dedicated `label` permission statement (US-005). Managed in the card detail sheet; colored chips render on the card face in the board view; attach/detach broadcast live via the `card:labels-updated` socket event; label rename/recolor/delete fan that same event out per affected card so chips refresh live for other viewers (US-010). |
-| Checklists | `Checklist` / `ChecklistItem` | `createChecklistAction`, `deleteChecklistAction`, `createChecklistItemAction`, `toggleChecklistItemAction`, `deleteChecklistItemAction` | Card content; reuse `card:["update"]` (viewer denied) — no dedicated `checklist` permission. Ordered items with `isCompleted`, float-gap positioned. Deleting a checklist cascades to its items. Rendered in the card detail sheet (US-015). Rename/reorder and cross-client realtime are deferred follow-ups (slice 1 revalidates rather than emitting). |
-| Comments | `Comment` | `createCommentAction` | Notifies + emails; applied live over socket |
+| Checklists | `Checklist` / `ChecklistItem` | `createChecklistAction`, `deleteChecklistAction`, `createChecklistItemAction`, `toggleChecklistItemAction`, `deleteChecklistItemAction` | Card content; reuse `card:["update"]` (viewer denied) — no dedicated `checklist` permission. Ordered items with `isCompleted`, float-gap positioned. Deleting a checklist cascades to its items. Rendered in the card detail sheet (US-015); the card face shows checklist progress (`done/total`) from the board-view payload (US-030). Rename/reorder and cross-client realtime are deferred follow-ups (slice 1 revalidates rather than emitting). |
+| Comments | `Comment` | `createCommentAction` | Notifies + emails; applied live over socket. The card face shows the comment count from the board-view payload (US-030). |
 | Attachments | `Attachment` | `uploadAttachmentAction` | Cloudinary-hosted; orphan cleanup on failure |
+
+### Card face (board view)
+
+Beyond labels and the priority chip, the card face renders a metadata row from
+the board-view payload (US-030, decision 0011): a **due-date badge** with state
+(`overdue` / `today` / `soon` / `upcoming`, and `done` once `completedAt` is set —
+a completed card never reads as overdue), **assignee avatars** (capped stack +
+`+N` overflow), **checklist progress** (`done/total`), and the **comment count**.
+Each is icon + text with an accessible label (never colour-only). The row is
+omitted entirely when a card has none of these. Values reflect on the viewer's
+next board render/refresh; dedicated live broadcast of these fields is a
+follow-up (they behave like priority/cover today). The counts are aggregated
+server-side over FK-indexed columns so the board-load query stays bounded.
 
 ## Ordering (Float gap positioning)
 
@@ -104,10 +117,10 @@ normalizes positions on overflow. The neighbour math is pure and unit-tested in
   and drop positions are never corrupted (see `lib/dnd/apply-drop.ts`).
 - A list whose cards are all narrowed out (by filter and/or search) shows a
   "No cards match" hint instead of the empty "No cards yet" placeholder.
-- Filtering by **assignee** and **due date** is a planned follow-up slice: the
-  board-view card payload carries `labels` but not `dueDate`/`assignees` yet
-  (those live in the card detail sheet), so those dimensions need the card
-  payload enriched first.
+- Filtering by **assignee** and **due date** is a planned follow-up slice. The
+  board-view card payload now carries `dueDate` and a capped `assignees` list
+  (plus checklist progress and comment count) for the card face (US-030), so the
+  data those filters need already exists — only the filter UI/logic remains.
 
 ## Responsive / mobile (US-021)
 

@@ -152,7 +152,14 @@ export default async function BoardPage({
       position: card.position,
       coverImage: card.coverImage,
       priority: card.priority,
+      dueDate: card.dueDate,
+      completedAt: card.completedAt,
       labels: card.labels,
+      members: card.members,
+      memberCount: card.memberCount,
+      checklistDone: card.checklistDone,
+      checklistTotal: card.checklistTotal,
+      commentCount: card.commentCount,
     })),
   }));
 
