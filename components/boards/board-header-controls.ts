@@ -13,5 +13,8 @@ export const boardHeaderControlActiveClass = "border-white/70 bg-white/30 text-w
 
 // Ring/fill for the live-presence avatars so they read on the colored header
 // instead of inheriting the dark theme's near-black ring-background + bg-muted.
-export const boardHeaderAvatarRingClass = "*:data-[slot=avatar]:ring-white/50";
-export const boardHeaderAvatarFallbackClass = "bg-white/90 text-neutral-700";
+// A dark ring keeps the avatars light (clean on the colored header in both
+// themes) while still giving each a clear outline that separates them where they
+// overlap (-space-x-2) — the ring just has to contrast the light fill.
+export const boardHeaderAvatarRingClass = "*:data-[slot=avatar]:ring-black/40";
+export const boardHeaderAvatarFallbackClass = "bg-white text-slate-700";

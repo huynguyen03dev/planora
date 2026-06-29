@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { PresenceRegistry } from "./presence";
 import type { Watcher } from "./types";
 
-const alice: Watcher = { id: "u-alice", name: "Alice", image: null };
-const bob: Watcher = { id: "u-bob", name: "Bob", image: "https://img/bob" };
+const alice: Watcher = { id: "u-alice", name: "Alice", image: null, role: "admin" };
+const bob: Watcher = { id: "u-bob", name: "Bob", image: "https://img/bob", role: "editor" };
 
 describe("PresenceRegistry", () => {
   it("adds a watcher and reports a visible change", () => {
