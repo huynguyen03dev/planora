@@ -2,7 +2,14 @@
 
 ## Status
 
-planned
+done — implemented 2026-06-30 on `feat/us-055-unread-noncolor-signal`; manual QA
+passed (light + dark, no console errors). Unread notification rows now carry a
+**non-color signal** beyond the dot: the title renders `font-semibold` (vs
+`font-normal` for read rows) — a weight contrast perceivable in grayscale — plus
+an `sr-only "Unread: "` prefix for assistive tech, and the color dot is marked
+`aria-hidden`. Applied to **both** the bell dropdown (the AC surface) and the
+full-page `/notifications` list (the identical-markup sibling — same WCAG 1.4.1
+defect). Bell left as-is. See Evidence.
 
 ## Lane
 
@@ -73,4 +80,39 @@ None.
 
 ## Evidence
 
-_Pending implementation._
+**The fix — a weight-based non-color channel.** Per the AC's "cheapest sufficient
+fix" (Design Notes): keep the color dot but make the unread state legible without
+color via title **weight** (the non-color channel) plus a screen-reader cue.
+
+- Unread row title: `font-semibold`; read row title: `font-normal` (was
+  `font-medium` for both — no distinction).
+- `<span className="sr-only">Unread: </span>` prefixes the unread title so
+  assistive tech announces the state (the visual weight is invisible to AT).
+- The `bg-primary` dot is now `aria-hidden="true"` — it's decorative once the
+  weight + sr-only label carry the state (avoids a redundant/ambiguous AT cue).
+- Read rows keep their existing `opacity-60`; unread rows keep `bg-accent/50`.
+
+**Two surfaces, one defect.** The AC names the dropdown
+(`components/notifications/notification-dropdown.tsx`), but the full-page list
+(`app/(authenticated)/(dashboard)/notifications/notifications-list-client.tsx`)
+had the **identical** color-only dot + uniform `font-medium` rows — same WCAG
+1.4.1 / §393 gap. Fixing one surface while leaving its twin would be inconsistent,
+so the same change landed on both. The **bell**
+(`notification-bell.tsx`) was already conformant (numeric count badge +
+`aria-label="Notifications (N unread)"`) and was left untouched.
+
+**Manual QA — light + dark, no console errors (2026-06-30).** Seeded one unread +
+one read notification for the logged-in user, then verified and removed them.
+- **Dropdown** (DOM-verified via `getComputedStyle`): unread title
+  `font-weight: 600`, `sr-only "Unread: "` present, row `opacity: 1`, dot present
+  & `aria-hidden`; read title `font-weight: 400`, no sr-only, row `opacity: 0.6`,
+  no dot.
+- **Full-page `/notifications`**: same DOM result; screenshotted in both themes —
+  the bold-vs-normal weight contrast reads clearly in grayscale (the unread row is
+  visibly heavier independent of the blue dot/tint). Screenshots in scratchpad
+  `qa055/`: `02-page-light`, `03-page-dark`.
+- `list_console_messages` (error+warn) returned none on the notifications page.
+
+**Automated checks (2026-06-30):** `tsc --noEmit` clean (pre-existing untracked
+`scripts/perf-measure.ts`/`seed-perf-board.ts` errors excluded — not this branch);
+ESLint on the 2 touched files = 0 errors; `npm test` = 523/523 pass.

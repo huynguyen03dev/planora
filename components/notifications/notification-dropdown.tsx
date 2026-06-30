@@ -269,7 +269,18 @@ export function NotificationDropdown({
                 }`}
               >
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium leading-tight">{item.title}</p>
+                  <p
+                    className={`text-sm leading-tight ${
+                      item.isRead ? "font-normal" : "font-semibold"
+                    }`}
+                  >
+                    {/* Non-color unread signal (WCAG 1.4.1 / DESIGN.md §393): the
+                        title weight (semibold vs normal) carries the unread state
+                        in grayscale, alongside the color dot. The sr-only label
+                        gives the same cue to assistive tech. */}
+                    {!item.isRead && <span className="sr-only">Unread: </span>}
+                    {item.title}
+                  </p>
                   <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
                     {item.message}
                   </p>
@@ -278,7 +289,10 @@ export function NotificationDropdown({
                   </p>
                 </div>
                 {!item.isRead && (
-                  <span className="mt-1.5 size-2 shrink-0 rounded-full bg-primary" />
+                  <span
+                    aria-hidden="true"
+                    className="mt-1.5 size-2 shrink-0 rounded-full bg-primary"
+                  />
                 )}
               </button>
             ),
