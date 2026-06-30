@@ -261,7 +261,7 @@ function ListCardItemComponent({
                           variant="ghost"
                           size="icon-sm"
                           aria-label="Drag card"
-                          className="cursor-grab text-muted-foreground hover:bg-muted hover:text-foreground active:cursor-grabbing"
+                          className="cursor-grab text-muted-foreground hover:bg-foreground/10 hover:text-foreground active:cursor-grabbing"
                           {...provided.dragHandleProps}
                         >
                           <HugeiconsIcon
@@ -281,7 +281,7 @@ function ListCardItemComponent({
                               variant="ghost"
                               size="icon-sm"
                               aria-label="Card actions"
-                              className="text-muted-foreground hover:bg-muted hover:text-foreground"
+                              className="text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
                             >
                               <HugeiconsIcon
                                 icon={MoreHorizontalIcon}
