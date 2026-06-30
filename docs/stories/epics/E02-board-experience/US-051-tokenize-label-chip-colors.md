@@ -2,7 +2,11 @@
 
 ## Status
 
-planned
+done — implemented 2026-06-30 on `feat/us-051-tokenize-label-chips`; manual QA
+passed (light + dark, DOM-verified per-hue token resolution + measured contrast).
+The `text-white`-on-raw-fill AA defect is retired; the 8 `BOARD_COLORS` hues each
+map to an AA-passing tint/foreground pair in both themes (decision 0014). See
+Evidence.
 
 ## Lane
 
@@ -109,4 +113,83 @@ When updating durable proof status, use numeric booleans:
 
 ## Evidence
 
-_Pending implementation. Must include the per-hue measured-contrast table._
+**Tokens (decision 0014):** 8 `BOARD_COLORS` hues × (tint + foreground) × 2 themes
+= **32 measured values** added to `app/globals.css` (`:root` + `.dark`), with
+`--color-label-*` aliases wired in the `@theme inline` block and a measured-AA
+comment per theme. Hue angle for each pair is derived from the stored hex; light
+tints sit at L≈0.95 + deep text (L≈0.51–0.55), dark tints at L≈0.30 + bright text
+(L=0.80, matching `--success-foreground` dark for token-family coherence).
+
+**Mapping defined once:** `lib/label-colors.ts` — `labelHue(color)` maps a stored
+`BOARD_COLORS` hex → its hue key (keyed off `BOARD_COLORS` so the palette and the
+token set can't drift); `labelChipStyle` returns `{ backgroundColor:
+var(--label-<hue>), color: var(--label-<hue>-fg) }` and `labelSwatchStyle` returns
+tint bg + deeper-hue `borderColor` for no-text hue indicators. Legacy /
+out-of-palette colors **fall back to the neutral gray pair**.
+
+**Migration (4 components):**
+
+| Site | Was | Now |
+| --- | --- | --- |
+| `label-mark.tsx` chip (card face) | solid fill + `text-white`, `rounded` | `labelChipStyle` tint+text, `rounded-sm` |
+| `card-labels-section.tsx:99` attached chips | solid fill + `text-white`, `rounded-md` | `labelChipStyle` tint+text, `rounded-sm`; × inherits text color |
+| `card-labels-section.tsx:141`/`:249` swatches | raw `backgroundColor` | `labelSwatchStyle` tint + deeper-hue `border` |
+| `board-filter.tsx:82` filter dot | raw `backgroundColor` | `labelSwatchStyle` tint + deeper-hue `border` |
+| `color-palette.tsx` picker | `hover:opacity-90`, `border-black/10` | `hover:brightness-95` (tonal, §68), `border-border`; active check keeps the ring as the non-color signal + a drop-shadow for glyph legibility |
+
+The compact **bar** form in `label-mark.tsx` keeps its raw hue + colorblind
+texture overlay (the AC preserve). The picker swatches keep the **saturated**
+`BOARD_COLORS` hues (selecting the source identity — the AC allows raw hue for
+no-text swatches); only the *display* surfaces adopt the tint language. No
+`text-white` + raw-`backgroundColor` label **chip** literal remains
+(grep-verified; the only residual `text-white` is the picker's checkmark glyph on
+its saturated swatch, reinforced by the active ring).
+
+**Note — a 5th site beyond the story's "four":** the board label-filter dot
+(`board-filter.tsx:82`) wasn't in the story's enumerated list but is the same
+no-text hue-indicator pattern, so it was migrated to `labelSwatchStyle` for
+consistency.
+
+**Measured WCAG contrast** (computed oklch→sRGB; AA normal text ≥4.5:1 — text-xs/
+text-sm chips are normal, not large, so 4.5:1 applies):
+
+| Hue | OKLCH hue | Light fg/tint | Dark fg/tint |
+| --- | --- | --- | --- |
+| Blue | 244.95 | 4.61:1 | 7.34:1 |
+| Green | 138.64 | 4.66:1 | 7.44:1 |
+| Orange | 71.08 | 4.66:1 | 7.23:1 |
+| Red | 32.62 | 4.65:1 | 7.18:1 |
+| Purple | 313.63 | 4.65:1 | 7.15:1 |
+| Pink | 352.70 | 4.61:1 | 7.11:1 |
+| Gray | 231.78 | 4.63:1 | 7.37:1 |
+| Teal | 215.91 | 4.60:1 | 7.44:1 |
+
+All 16 pairs ≥4.5:1; fg vs the card surface runs higher (light 5.27–5.44, dark
+9.05–10.0).
+
+**Manual QA — light + dark, no console errors/warnings:**
+
+- DOM-verified `getComputedStyle` on rendered chips. The QA board's seeded labels
+  used legacy Tailwind hex (`#22c55e`, `#3b82f6`…), **not** `BOARD_COLORS` values,
+  so they exercised the **gray fallback** — all chips correctly resolved to
+  `--label-gray`/`--label-gray-fg` (proving both the tint+text mechanism and the
+  fallback). To prove the distinct per-hue pairs end-to-end, four labels were
+  recolored through the real picker UI to Red / Green / Orange / Teal (the light
+  hues that were the actual white-on-fill AA defect); each chip then resolved to
+  its exact `--label-<hue>` / `--label-<hue>-fg` pair, confirmed against the
+  document-level token values in both themes (light + `.dark`).
+- The attach-list and filter swatches render tint bg + deeper-hue 1px border; the
+  card-face bar keeps its texture; the × remove control inherits the chip text
+  color. Dark theme: chips show deep tint + bright same-hue text, legible on the
+  near-black card. The dark cascade shipped (clean `.next` restart — same stale
+  Turbopack cache gotcha as US-049/050 was pre-empted).
+
+**Automated checks (2026-06-30):** ESLint on the 4 changed components +
+`lib/label-colors.ts` = 0 errors; `tsc --noEmit` clean (the lone errors are in
+untracked `scripts/perf-measure.ts`/`seed-perf-board.ts`, not on this branch);
+`npm test` = 523/523 pass. (`npm run build` only fails on the offline Google-Fonts
+fetch in `app/layout.tsx` — an environment limitation, not a code error; types are
+proven by `tsc`.)
+
+Screenshots (scratchpad `qa051/`): `01-board-light-chips`, `02-picker-light`,
+`03-carddetail-light`, `04-carddetail-dark`.

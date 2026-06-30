@@ -22,6 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { ColorPalette } from "@/components/boards/color-palette";
 import { DEFAULT_BOARD_COLOR } from "@/lib/constants";
+import { labelChipStyle, labelSwatchStyle } from "@/lib/label-colors";
 import { cn } from "@/lib/utils";
 
 export type LabelChip = {
@@ -94,17 +95,20 @@ export function CardLabelsSection({
       ) : (
         <div className="flex flex-wrap gap-2">
           {attached.map((label) => (
+            // Tinted chip (US-051): per-hue tint bg + deeper same-hue text, name
+            // as the non-color channel. The remove × inherits the chip's text
+            // color (currentColor) and dims on idle.
             <span
               key={label.id}
-              className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm font-medium text-white"
-              style={{ backgroundColor: label.color }}
+              className="inline-flex items-center gap-1.5 rounded-sm px-2.5 py-1 text-sm font-medium"
+              style={labelChipStyle(label.color)}
             >
               {label.name}
               {canEdit ? (
                 <button
                   type="button"
                   aria-label={`Remove ${label.name}`}
-                  className="text-white/80 hover:text-white disabled:opacity-50"
+                  className="opacity-70 hover:opacity-100 disabled:opacity-50"
                   disabled={isPending}
                   onClick={() => toggleAttached(label.id, true)}
                 >
@@ -137,8 +141,8 @@ export function CardLabelsSection({
                   }
                 >
                   <span
-                    className="h-4 w-6 rounded"
-                    style={{ backgroundColor: label.color }}
+                    className="h-4 w-6 rounded-sm border"
+                    style={labelSwatchStyle(label.color)}
                   />
                   <span className="flex-1">{label.name}</span>
                   <span className="text-xs text-muted-foreground">
@@ -245,8 +249,8 @@ function ManageLabelsDialog({ boardId, boardLabels }: ManageLabelsDialogProps) {
                   className="flex items-center gap-2 rounded-md border px-2 py-1.5"
                 >
                   <span
-                    className="h-4 w-6 rounded"
-                    style={{ backgroundColor: label.color }}
+                    className="h-4 w-6 rounded-sm border"
+                    style={labelSwatchStyle(label.color)}
                   />
                   <span className="flex-1 text-sm">{label.name}</span>
                   <Button

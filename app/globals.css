@@ -42,6 +42,23 @@
   --color-selected-foreground: var(--selected-foreground);
   --color-selected-tint: var(--selected-tint);
   --color-selected-tint-foreground: var(--selected-tint-foreground);
+  /* US-051 per-hue label tint/foreground pairs (one per BOARD_COLORS hue). */
+  --color-label-blue: var(--label-blue);
+  --color-label-blue-fg: var(--label-blue-fg);
+  --color-label-green: var(--label-green);
+  --color-label-green-fg: var(--label-green-fg);
+  --color-label-orange: var(--label-orange);
+  --color-label-orange-fg: var(--label-orange-fg);
+  --color-label-red: var(--label-red);
+  --color-label-red-fg: var(--label-red-fg);
+  --color-label-purple: var(--label-purple);
+  --color-label-purple-fg: var(--label-purple-fg);
+  --color-label-pink: var(--label-pink);
+  --color-label-pink-fg: var(--label-pink-fg);
+  --color-label-gray: var(--label-gray);
+  --color-label-gray-fg: var(--label-gray-fg);
+  --color-label-teal: var(--label-teal);
+  --color-label-teal-fg: var(--label-teal-fg);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
@@ -96,6 +113,28 @@
   --selected-foreground: oklch(0.985 0 0);
   --selected-tint: oklch(0.95 0.03 262);
   --selected-tint-foreground: oklch(0.45 0.16 262);
+  /* US-051 label-chip tokens (light) — Notion tinted pattern: a pale per-hue tint
+     bg + deeper same-hue text, modeled on --selected-tint (decision 0014). One
+     pair per BOARD_COLORS hue (hue angle derived from the stored hex). The name
+     is the non-color channel. Text-vs-tint contrast measured (AA ≥4.5:1 normal):
+     blue 4.61 · green 4.66 · orange 4.66 · red 4.65 · purple 4.65 · pink 4.61 ·
+     gray 4.63 · teal 4.60. (fg vs the white card runs higher, 5.27–5.44.) */
+  --label-blue: oklch(0.95 0.026 244.952);
+  --label-blue-fg: oklch(0.526 0.133 244.952);
+  --label-green: oklch(0.95 0.045 138.637);
+  --label-green-fg: oklch(0.514 0.16 138.637);
+  --label-orange: oklch(0.95 0.038 71.081);
+  --label-orange-fg: oklch(0.53 0.115 71.081);
+  --label-red: oklch(0.95 0.025 32.619);
+  --label-red-fg: oklch(0.542 0.16 32.619);
+  --label-purple: oklch(0.95 0.034 313.63);
+  --label-purple-fg: oklch(0.542 0.16 313.63);
+  --label-pink: oklch(0.95 0.029 352.7);
+  --label-pink-fg: oklch(0.546 0.16 352.7);
+  --label-gray: oklch(0.95 0.029 231.775);
+  --label-gray-fg: oklch(0.522 0.107 231.775);
+  --label-teal: oklch(0.95 0.038 215.909);
+  --label-teal-fg: oklch(0.522 0.093 215.909);
   --chart-1: oklch(0.809 0.105 251.813);
   --chart-2: oklch(0.623 0.214 259.815);
   --chart-3: oklch(0.546 0.245 262.881);
@@ -150,6 +189,27 @@
   --selected-foreground: oklch(0.985 0 0);
   --selected-tint: oklch(0.3 0.07 262);
   --selected-tint-foreground: oklch(0.9 0.05 262);
+  /* US-051 label-chip tokens (dark) — deep per-hue tint bg + bright same-hue text
+     (fg L=0.80, matching --success-foreground dark for token-family coherence).
+     Text-vs-tint contrast measured (AA ≥4.5:1 normal): blue 7.34 · green 7.44 ·
+     orange 7.23 · red 7.18 · purple 7.15 · pink 7.11 · gray 7.37 · teal 7.44.
+     (fg vs the dark card runs higher, 9.05–10.0.) */
+  --label-blue: oklch(0.3 0.07 244.952);
+  --label-blue-fg: oklch(0.8 0.109 244.952);
+  --label-green: oklch(0.3 0.07 138.637);
+  --label-green-fg: oklch(0.8 0.13 138.637);
+  --label-orange: oklch(0.3 0.068 71.081);
+  --label-orange-fg: oklch(0.8 0.13 71.081);
+  --label-red: oklch(0.3 0.07 32.619);
+  --label-red-fg: oklch(0.8 0.116 32.619);
+  --label-purple: oklch(0.3 0.07 313.63);
+  --label-purple-fg: oklch(0.8 0.13 313.63);
+  --label-pink: oklch(0.3 0.07 352.7);
+  --label-pink-fg: oklch(0.8 0.13 352.7);
+  --label-gray: oklch(0.3 0.064 231.775);
+  --label-gray-fg: oklch(0.8 0.123 231.775);
+  --label-teal: oklch(0.3 0.055 215.909);
+  --label-teal-fg: oklch(0.8 0.13 215.909);
   --chart-1: oklch(0.809 0.105 251.813);
   --chart-2: oklch(0.623 0.214 259.815);
   --chart-3: oklch(0.546 0.245 262.881);
