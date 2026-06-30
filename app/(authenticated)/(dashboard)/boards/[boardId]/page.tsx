@@ -228,7 +228,9 @@ export default async function BoardPage({
       canEditCard={canEditCard}
       canArchiveCard={canArchiveCard}
     >
-      <div className="flex h-full min-h-0 flex-1 flex-col p-3 sm:p-6">
+      {/* Pin the board to the viewport minus the 56px (3.5rem) app header so the
+          page itself never scrolls; lists scroll their cards internally instead. */}
+      <div className="flex h-[calc(100vh-3.5rem)] min-h-0 flex-col overflow-hidden p-3 sm:p-6">
         <BoardHeader
           board={{
             id: board.id,
@@ -247,7 +249,7 @@ export default async function BoardPage({
         />
 
         <div
-          className="-mt-px flex flex-1 flex-col rounded-b-xl border border-t-0 border-white/20"
+          className="-mt-px flex min-h-0 flex-1 flex-col overflow-hidden rounded-b-xl border border-t-0 border-white/20"
           style={{ background: boardTheme.surface }}
         >
           <BoardContent
