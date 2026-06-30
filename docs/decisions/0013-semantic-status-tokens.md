@@ -4,7 +4,23 @@ Date: 2026-06-30
 
 ## Status
 
-Proposed
+Accepted — implemented and contrast-verified in US-050 (2026-06-30).
+
+## Committed Values
+
+`app/globals.css`, both themes, oklch (tint + deeper/brighter same-hue text):
+
+| Token | `:root` (light) | `.dark` |
+| --- | --- | --- |
+| `--success` | `oklch(0.95 0.04 150)` | `oklch(0.32 0.06 150)` |
+| `--success-foreground` | `oklch(0.5 0.15 150)` | `oklch(0.8 0.13 150)` |
+| `--warning` | `oklch(0.95 0.06 80)` | `oklch(0.33 0.05 75)` |
+| `--warning-foreground` | `oklch(0.52 0.12 70)` | `oklch(0.84 0.11 85)` |
+
+Measured WCAG (text ≥4.5:1): light success-fg 5.54:1 vs white card / 4.85:1 vs
+its tint; light warning-fg 5.65:1 / 4.82:1; dark success-fg 10.07:1 vs card /
+6.96:1 vs tint; dark warning-fg 10.91:1 / 7.50:1. Green hue ~150 and amber
+~70–80 are both distinct from the blue chart ramp (~260).
 
 ## Context
 

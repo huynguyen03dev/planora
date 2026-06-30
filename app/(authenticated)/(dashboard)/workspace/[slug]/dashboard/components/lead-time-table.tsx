@@ -29,14 +29,14 @@ function DueDateBadge({ row }: { row: LeadTimeRow }) {
 
   if (row.wasLate) {
     return (
-      <span className="rounded-full bg-red-500/10 px-2 py-1 text-xs font-medium text-red-700 dark:text-red-400">
+      <span className="rounded-full bg-destructive/10 px-2 py-1 text-xs font-medium text-destructive">
         Late
       </span>
     );
   }
 
   return (
-    <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+    <span className="rounded-full bg-success px-2 py-1 text-xs font-medium text-success-foreground">
       On time
     </span>
   );

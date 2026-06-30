@@ -2,7 +2,8 @@
 
 ## Status
 
-planned
+done — implemented 2026-06-30 on `feat/us-050-semantic-status-tokens`; manual QA
+passed (light + dark, DOM-verified + compiled-CSS token check). See Evidence.
 
 ## Lane
 
@@ -103,5 +104,59 @@ When updating durable proof status, use numeric booleans:
 
 ## Evidence
 
-_Pending implementation. Must include the committed token values + measured WCAG
-contrast table (per US-042's precedent)._
+**Tokens** (`app/globals.css`, both themes, with measured-AA comments; aliases
+wired in `@theme inline`):
+
+| Token | `:root` (light) | `.dark` |
+| --- | --- | --- |
+| `--success` | `oklch(0.95 0.04 150)` | `oklch(0.32 0.06 150)` |
+| `--success-foreground` | `oklch(0.5 0.15 150)` | `oklch(0.8 0.13 150)` |
+| `--warning` | `oklch(0.95 0.06 80)` | `oklch(0.33 0.05 75)` |
+| `--warning-foreground` | `oklch(0.52 0.12 70)` | `oklch(0.84 0.11 85)` |
+
+**Measured WCAG contrast** (computed oklch→sRGB; text needs ≥4.5:1):
+
+| Pair | Light: vs card / vs tint | Dark: vs card / vs tint |
+| --- | --- | --- |
+| success-foreground | 5.54:1 / 4.85:1 | 10.07:1 / 6.96:1 |
+| warning-foreground | 5.65:1 / 4.82:1 | 10.91:1 / 7.50:1 |
+
+All ≥4.5:1 (AA normal text) in both themes. Green hue ~150, amber ~70–80, both
+distinct from the blue `--chart-*` ramp (~260).
+
+**Migration (6 files, 9 sites):** `kpi-cards.tsx` trend (improvement →
+`text-success-foreground`, decline → `text-destructive`, keeping the red) and
+low-confidence note (→ `text-warning-foreground`); `burndown-chart.tsx` delta and
+`flow-chart.tsx` net-open (success/destructive by sign); `lead-time-table.tsx`
+"On time" → `bg-success text-success-foreground`, "Late" → `bg-destructive/10
+text-destructive` (confirmed pointing at the token, per AC); `data-quality-section.tsx`
+warning banner + QualityCard value and `launch-boundary-banner.tsx` → `bg-warning
+text-warning-foreground border-warning-foreground/25`. No ad-hoc `green/red/amber/emerald`
+literal remains in the dashboard components (grep-verified).
+
+**Non-color signal (WCAG 1.4.1) — verified per site:** trend arrows ↑/↓ (kpi),
+±/− sign (burndown delta, flow net), text labels "On time"/"Late" (lead-time),
+"Low confidence:" label, full-sentence banners (data-quality, launch). The
+data-quality QualityCard recolors a value whose datum is already textual and is
+reinforced by the adjacent explanatory banner — color is emphasis, not the sole
+channel. No site relied on color alone, so no glyph was added.
+
+**Automated checks (2026-06-30):** ESLint on the 6 changed components = 0 errors;
+`npm test` = 523/523 pass; `npm run build` compiled successfully (the lone TS
+error is in `scripts/perf-measure.ts`, an untracked pre-existing script not on
+this branch).
+
+**Manual QA — light + dark, no console errors/warnings:**
+
+- Compiled-CSS check (`/_next/.../*.css`): both `:root` and `.dark` emit all four
+  tokens — light `--success #dcf7e1` / `--success-foreground #007834`, dark
+  `--success #193b22` / `--success-foreground #7cd591` (and the warning pair),
+  confirming the dark cascade ships (a stale Turbopack cache initially dropped the
+  `.dark` block; resolved by clearing `.next` — source was always correct).
+- Live dashboard (`/workspace/<ws>/dashboard`): "Historical Data Notice" and
+  "N active card(s) excluded" amber warning banners, KPI "Low confidence" amber
+  text, "Net open: +2" destructive-red, data-quality amber values — all resolve
+  through the tokens in both themes; DOM-verified `getComputedStyle` on injected
+  On-time/Late/trend probes matched the measured token colors exactly.
+
+Screenshots (scratchpad `qa050/`): `02-dashboard-dark`, `03-dashboard-light`.
