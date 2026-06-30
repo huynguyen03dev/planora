@@ -212,11 +212,14 @@ function ListColumnComponent({
               // horizontal scroll), capped at and reverting to the 20rem desktop
               // width at sm:. Width is the only responsive change — the dnd index
               // space and apply-drop math are untouched.
-              "flex w-[80vw] max-w-80 shrink-0 flex-col gap-2 rounded-lg bg-muted p-3 sm:w-80 sm:max-w-none",
+              // max-h-full caps the column at the board height so the card area
+              // (below) scrolls internally instead of growing the page; short
+              // lists stay compact (the column sizes to its content under the cap).
+              "flex max-h-full min-h-0 w-[80vw] max-w-80 shrink-0 flex-col gap-2 rounded-lg bg-muted p-3 sm:w-80 sm:max-w-none",
               snapshot.isDragging && "shadow-md ring-2 ring-primary/30",
             )}
           >
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex shrink-0 items-center justify-between gap-2">
               {canEdit && editing ? (
                 <Input
                   value={draftTitle}
@@ -330,7 +333,10 @@ function ListColumnComponent({
                   ref={dropProvided.innerRef}
                   {...dropProvided.droppableProps}
                   className={cn(
-                    "rounded-md border border-transparent transition-colors",
+                    // The single vertical scroller: shrinks (min-h-0) within the
+                    // capped column and scrolls its own cards when they overflow.
+                    // themed-scrollbar keeps the native scrollbar on-theme.
+                    "themed-scrollbar min-h-0 overflow-y-auto rounded-md border border-transparent transition-colors",
                     list.cards.length === 0 && !dropSnapshot.isDraggingOver
                       ? "-mt-2 p-0"
                       : "min-h-[2.5rem] p-1",
@@ -365,7 +371,7 @@ function ListColumnComponent({
 
             {canCreateCard ? (
               addCardExpanded ? (
-                <form onSubmit={handleCreateCard} className="space-y-2">
+                <form onSubmit={handleCreateCard} className="shrink-0 space-y-2">
                   <Input
                     value={newCardTitle}
                     onChange={(event) => {
@@ -411,7 +417,7 @@ function ListColumnComponent({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="justify-start text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                  className="shrink-0 justify-start text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
                   onClick={() => setAddCardExpanded(true)}
                 >
                   + Add a card

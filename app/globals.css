@@ -245,3 +245,37 @@
     @apply font-sans;
   }
 }
+
+/* Themed scrollbar — token-driven so it matches both themes (replaces the
+   Radix ScrollArea thumb on native scroll containers, e.g. list card areas).
+   Thin, transparent track, `--border` thumb lifting to `--muted-foreground`
+   on hover; mirrors the old `bg-border` rounded thumb. */
+@utility themed-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  &::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  /* Gentle hover lift — a small step toward muted-foreground, not the full
+     (loud) value, to stay within the quiet neutral chrome (DESIGN.md ethos). */
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklch, var(--muted-foreground) 30%, transparent);
+  }
+}
+
+/* In dark theme `--muted-foreground` is a LIGHT gray (≈oklch(0.708), tuned for
+   text legibility), so the same 30% mix reads too bright on the dark column.
+   Pull the dark-mode hover down so the thumb stays a quiet, dim gray. */
+.dark .themed-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklch, var(--muted-foreground) 22%, transparent);
+}
