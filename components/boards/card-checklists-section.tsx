@@ -130,16 +130,14 @@ export function CardChecklistsSection({
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
       {checklists.length === 0 && !addingChecklist ? (
-        <div className="rounded-lg border bg-background p-4">
-          <p className="text-sm text-muted-foreground">No checklists yet.</p>
-        </div>
+        <p className="text-sm text-muted-foreground">No checklists yet.</p>
       ) : null}
 
       {checklists.map((checklist) => {
         const total = checklist.items.length;
         const done = checklist.items.filter((item) => item.isCompleted).length;
         return (
-          <div key={checklist.id} className="space-y-2 rounded-lg border bg-background p-3">
+          <div key={checklist.id} className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <h4 className="text-sm font-semibold">{checklist.title}</h4>
               <div className="flex items-center gap-2">
@@ -243,7 +241,7 @@ export function CardChecklistsSection({
             event.preventDefault();
             addChecklist();
           }}
-          className="space-y-2 rounded-lg border bg-background p-3"
+          className="space-y-2"
         >
           <Input
             value={newChecklistTitle}

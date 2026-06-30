@@ -142,6 +142,13 @@ import { ac, admin, editor, viewer } from "./permissions";
 
 ### Styling
 
+- **READ `DESIGN.md` (repo root) BEFORE ANY UI CHANGE.** It is the single source
+  of truth for Planora's visual language — tokens, type, spacing, components,
+  card-detail surface, and kanban interaction patterns (adapted from Linear +
+  Notion, mapped to our shadcn/oklch tokens). Apply the named tokens via Tailwind
+  utilities (`bg-card`, `text-muted-foreground`, `rounded-lg`…); never hard-code
+  hex/oklch/arbitrary px when a token exists. If a needed value has no token, add
+  it to `app/globals.css` (both themes, with a contrast note) — don't inline it.
 - **Tailwind CSS 4** with `@tailwindcss/postcss`. No `tailwind.config` file — use
   CSS-based config in `app/globals.css`.
 - shadcn/ui theme uses **oklch** color values with CSS custom properties.
@@ -281,7 +288,8 @@ the agent does it on the human's go-ahead.
 
 1. Define schema and migrate (if needed).
 2. Create the Server Action for mutations (+ the matching realtime emitter).
-3. Add shadcn components (`npx shadcn add <component>`).
+3. Add shadcn components (`npx shadcn add <component>`). **Consult `DESIGN.md`
+   first** for the tokens, component specs, and interaction patterns to follow.
 4. Add a `"use client"` component for interactivity; fetch server-side where
    possible.
 5. Update the relevant `docs/product/*` doc and `docs/TEST_MATRIX.md`.

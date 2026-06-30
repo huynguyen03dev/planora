@@ -216,7 +216,7 @@ function ListCardItemComponent({
               // tile. Without it, the explicit gap-0 / py-0 (+ CardContent p-2)
               // take effect, which is what makes the compact tile actually compact
               // (US-044).
-              className={cn("gap-0 overflow-hidden py-0 shadow-sm", snapshot.isDragging && "shadow-lg")}
+              className={cn("gap-0 overflow-hidden py-0 transition-transform", snapshot.isDragging && "scale-[1.02] shadow-md")}
             >
               {card.coverImage ? (
                 // Compact tiles (US-044): the cover shrinks from h-20 so an 80px
@@ -261,7 +261,7 @@ function ListCardItemComponent({
                           variant="ghost"
                           size="icon-sm"
                           aria-label="Drag card"
-                          className="cursor-grab text-muted-foreground hover:bg-muted hover:text-foreground active:cursor-grabbing"
+                          className="cursor-grab text-muted-foreground hover:bg-foreground/10 hover:text-foreground active:cursor-grabbing"
                           {...provided.dragHandleProps}
                         >
                           <HugeiconsIcon
@@ -281,7 +281,7 @@ function ListCardItemComponent({
                               variant="ghost"
                               size="icon-sm"
                               aria-label="Card actions"
-                              className="text-muted-foreground hover:bg-muted hover:text-foreground"
+                              className="text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
                             >
                               <HugeiconsIcon
                                 icon={MoreHorizontalIcon}

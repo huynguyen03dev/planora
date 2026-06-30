@@ -11,7 +11,11 @@ interface BurndownChartProps {
 
 const HEIGHT = 300;
 const MARGIN = { top: 16, right: 20, bottom: 28, left: 48 };
-const LINE_COLOR = "#3b82f6";
+// Remaining-work series. Uses --chart-2 (not --chart-1): --chart-1 is the
+// palest ramp rung and measures only 1.81:1 on the white card (fails WCAG 3:1
+// for graphical objects); --chart-2 clears 3:1 in both themes (3.76 light /
+// 4.73 dark) and matches the prior #3b82f6. See US-049 evidence.
+const LINE_COLOR = "var(--chart-2)";
 
 function formatHours(hours: number): string {
   return Number.isInteger(hours) ? `${hours}h` : `${hours.toFixed(1)}h`;
@@ -290,7 +294,7 @@ export function BurndownChart({ data }: BurndownChartProps) {
         </div>
         <div>
           <span className="text-muted-foreground">Change</span>
-          <div className={`font-medium ${delta <= 0 ? "text-green-600" : "text-red-600"}`}>
+          <div className={`font-medium ${delta <= 0 ? "text-success-foreground" : "text-destructive"}`}>
             {delta <= 0 ? "−" : "+"}
             {formatHours(Math.abs(delta))}
           </div>

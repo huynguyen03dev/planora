@@ -7,7 +7,7 @@ import type { WorkspaceBoard } from "@/lib/workspace";
 
 import { BoardCard } from "./board-card";
 import { CreateBoardModal } from "./create-board-modal";
-import { workspaceBadgeGradient } from "./styles";
+import { workspaceBadgeSurface } from "./styles";
 
 type WorkspaceSectionProps = {
   workspace: {
@@ -28,7 +28,7 @@ export function WorkspaceSection({ workspace, boards, starredBoardIds = [] }: Wo
     <section className="space-y-3">
       <div className="flex items-center gap-3">
         <div
-          className={`flex size-8 items-center justify-center rounded-md ${workspaceBadgeGradient} text-sm font-bold text-white`}
+          className={`flex size-8 items-center justify-center rounded-md ${workspaceBadgeSurface} text-sm font-bold`}
         >
           {initial}
         </div>

@@ -13,8 +13,8 @@ interface FlowChartProps {
 
 const HEIGHT = 300;
 const MARGIN = { top: 16, right: 20, bottom: 28, left: 36 };
-const CREATED_COLOR = "#6366f1"; // indigo — work coming in
-const COMPLETED_COLOR = "#10b981"; // emerald — work finished
+const CREATED_COLOR = "var(--chart-2)"; // blue ramp token — work coming in
+const COMPLETED_COLOR = "var(--success-foreground)"; // deep success green (US-050) — work finished
 
 export function FlowChart({ data, createdTotal, completedTotal }: FlowChartProps) {
   const [containerRef, width] = useMeasuredWidth();
@@ -255,7 +255,7 @@ export function FlowChart({ data, createdTotal, completedTotal }: FlowChartProps
         </div>
         <div>
           <span className="text-muted-foreground">Net open</span>
-          <div className={`font-medium ${net > 0 ? "text-red-600" : net < 0 ? "text-green-600" : ""}`}>
+          <div className={`font-medium ${net > 0 ? "text-destructive" : net < 0 ? "text-success-foreground" : ""}`}>
             {net > 0 ? "+" : ""}
             {net}
           </div>

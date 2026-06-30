@@ -76,7 +76,17 @@ export function NotificationsListClient({ notifications: initialNotifications }:
             }`}
           >
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium">{notification.title}</p>
+              <p
+                className={`text-sm ${
+                  notification.isRead ? "font-normal" : "font-semibold"
+                }`}
+              >
+                {/* Non-color unread signal (WCAG 1.4.1 / DESIGN.md §393): the
+                    title weight (semibold vs normal) carries the unread state in
+                    grayscale, alongside the color dot; sr-only label for AT. */}
+                {!notification.isRead && <span className="sr-only">Unread: </span>}
+                {notification.title}
+              </p>
               <p className="mt-0.5 text-sm text-muted-foreground">
                 {notification.message}
               </p>
@@ -85,7 +95,10 @@ export function NotificationsListClient({ notifications: initialNotifications }:
               </p>
             </div>
             {!notification.isRead && (
-              <span className="mt-1.5 size-2 shrink-0 rounded-full bg-primary" />
+              <span
+                aria-hidden="true"
+                className="mt-1.5 size-2 shrink-0 rounded-full bg-primary"
+              />
             )}
           </button>
         ))}

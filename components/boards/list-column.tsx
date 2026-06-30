@@ -34,7 +34,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
 import { cardMatchesFilter, cardMatchesQuery } from "@/lib/board-filter";
 import { cn } from "@/lib/utils";
 
@@ -213,8 +212,8 @@ function ListColumnComponent({
               // horizontal scroll), capped at and reverting to the 20rem desktop
               // width at sm:. Width is the only responsive change — the dnd index
               // space and apply-drop math are untouched.
-              "flex w-[80vw] max-w-[20rem] shrink-0 flex-col gap-2 rounded-lg bg-muted p-3 sm:w-80 sm:max-w-none",
-              snapshot.isDragging && "shadow-xl ring-2 ring-primary/30",
+              "flex w-[80vw] max-w-80 shrink-0 flex-col gap-2 rounded-lg bg-muted p-3 sm:w-80 sm:max-w-none",
+              snapshot.isDragging && "shadow-md ring-2 ring-primary/30",
             )}
           >
             <div className="flex items-center justify-between gap-2">
@@ -259,7 +258,7 @@ function ListColumnComponent({
                         variant="ghost"
                         size="icon-sm"
                         aria-label="Drag list"
-                        className="cursor-grab text-muted-foreground hover:bg-muted hover:text-foreground active:cursor-grabbing"
+                        className="cursor-grab text-muted-foreground hover:bg-foreground/10 hover:text-foreground active:cursor-grabbing"
                         onPointerDown={handleActionsMenuPointerDown}
                         {...provided.dragHandleProps}
                       >
@@ -280,7 +279,7 @@ function ListColumnComponent({
                           size="icon-sm"
                           aria-label="List actions"
                           onPointerDown={handleActionsMenuPointerDown}
-                          className="text-muted-foreground hover:bg-muted hover:text-foreground"
+                          className="text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
                         >
                           <HugeiconsIcon
                             icon={MoreHorizontalIcon}
@@ -331,22 +330,15 @@ function ListColumnComponent({
                   ref={dropProvided.innerRef}
                   {...dropProvided.droppableProps}
                   className={cn(
-                    "min-h-[2.5rem] rounded-md border border-transparent p-1 transition-colors",
+                    "rounded-md border border-transparent transition-colors",
+                    list.cards.length === 0 && !dropSnapshot.isDraggingOver
+                      ? "-mt-2 p-0"
+                      : "min-h-[2.5rem] p-1",
                     dropSnapshot.isDraggingOver
                       ? "border-primary/40 bg-background/80"
                       : "hover:bg-muted/30",
                   )}
                 >
-                  {list.cards.length === 0 && !dropSnapshot.isDraggingOver ? (
-                    <Card
-                      size="sm"
-                      className="gap-2 border-dashed border-border/60 py-3 shadow-none"
-                    >
-                      <CardContent className="px-3 py-0">
-                        <p className="text-xs text-muted-foreground">No cards yet</p>
-                      </CardContent>
-                    </Card>
-                  ) : null}
                   <div className="flex flex-col gap-2">
                     {list.cards.map((card, cardIndex) => (
                       <ListCardItem
@@ -419,7 +411,7 @@ function ListColumnComponent({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="justify-start text-muted-foreground hover:bg-muted hover:text-foreground"
+                  className="justify-start text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
                   onClick={() => setAddCardExpanded(true)}
                 >
                   + Add a card

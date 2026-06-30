@@ -58,7 +58,7 @@ export function BoardCard({
     <div className="group relative">
       <Link
         href={`/boards/${id}`}
-        className="block overflow-hidden rounded-lg border bg-card transition-shadow hover:shadow-md"
+        className="block overflow-hidden rounded-lg border border-border bg-card transition-colors hover:bg-muted"
       >
         <div className="relative h-20 p-3" style={{ background: backgroundStyle }}>
           <span className="line-clamp-2 pr-7 text-sm font-medium text-white">

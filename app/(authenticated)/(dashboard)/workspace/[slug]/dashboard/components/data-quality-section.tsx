@@ -52,7 +52,7 @@ export function DataQualitySection({
       </div>
 
       {hasUnestimatedCards ? (
-        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
+        <p className="rounded-md border border-warning-foreground/25 bg-warning p-3 text-sm text-warning-foreground">
           {analytics.estimationCoverage.unestimatedCount} active card(s) are
           excluded from burndown totals because they do not have an estimate.
         </p>
@@ -75,7 +75,7 @@ function QualityCard({
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </p>
-      <p className={warning ? "text-2xl font-semibold text-amber-700 dark:text-amber-400" : "text-2xl font-semibold"}>
+      <p className={warning ? "text-2xl font-semibold text-warning-foreground" : "text-2xl font-semibold"}>
         {value}
       </p>
     </div>
