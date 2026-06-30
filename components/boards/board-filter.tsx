@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { availableLabels } from "@/lib/board-filter"
+import { labelSwatchStyle } from "@/lib/label-colors"
 import { cn } from "@/lib/utils"
 
 // Toolbar control for the client-only board card filter (US-013 slice 1: labels).
@@ -78,8 +79,8 @@ export function BoardFilter() {
           >
             <span className="flex items-center gap-2">
               <span
-                className="size-3 shrink-0 rounded-full"
-                style={{ backgroundColor: label.color }}
+                className="size-3 shrink-0 rounded-full border"
+                style={labelSwatchStyle(label.color)}
               />
               <span className="truncate">{label.name}</span>
             </span>

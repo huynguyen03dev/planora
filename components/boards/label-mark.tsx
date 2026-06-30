@@ -1,5 +1,6 @@
 "use client";
 
+import { labelChipStyle } from "@/lib/label-colors";
 import { cn } from "@/lib/utils";
 
 export type LabelMarkItem = {
@@ -61,14 +62,17 @@ export function LabelMark({ label, variant, className }: LabelMarkProps) {
     );
   }
 
+  // Notion tinted pattern (US-051 / decision 0014): per-hue tint bg + deeper
+  // same-hue text (AA in both themes), not a solid fill + text-white (which fails
+  // AA on light hues like Orange/Green). The name is the non-color channel.
   return (
     <span
       title={label.name}
       className={cn(
-        "max-w-full truncate rounded px-2 py-0.5 text-xs font-medium text-white",
+        "max-w-full truncate rounded-sm px-2 py-0.5 text-xs font-medium",
         className,
       )}
-      style={{ backgroundColor: label.color }}
+      style={labelChipStyle(label.color)}
     >
       {label.name}
     </span>

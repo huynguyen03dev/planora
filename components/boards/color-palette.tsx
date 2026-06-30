@@ -27,8 +27,11 @@ export function ColorPalette({
             key={color.value}
             type="button"
             className={cn(
-              "relative h-10 w-full rounded-md border border-black/10 transition-opacity",
-              isActive ? "ring-2 ring-ring ring-offset-1" : "hover:opacity-90",
+              // Tonal hover (brightness filter), not an opacity step (DESIGN.md §68).
+              // Active state is signalled by the ring + checkmark (non-color), not
+              // color alone (WCAG 1.4.1).
+              "relative h-10 w-full rounded-md border border-border transition-[filter]",
+              isActive ? "ring-2 ring-ring ring-offset-1" : "hover:brightness-95",
             )}
             style={{ backgroundColor: color.value }}
             onClick={() => onChange(color.value)}
@@ -37,7 +40,7 @@ export function ColorPalette({
             disabled={disabled}
           >
             {isActive ? (
-              <span className="absolute inset-0 flex items-center justify-center text-white">
+              <span className="absolute inset-0 flex items-center justify-center text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.45)]">
                 <HugeiconsIcon icon={Tick02Icon} size={18} strokeWidth={2.5} />
               </span>
             ) : null}

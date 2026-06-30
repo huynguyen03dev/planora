@@ -4,7 +4,8 @@ Date: 2026-06-30
 
 ## Status
 
-Proposed
+Accepted — implemented in US-051 on 2026-06-30. Per-hue measured-contrast table
+below.
 
 ## Context
 
@@ -65,9 +66,34 @@ Tradeoffs:
 - 32 token values to define and maintain across both themes (one-time, bounded).
 - Couples the label palette to a fixed hue set (already true via the picker).
 
+## Measured contrast (per hue, foreground text vs its tint background)
+
+Computed oklch→linear-sRGB→WCAG. AA normal text needs **≥4.5:1**; all 16 pairs
+pass. The hue angle is derived from the stored `BOARD_COLORS` hex. Light tints sit
+at L≈0.95 with deep text (L≈0.51–0.55); dark tints at L≈0.30 with bright text
+(L=0.80, matching `--success-foreground` dark for token-family coherence).
+
+| Hue | Stored hex | OKLCH hue | Light fg/tint | Dark fg/tint |
+| --- | --- | --- | --- | --- |
+| Blue | `#0079BF` | 244.95 | 4.61:1 | 7.34:1 |
+| Green | `#519839` | 138.64 | 4.66:1 | 7.44:1 |
+| Orange | `#D29034` | 71.08 | 4.66:1 | 7.23:1 |
+| Red | `#B04632` | 32.62 | 4.65:1 | 7.18:1 |
+| Purple | `#89609E` | 313.63 | 4.65:1 | 7.15:1 |
+| Pink | `#CD5A91` | 352.70 | 4.61:1 | 7.11:1 |
+| Gray | `#838C91` | 231.78 | 4.63:1 | 7.37:1 |
+| Teal | `#00AECC` | 215.91 | 4.60:1 | 7.44:1 |
+
+Foreground text vs the card surface runs higher in both themes (light 5.27–5.44,
+dark 9.05–10.0), so the text is legible whether it reads against the tint or, at
+the chip edge, against the card. Defined once in `app/globals.css`
+(`:root` + `.dark`) and mapped via `lib/label-colors.ts` (`labelHue` →
+`--label-<hue>` / `--label-<hue>-fg`). **Gray is the neutral fallback** for legacy
+/ out-of-palette stored colors.
+
 ## Follow-Up
 
-- Implemented and contrast-verified in **US-051**; flip to **Accepted** with the
-  per-hue measured-contrast table once shipped.
+- Shipped in **US-051** (manual light/dark QA, DOM-verified token resolution per
+  hue + per-hue contrast table above).
 - If the label palette ever opens beyond the fixed set, revisit alternative (1)
   (runtime derivation with an AA guarantee).
