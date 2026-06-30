@@ -2,7 +2,14 @@
 
 ## Status
 
-planned
+done — implemented 2026-06-30 on `feat/us-054-primitive-conformance`; manual QA
+passed (light + dark, no console errors). The default button (and the brand badge
+link) now hover to a **lighter same-hue tint** via a new `--primary-hover` token
+(both themes, AA-measured); all `rounded-[…]` radius literals in `button.tsx` /
+`checkbox.tsx` are replaced with `rounded-md` / `rounded-sm`; and the last
+arbitrary-px width (`dropdown-menu` `min-w-[96px]`) plus the cleanly-mappable rem
+max-widths in `card-detail-sheet` / `list-column` are promoted to spacing-scale
+tokens. See Evidence.
 
 ## Lane
 
@@ -94,4 +101,67 @@ When updating durable proof status, use numeric booleans:
 
 ## Evidence
 
-_Pending implementation._
+**Scope note — the px-width inventory had already shrunk.** The story's "Today"
+list (`card-detail-sheet` `w-[280px]`/`w-[320px]`/`max-w-[120px]`, `board-header`
+`max-w-[200px]`/`w-[260px]`, `board-filter` `w-[320px]`, `list-column` `w-[300px]`)
+was written before US-052/US-048 landed; those passes already swept every one of
+those px literals to rem/scale values. A fresh grep (`rounded-\[`, `w-\[Npx\]`,
+`hover:bg-primary/`) found the genuinely-remaining set, which is what this story
+fixes.
+
+**1 — Tonal hover (new `--primary-hover` token).** `button.tsx` default and
+`badge.tsx` default-link hover changed from `bg-primary/80` (an opacity fade) to
+`bg-primary-hover` (a lighter same-hue step), per DESIGN.md §68 ("Linear lightens
+toward the accent"). The token raises L in each theme relative to that theme's
+base:
+
+| Theme | `--primary` (base) | `--primary-hover` | Direction | Hover vs `primary-foreground` |
+| --- | --- | --- | --- | --- |
+| Light | `oklch(0.52 0.2 262)` | `oklch(0.56 0.2 262)` | lighter (+0.04 L) | **4.62:1** (AA) |
+| Dark | `oklch(0.54 0.19 262)` | `oklch(0.565 0.19 262)` | lighter still (+0.025 L) | **4.51:1** (AA) |
+
+Both stay AA (≥4.5:1) even on the transient hover. `@theme inline` maps
+`--color-primary-hover: var(--primary-hover)`. DOM-verified the token resolves
+lighter than base in both themes (light `lab(46.81)` > `lab(42.04)`; dark
+`lab(47.60)` > `lab(44.63)`), and the compiled CSS emits the rule
+`hover:bg-primary-hover { &:hover { background-color: var(--primary-hover) } }`
+for both the button and the `&:is(a)` badge link.
+
+**2 — Radius literals → tokens.** `checkbox.tsx` `rounded-[4px]` → `rounded-sm`
+(small-chip token, ≈4.3px). `button.tsx` size variants (`xs`, `sm`, `icon-xs`,
+`icon-sm`) `rounded-[min(var(--radius-md),8px|10px)]` → `rounded-md`: the `min()`
+guard never clamped (`--radius-md` ≈ 5.76px is already below the 8/10px cap), so
+the result is identical. DOM-verified a default-size button renders
+`border-radius: 5.76px` (= `--radius-md`). shadcn-CLI files carry a `// customized:`
+note (AGENTS.md).
+
+**3 — Arbitrary px / rem widths → scale tokens (pixel-identical).**
+`dropdown-menu.tsx` `min-w-[96px]` → `min-w-24` (6rem; the last px-literal width
+in the codebase; `// customized:` note). Cleanly-mapping rem max-widths:
+`card-detail-sheet` `max-w-[14rem]`→`max-w-56`, `max-w-[15rem]`→`max-w-60` (×2),
+`max-w-[10rem]`→`max-w-40` (×2); `list-column` `max-w-[20rem]`→`max-w-80`.
+
+**Documented exceptions (kept):** `scroll-area` `rounded-[inherit]` (a CSS keyword,
+inherits the parent radius — not a px literal); `card-detail-sheet`
+`max-w-[min(96vw,768px)]` / `h-[min(90vh,820px)]` (the US-052 reading-column /
+height composite — no single token expresses it); `list-column` `w-[80vw]` (the
+fluid-on-phones width that makes the next column peek — viewport-relative, no
+token). The desktop column width is `sm:w-80` — already a named scale token.
+Secondary/destructive/ghost button hovers were left as-is (out of this AC, which
+names the **default** hover; their tonal-vs-muted treatment is a separate call).
+
+**Post-sweep grep (components/ + app/):** zero `hover:bg-primary/` opacity hovers;
+zero `w-[Npx]`/`max-w-[Npx]`/`min-w-[Npx]` literals; the only `rounded-[…]` hits
+are `rounded-[inherit]` and the `// customized:` comment lines.
+
+**Automated checks (2026-06-30):** `tsc --noEmit` clean (lone errors are in
+untracked `scripts/perf-measure.ts`/`seed-perf-board.ts`, not this branch); ESLint
+on the 6 touched component files = 0 errors (3 pre-existing `<img>` LCP warnings on
+the card cover, untouched); `npm test` = 523/523 pass.
+
+**Manual QA — light + dark, no console errors:** clean-restarted the dev server
+(a new `@theme` token + utility needs a Turbopack rebuild, not just HMR — the
+`stale-Turbopack-CSS-cache` gotcha) and reverified. Boards overview, board, and
+card-detail dialog all render correctly in both themes; Select triggers at the new
+`max-w-60`/`max-w-40` widths and the labels/buttons show no regression. Screenshots
+in scratchpad `qa054/`: `01-card-detail-light`, `02-card-detail-dark`.
