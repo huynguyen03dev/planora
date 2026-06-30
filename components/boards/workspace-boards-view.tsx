@@ -6,7 +6,7 @@ import type { WorkspaceBoard } from "@/lib/workspace";
 
 import { BoardCard } from "./board-card";
 import { CreateBoardModal } from "./create-board-modal";
-import { workspaceBadgeGradient } from "./styles";
+import { workspaceBadgeSurface } from "./styles";
 
 type WorkspaceBoardsViewProps = {
   workspace: {
@@ -33,7 +33,7 @@ export function WorkspaceBoardsView({
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           <div
-            className={`flex size-10 items-center justify-center rounded-lg ${workspaceBadgeGradient} text-lg font-bold text-white`}
+            className={`flex size-10 items-center justify-center rounded-lg ${workspaceBadgeSurface} text-lg font-bold`}
           >
             {initial}
           </div>
