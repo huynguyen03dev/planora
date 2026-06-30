@@ -6,7 +6,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { Analytics01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
-import { workspaceBadgeGradient } from "./styles";
+import { workspaceBadgeSurface } from "./styles";
 
 type WorkspaceItemProps = {
   workspace: {
@@ -35,7 +35,7 @@ export function WorkspaceItem({ workspace }: WorkspaceItemProps) {
         className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-sidebar-accent"
       >
         <div
-          className={`flex size-6 shrink-0 items-center justify-center rounded ${workspaceBadgeGradient} text-xs font-bold text-white`}
+          className={`flex size-6 shrink-0 items-center justify-center rounded ${workspaceBadgeSurface} text-xs font-bold`}
         >
           {initial}
         </div>

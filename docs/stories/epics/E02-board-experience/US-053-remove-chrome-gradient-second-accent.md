@@ -2,7 +2,12 @@
 
 ## Status
 
-planned
+done — implemented 2026-06-30 on `feat/us-053-remove-chrome-gradient`; manual QA
+passed (light + dark). The `workspaceBadgeGradient` sky→blue gradient is retired
+for a neutral `bg-secondary` chip across all three badge consumers; the card-cover
+scrim is resolved as *kept* (legibility fade over a user image, not chrome
+decoration). No `bg-gradient` remains in chrome — only the intentional per-board
+`boardTheme` gradients (inline `linear-gradient`, out of scope). See Evidence.
 
 ## Lane
 
@@ -81,4 +86,56 @@ None.
 
 ## Evidence
 
-_Pending implementation._
+**Workspace badge (gradient + second accent removed):** `components/boards/styles.ts`
+`workspaceBadgeGradient = "bg-gradient-to-br from-sky-600 to-blue-800"` →
+`workspaceBadgeSurface = "bg-secondary text-secondary-foreground"`. The constant
+was renamed (it's no longer a gradient) and the redundant `text-white` dropped
+from all three consumers, which now inherit the badge's guaranteed-contrast
+foreground:
+
+| Consumer | Badge | Before | After |
+| --- | --- | --- | --- |
+| `workspace-item.tsx:38` | sidebar list (size-6) | `${gradient} text-white` | `${surface}` |
+| `workspace-section.tsx:31` | sidebar section (size-8) | `${gradient} text-white` | `${surface}` |
+| `workspace-boards-view.tsx:36` | overview header (size-10) | `${gradient} text-white` | `${surface}` |
+
+**Chosen treatment — neutral, not brand.** The AC allowed neutral *or* brand
+`bg-primary`. Neutral was chosen: the badge repeats per workspace across the
+sidebar and overview, so a `bg-primary` fill would make brand blue ambient chrome
+and break "brand blue used scarcely" (DESIGN.md §183/§386). The badge is now a
+neutral identity chip; brand blue stays reserved for CTA/focus/selection/active.
+
+**Cover scrim — resolved as kept (annotated, not undecided):**
+`card-detail-sheet.tsx` cover `bg-gradient-to-t from-background via-background/10
+to-transparent` is retained with an inline rationale comment. It is a bottom-edge
+fade that blends an arbitrary user-supplied cover image into the document surface
+below — a legibility scrim over user content, not a decorative chrome gradient.
+The §389 ban targets atmospheric chrome gradients; a solid `bg-background/80` here
+would wash out the entire cover.
+
+**`bg-gradient` grep (app/ + components/) afterward** returns exactly one hit —
+the annotated cover scrim. No chrome gradient remains. The per-board `boardTheme`
+header/surface gradients (`lib/constants.ts` `BOARD_THEME_GRADIENTS`, inline
+`linear-gradient`) are the Trello board-background analogue, ratified in
+US-036/US-042 and out of scope; `label-mark.tsx` repeating-gradients are
+colorblind label patterns (label spectrum, excepted); the burndown-chart SVG
+`linearGradient` is data-viz fill — none are chrome accents.
+
+**Typography/contrast (DOM-verified via `getComputedStyle`):**
+
+| Theme | Badge bg (`bg-secondary`) | Badge text (`secondary-foreground`) | `backgroundImage` |
+| --- | --- | --- | --- |
+| Light | `lab(96.52 …)` (near-white neutral) | `lab(7.78 …)` (near-black) | `none` |
+| Dark | `lab(15.20 …)` (dark neutral) | `lab(98.26 …)` (near-white) | `none` |
+
+**Automated checks (2026-06-30):** `tsc --noEmit` clean (lone errors are in
+untracked `scripts/perf-measure.ts`/`seed-perf-board.ts`, not this branch);
+ESLint on the 5 touched files = 0 errors (3 pre-existing `<img>` LCP warnings on
+the card cover, untouched); `npm test` = 523/523 pass.
+
+**Manual QA — light + dark, boards overview + sidebar, no console errors:** the
+"B" Brand-QA workspace badge renders as a neutral chip with strong-contrast
+initials in both the sidebar (item + section) and the overview header, in both
+themes — no gradient, no second chromatic accent. Screenshots in scratchpad
+`qa053/`: `01-badges-light`, `02-badges-dark`. The blue board thumbnail visible
+in those shots is the per-board `boardTheme` gradient (out of scope).

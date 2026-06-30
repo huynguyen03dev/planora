@@ -765,6 +765,11 @@ function CardDetailDialogBody({
             alt="Card cover"
             className="h-48 w-full object-cover"
           />
+          {/* US-053: kept intentionally. This is a bottom-edge fade over an
+              arbitrary user-supplied cover image so it blends into the document
+              surface below — a legibility scrim over user content, not a
+              decorative chrome gradient. The §389 ban targets atmospheric chrome
+              gradients; a solid bg-background/80 here would wash out the cover. */}
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background via-background/10 to-transparent" />
         </div>
       ) : null}
