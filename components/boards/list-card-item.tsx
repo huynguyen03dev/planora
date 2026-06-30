@@ -216,7 +216,7 @@ function ListCardItemComponent({
               // tile. Without it, the explicit gap-0 / py-0 (+ CardContent p-2)
               // take effect, which is what makes the compact tile actually compact
               // (US-044).
-              className={cn("gap-0 overflow-hidden py-0 shadow-sm", snapshot.isDragging && "shadow-lg")}
+              className={cn("gap-0 overflow-hidden py-0 transition-transform", snapshot.isDragging && "scale-[1.02] shadow-md")}
             >
               {card.coverImage ? (
                 // Compact tiles (US-044): the cover shrinks from h-20 so an 80px
