@@ -20,6 +20,11 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { ColorPalette } from "@/components/boards/color-palette";
 import { DEFAULT_BOARD_COLOR } from "@/lib/constants";
 import { labelChipStyle, labelSwatchStyle } from "@/lib/label-colors";
@@ -73,88 +78,90 @@ export function CardLabelsSection({
     });
   }
 
+  // Compact meta-row form (US-052): the label lives in the card-detail property
+  // strip, so this renders inline — attached chips + an attach popover + the
+  // manage dialog — not a full boxed section with its own heading.
   return (
-    <section className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-base font-semibold">Labels</h3>
-        {canEdit ? (
-          <ManageLabelsDialog boardId={boardId} boardLabels={boardLabels} />
-        ) : (
-          <span className="text-xs text-muted-foreground">
-            Visible to all members
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+      {attached.length > 0 ? (
+        attached.map((label) => (
+          // Tinted chip (US-051): per-hue tint bg + deeper same-hue text, name
+          // as the non-color channel. The remove × inherits the chip's text
+          // color (currentColor) and dims on idle.
+          <span
+            key={label.id}
+            className="inline-flex items-center gap-1.5 rounded-sm px-2.5 py-1 text-sm font-medium"
+            style={labelChipStyle(label.color)}
+          >
+            {label.name}
+            {canEdit ? (
+              <button
+                type="button"
+                aria-label={`Remove ${label.name}`}
+                className="opacity-70 hover:opacity-100 disabled:opacity-50"
+                disabled={isPending}
+                onClick={() => toggleAttached(label.id, true)}
+              >
+                ×
+              </button>
+            ) : null}
           </span>
-        )}
-      </div>
-
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-
-      {attached.length === 0 ? (
-        <div className="rounded-lg border bg-background p-4">
-          <p className="text-sm text-muted-foreground">No labels yet.</p>
-        </div>
+        ))
       ) : (
-        <div className="flex flex-wrap gap-2">
-          {attached.map((label) => (
-            // Tinted chip (US-051): per-hue tint bg + deeper same-hue text, name
-            // as the non-color channel. The remove × inherits the chip's text
-            // color (currentColor) and dims on idle.
-            <span
-              key={label.id}
-              className="inline-flex items-center gap-1.5 rounded-sm px-2.5 py-1 text-sm font-medium"
-              style={labelChipStyle(label.color)}
-            >
-              {label.name}
-              {canEdit ? (
-                <button
-                  type="button"
-                  aria-label={`Remove ${label.name}`}
-                  className="opacity-70 hover:opacity-100 disabled:opacity-50"
-                  disabled={isPending}
-                  onClick={() => toggleAttached(label.id, true)}
-                >
-                  ×
-                </button>
-              ) : null}
-            </span>
-          ))}
-        </div>
+        <span className="text-sm text-muted-foreground">
+          {canEdit ? "No labels yet" : "None"}
+        </span>
       )}
 
-      {canEdit && boardLabels.length > 0 ? (
-        <div className="space-y-1.5 rounded-lg border bg-background p-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Attach a label
-          </p>
-          <ul className="space-y-1.5">
-            {boardLabels.map((label) => (
-              <li key={label.id}>
-                <button
-                  type="button"
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left text-sm disabled:opacity-50",
-                    attachedIds.has(label.id) ? "font-semibold" : "font-normal",
-                  )}
-                  disabled={isPending}
-                  aria-pressed={attachedIds.has(label.id)}
-                  onClick={() =>
-                    toggleAttached(label.id, attachedIds.has(label.id))
-                  }
-                >
-                  <span
-                    className="h-4 w-6 rounded-sm border"
-                    style={labelSwatchStyle(label.color)}
-                  />
-                  <span className="flex-1">{label.name}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {attachedIds.has(label.id) ? "On" : "Off"}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
+      {canEdit ? (
+        <>
+          {boardLabels.length > 0 ? (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button type="button" variant="outline" size="sm">
+                  Add
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-64 space-y-1.5">
+                <p className="text-sm font-semibold">Attach labels</p>
+                <ul className="space-y-1.5">
+                  {boardLabels.map((label) => (
+                    <li key={label.id}>
+                      <button
+                        type="button"
+                        className={cn(
+                          "flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left text-sm disabled:opacity-50",
+                          attachedIds.has(label.id) ? "font-semibold" : "font-normal",
+                        )}
+                        disabled={isPending}
+                        aria-pressed={attachedIds.has(label.id)}
+                        onClick={() =>
+                          toggleAttached(label.id, attachedIds.has(label.id))
+                        }
+                      >
+                        <span
+                          className="h-4 w-6 rounded-sm border"
+                          style={labelSwatchStyle(label.color)}
+                        />
+                        <span className="flex-1">{label.name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {attachedIds.has(label.id) ? "On" : "Off"}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </PopoverContent>
+            </Popover>
+          ) : null}
+          <ManageLabelsDialog boardId={boardId} boardLabels={boardLabels} />
+        </>
       ) : null}
-    </section>
+
+      {error ? (
+        <p className="w-full text-sm text-destructive">{error}</p>
+      ) : null}
+    </div>
   );
 }
 

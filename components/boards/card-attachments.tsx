@@ -61,12 +61,10 @@ export function CardAttachments({
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
       {attachments.length === 0 ? (
-        <div className="rounded-lg border bg-background p-4">
-          <p className="text-sm text-muted-foreground">
-            No attachments yet.
-            {canEdit && " Upload files to share with your team."}
-          </p>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          No attachments yet.
+          {canEdit && " Upload files to share with your team."}
+        </p>
       ) : (
         <div className="space-y-2">
           {attachments.map((attachment) => (
@@ -115,9 +113,8 @@ function AttachmentItem({ attachment }: AttachmentItemProps) {
   const fileSize = (attachment.fileSize / 1024).toFixed(1);
 
   return (
-    <div className="rounded-lg border bg-background p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
+    <div className="flex items-start justify-between gap-3 border-b border-border pb-2 last:border-b-0 last:pb-0">
+      <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <a
               href={attachment.fileUrl}
@@ -145,7 +142,6 @@ function AttachmentItem({ attachment }: AttachmentItemProps) {
             Download
           </a>
         </Button>
-      </div>
     </div>
   );
 }
