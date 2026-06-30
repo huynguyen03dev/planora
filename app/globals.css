@@ -38,6 +38,7 @@
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
   --color-selected: var(--selected);
   --color-selected-foreground: var(--selected-foreground);
   --color-selected-tint: var(--selected-tint);
@@ -83,6 +84,10 @@
      primary vs primary-foreground measured 5.50:1 (AA, normal text). */
   --primary: oklch(0.52 0.2 262);
   --primary-foreground: oklch(0.985 0 0);
+  /* US-054 tonal hover — a lighter same-hue step (L 0.52 → 0.56), not an
+     opacity fade (DESIGN.md §68: "Linear lightens toward the accent").
+     primary-hover vs primary-foreground measured 4.62:1 (AA, normal text). */
+  --primary-hover: oklch(0.56 0.2 262);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
@@ -163,6 +168,10 @@
      fill vs background 3.78:1 (≥3:1 UI component, WCAG 1.4.11). */
   --primary: oklch(0.54 0.19 262);
   --primary-foreground: oklch(0.985 0 0);
+  /* US-054 tonal hover (dark) — lighter still than the already-brighter dark
+     base (L 0.54 → 0.565), per DESIGN.md §68. primary-hover vs
+     primary-foreground measured 4.51:1 (AA, normal text). */
+  --primary-hover: oklch(0.565 0.19 262);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);

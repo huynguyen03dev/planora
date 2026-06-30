@@ -567,7 +567,7 @@ function CardDetailDialogBody({
               aria-live="polite"
               title={error || (isPending ? "Saving…" : undefined)}
               className={cn(
-                "max-w-[14rem] truncate text-xs",
+                "max-w-56 truncate text-xs",
                 error ? "text-destructive" : "text-muted-foreground",
               )}
             >
@@ -797,7 +797,7 @@ function CardDetailDialogBody({
                     className="flex items-center gap-1.5 rounded-full bg-muted py-0.5 pl-0.5 pr-2.5 text-sm"
                   >
                     <MemberAvatar name={member.name} image={member.image} size="sm" />
-                    <span className="max-w-[10rem] truncate">{member.name}</span>
+                    <span className="max-w-40 truncate">{member.name}</span>
                     {canEdit ? (
                       <button
                         type="button"
@@ -892,7 +892,7 @@ function CardDetailDialogBody({
               }}
               disabled={!canEdit || isPending}
             >
-              <SelectTrigger id="card-priority" className="w-full max-w-[15rem]">
+              <SelectTrigger id="card-priority" className="w-full max-w-60">
                 <SelectValue placeholder="No priority" />
               </SelectTrigger>
               <SelectContent>
@@ -923,7 +923,7 @@ function CardDetailDialogBody({
                       : "Set due date"
                   }
                   className={cn(
-                    "w-full max-w-[15rem] justify-start text-left font-normal",
+                    "w-full max-w-60 justify-start text-left font-normal",
                     !selectedDueDate && "text-muted-foreground",
                   )}
                 >
@@ -991,7 +991,7 @@ function CardDetailDialogBody({
                 }}
                 disabled={!canEdit || isPending || Boolean(card.completedAt)}
               >
-                <SelectTrigger id="card-estimate-hours" className="w-full max-w-[10rem]">
+                <SelectTrigger id="card-estimate-hours" className="w-full max-w-40">
                   <SelectValue placeholder="No estimate" />
                 </SelectTrigger>
                 <SelectContent>
