@@ -37,13 +37,14 @@ export function labelChipStyle(color: string | null | undefined): CSSProperties 
   };
 }
 
-// Hue-indicator swatch (no text — picker rows, filter dots): the same tint
-// background plus a deeper same-hue border so the pale tint keeps definition on
-// the card surface. Pair with a `border` width/style class on the element.
+// Hue-indicator swatch (no text — manage/attach rows, filter dots). Unlike the
+// chip, a swatch's whole job is to *show the identity hue*, so it uses the
+// saturated stored color (the same value the picker shows), not the chip's tint
+// token: a near-white (light) or near-black (dark) tint reads as the same blank
+// box for every hue. Pair with a neutral `border` class on the element for
+// definition against the surface. Legacy/null colors fall back to a neutral.
 export function labelSwatchStyle(color: string | null | undefined): CSSProperties {
-  const hue = labelHue(color);
   return {
-    backgroundColor: `var(--label-${hue})`,
-    borderColor: `var(--label-${hue}-fg)`,
+    backgroundColor: color || "var(--muted-foreground)",
   };
 }
