@@ -213,7 +213,7 @@ function ListColumnComponent({
               // width at sm:. Width is the only responsive change — the dnd index
               // space and apply-drop math are untouched.
               "flex w-[80vw] max-w-[20rem] shrink-0 flex-col gap-2 rounded-lg bg-muted p-3 sm:w-80 sm:max-w-none",
-              snapshot.isDragging && "shadow-xl ring-2 ring-primary/30",
+              snapshot.isDragging && "shadow-md ring-2 ring-primary/30",
             )}
           >
             <div className="flex items-center justify-between gap-2">
