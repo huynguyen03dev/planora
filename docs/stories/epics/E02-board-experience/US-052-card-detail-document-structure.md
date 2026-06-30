@@ -2,7 +2,12 @@
 
 ## Status
 
-planned
+done — implemented 2026-06-30 on `feat/us-052-card-detail-document`; manual QA
+passed (light + dark, desktop + 375px, DOM-verified typography). The two-column
+~1120px layout with boxed sub-cards is retired: the card detail is now a single
+~720px reading column of hairline-divided sections (no boxed sub-cards), 32px
+padding, title at the `card-title` token, and a 16px/1.55 document body. See
+Evidence.
 
 ## Lane
 
@@ -114,4 +119,83 @@ None.
 
 ## Evidence
 
-_Pending implementation._
+**Reading column + padding:** `card-detail-sheet.tsx` `DialogContent` narrowed
+from `max-w-[min(96vw,1120px)]` to `max-w-[min(96vw,768px)]` — the modal width is
+the document measure. The content region is a single `overflow-y-auto` column at
+`px-8 py-8` (32px). Header padding stepped `px-6` → `px-8` so header and body read
+as one surface. DOM-verified at 375px: `document.documentElement.scrollWidth` ==
+`clientWidth` (0px horizontal overflow); modal is 360px (96vw), no clipping.
+
+**Two columns → one (right rail resolved):** the
+`grid lg:grid-cols-[1.65fr_1fr]` + `<aside border-l bg-muted/10>` is gone. The
+former right-rail **Comments and activity** now lives as the second-to-last
+hairline section in the single stack. The former right-rail/boxed controls
+collapse into a **compact, de-boxed property strip** directly under the title:
+
+| Property | Placement | Control |
+| --- | --- | --- |
+| Members | meta strip row | avatar chips + an **Add** popover (assign list) |
+| Labels | meta strip row | tinted chips + an **Add** popover (attach list) + **Manage labels** dialog |
+| Priority | meta strip row | `Select` (autosave on change) |
+| Due date | meta strip row | `Popover` + `Calendar` (autosave on select) |
+| Estimate | meta strip row | `Select` (autosave on change) |
+
+No control was removed — this is relocation. Members add/remove and the
+ManageLabels CRUD dialog keep their existing Server Actions and live-store
+behavior; the assignee remove/add UI and the label attach list moved into
+popovers triggered from the strip. `CardLabelsSection` was refactored from a full
+boxed `<section>` (own heading + always-open attach box) to an inline compact
+form (chips + attach popover + manage dialog) — it is the sole consumer.
+
+**De-boxed (no `rounded-lg border bg-muted/*` section wrappers remain in the
+document body):**
+
+| Site | Was | Now |
+| --- | --- | --- |
+| description (read-only) | `min-h-44 rounded-lg border bg-muted/20` box | plain `whitespace-pre-wrap` text, 16px/1.55 |
+| priority | `rounded-lg border bg-muted/20 p-4` box | meta-strip row |
+| dates grid | `rounded-lg border bg-muted/20 p-4` box | two meta-strip rows (due, estimate) |
+| right `<aside>` | `border-l bg-muted/10` rail | comments hairline section in the stack |
+| members rows | `rounded-lg border bg-background` rows | avatar chips + popover |
+| comment / activity items | `rounded-lg border bg-background p-3` cards | plain avatar + text rows |
+| checklist groups + empty/add boxes | `rounded-lg border bg-background` | de-boxed (`card-checklists-section.tsx`) |
+| attachment items + empty box | `rounded-lg border bg-background p-3` | hairline rows (`card-attachments.tsx`) |
+
+Sections are separated by `border-t border-border` hairlines (`mt-6 pt-6`).
+
+**Typography (DOM-verified via `getComputedStyle`):**
+
+| Element | Spec | Measured |
+| --- | --- | --- |
+| Title (input + read-only `h2`) | `card-title` 22px / 500 / 1.25 / -0.4px (was `text-2xl font-semibold`) | `text-[22px] font-medium leading-[1.25] tracking-[-0.4px]` |
+| Description body | 16px / 1.55 | `fontSize: 16px`, `lineHeight: 24.8px` (= 16×1.55) |
+| Comment body `<p>` | 16px / 1.55 | `text-base leading-[1.55]` |
+| Meta labels/controls | stays body-sm (14px) | priority label `fontSize: 14px` |
+
+`Textarea` needed `md:text-base` to override the primitive's `md:text-sm` and
+reach 16px on desktop; the comment `<p>` has no primitive baseline so plain
+`text-base` is 16px.
+
+**Section order** reads title → meta strip (members, labels, priority, due,
+estimate) → **description → checklist → comments → attachments** — the document
+body order the AC specifies, with the properties grouped under the title (US-031's
+"description under the title" preserved: description is the first body section).
+The `card-section-*` ids are retained, so the header "Add to card" affordances
+still scroll/focus their targets (US-043). Autosave (US-032), date picker
+(US-039), mention autocomplete, and live-store assignee updates (US-011) are
+untouched. Brand color appears only on the **Post comment** primary action; the
+cover scrim gradient (`:763`) is left for US-053.
+
+**Automated checks (2026-06-30):** `tsc --noEmit` clean (lone errors are in
+untracked `scripts/perf-measure.ts`/`seed-perf-board.ts`, not this branch);
+ESLint on the 4 changed components = 0 errors (3 pre-existing `<img>` LCP
+warnings on the cover image, untouched); `npm test` = 523/523 pass.
+
+**Manual QA — light + dark, desktop (1280) + 375px, no console errors/warnings:**
+opened a rich card (4 tinted labels, activity history) on the brand-qa board.
+Verified single ~720px column, hairline-divided sections, compact meta strip,
+de-boxed comments/activity, Labels attach popover + Members add popover open and
+operate in both themes, 0px horizontal overflow at 375px. Screenshots in
+scratchpad `qa052/`: `01-detail-light`, `02-detail-light-full`,
+`03-detail-light-bottom`, `04-detail-dark-top`, `05-labels-popover-dark`,
+`06-detail-375-dark`.

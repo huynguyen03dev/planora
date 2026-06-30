@@ -215,7 +215,7 @@ export function CardDetailSheet({
       }}
     >
       <DialogContent
-        className="h-[min(88vh,760px)] max-w-[min(96vw,1120px)] overflow-hidden p-0"
+        className="h-[min(90vh,820px)] max-w-[min(96vw,768px)] overflow-hidden p-0"
         onEscapeKeyDown={(e) => {
           // While the hero title is being edited, Escape reverts the field
           // (handled on the input) and must NOT close the dialog. Cancel Radix's
@@ -503,7 +503,7 @@ function CardDetailDialogBody({
         checklist, members, attachments, and post comments.
       </DialogDescription>
 
-      <div className="space-y-3 border-b px-6 py-4">
+      <div className="space-y-3 border-b px-8 py-4">
         <div className="flex items-start justify-between gap-3">
           {canEdit ? (
             <input
@@ -549,10 +549,12 @@ function CardDetailDialogBody({
                 }
               }}
               disabled={isPending}
-              className="-mx-2 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2 py-1 text-2xl font-semibold tracking-tight outline-none hover:bg-muted/50 focus-visible:border-ring focus-visible:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-60"
+              // card-title token: 22px / weight 500 / 1.25 / -0.4px tracking
+              // (DESIGN.md §244 / §335), not the old text-2xl/600.
+              className="-mx-2 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2 py-1 text-[22px] font-medium leading-[1.25] tracking-[-0.4px] outline-none hover:bg-muted/50 focus-visible:border-ring focus-visible:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-60"
             />
           ) : (
-            <h2 className="min-w-0 flex-1 px-0 py-1 text-2xl font-semibold tracking-tight">
+            <h2 className="min-w-0 flex-1 px-0 py-1 text-[22px] font-medium leading-[1.25] tracking-[-0.4px]">
               {card.title}
             </h2>
           )}
@@ -767,341 +769,322 @@ function CardDetailDialogBody({
         </div>
       ) : null}
 
-      <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1.65fr)_minmax(320px,1fr)]">
-        <div className="min-h-0 overflow-y-auto px-6 py-6">
-          <div className="space-y-6">
-            <section className="space-y-3">
-              <h3 className="text-base font-semibold">Description</h3>
-
-              {canEdit ? (
-                <Textarea
-                  id="card-detail-description"
-                  value={draftDescription}
-                  onChange={(e) => {
-                    setDraftDescription(e.target.value);
-                    setError("");
-                  }}
-                  onFocus={() => setDescriptionEditing(true)}
-                  onBlur={() => {
-                    setDescriptionEditing(false);
-                    saveDetails(draftTitle, draftDescription);
-                  }}
-                  disabled={isPending}
-                  rows={10}
-                  placeholder="Add a more detailed description..."
-                  className="min-h-44"
-                />
+      {/* Single ~720px reading column (the modal width is the document measure)
+          with 32px padding. Sub-sections are divided by border hairlines, not
+          boxed sub-cards, and the former right rail collapses into the stack
+          (US-052 / DESIGN.md §103–110 / §332–340). */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-8 py-8">
+        {/* Properties (meta row): the relocated right-rail controls + the former
+            priority/dates sub-card boxes collapse into one compact, de-boxed
+            property strip under the title. Property labels/controls stay
+            body-sm (14px); only the document body (description, comments) steps
+            to body (16px) — DESIGN.md §256–258. */}
+        <div className="space-y-3">
+          <div id="card-section-members" className="flex items-start gap-3">
+            <span className="w-20 shrink-0 pt-1.5 text-sm text-muted-foreground">
+              Members
+            </span>
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+              {assignees.length > 0 ? (
+                assignees.map((member) => (
+                  <span
+                    key={member.id}
+                    className="flex items-center gap-1.5 rounded-full bg-muted py-0.5 pl-0.5 pr-2.5 text-sm"
+                  >
+                    <MemberAvatar name={member.name} image={member.image} size="sm" />
+                    <span className="max-w-[10rem] truncate">{member.name}</span>
+                    {canEdit ? (
+                      <button
+                        type="button"
+                        aria-label={`Remove ${member.name}`}
+                        className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+                        disabled={isPending}
+                        onClick={() => handleRemoveMember(member.id)}
+                      >
+                        ×
+                      </button>
+                    ) : null}
+                  </span>
+                ))
               ) : (
-                <div className="min-h-44 rounded-lg border bg-muted/20 px-4 py-3 text-sm whitespace-pre-wrap">
-                  {card.description || "No description yet."}
-                </div>
-              )}
-            </section>
-
-            <div id="card-section-labels">
-              <CardLabelsSection
-                cardId={card.id}
-                boardId={boardId}
-                boardLabels={boardLabels}
-                cardLabelIds={cardLabelIds}
-                canEdit={canEdit}
-              />
-            </div>
-
-            <div id="card-section-checklist">
-              <CardChecklistsSection
-                cardId={card.id}
-                checklists={checklists}
-                canEdit={canEdit}
-              />
-            </div>
-
-            <section
-              id="card-section-priority"
-              className="space-y-3 rounded-lg border bg-muted/20 p-4"
-            >
-              <div className="space-y-2">
-                <label htmlFor="card-priority" className="text-sm font-semibold">
-                  Priority
-                </label>
-                <Select
-                  value={draftPriority}
-                  onValueChange={(value) => {
-                    setDraftPriority(value);
-                    setError("");
-                    const fd = new FormData();
-                    fd.set("cardId", card.id);
-                    fd.set("priority", value);
-                    startTransition(async () => {
-                      const result = await updateCardPriorityAction(fd);
-                      if (!result.success) {
-                        setError(result.error);
-                        setDraftPriority(card.priority ?? "NONE");
-                      } else router.refresh();
-                    });
-                  }}
-                  disabled={!canEdit || isPending}
-                >
-                  <SelectTrigger id="card-priority" className="w-full">
-                    <SelectValue placeholder="No priority" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="NONE">No priority</SelectItem>
-                    <SelectItem value="URGENT">🔴 Urgent</SelectItem>
-                    <SelectItem value="HIGH">🟠 High</SelectItem>
-                    <SelectItem value="MEDIUM">🟡 Medium</SelectItem>
-                    <SelectItem value="LOW">🔵 Low</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </section>
-
-            <section
-              id="card-section-dates"
-              className="grid gap-3 rounded-lg border bg-muted/20 p-4 sm:grid-cols-2"
-            >
-              <div className="space-y-2">
-                <label
-                  htmlFor="card-estimate-hours"
-                  className="text-sm font-semibold"
-                >
-                  Estimate
-                </label>
-                <Select
-                  value={draftEstimateHours === "" ? "none" : draftEstimateHours}
-                  onValueChange={(value) => {
-                    const next = value === "none" ? "" : value;
-                    setDraftEstimateHours(next);
-                    setError("");
-                    saveEstimate(next);
-                  }}
-                  disabled={!canEdit || isPending || Boolean(card.completedAt)}
-                >
-                  <SelectTrigger id="card-estimate-hours" className="w-full">
-                    <SelectValue placeholder="No estimate" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {estimateOptions.map((option) => (
-                      <SelectItem key={option || "none"} value={option || "none"}>
-                        {option ? `${option}h` : "No estimate"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {card.completedAt ? (
-                  <p className="text-xs text-muted-foreground">
-                    Locked after first completion.
-                  </p>
-                ) : null}
-              </div>
-
-              <div className="space-y-2">
-                <span id="card-due-date-label" className="text-sm font-semibold">
-                  Due date
+                <span className="text-sm text-muted-foreground">
+                  {canEdit ? "No members yet" : "None"}
                 </span>
-                <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
+              )}
+              {canEdit ? (
+                <Popover>
                   <PopoverTrigger asChild>
-                    <Button
-                      id="card-due-date"
-                      type="button"
-                      variant="outline"
-                      disabled={!canEdit || isPending}
-                      aria-labelledby="card-due-date-label card-due-date"
-                      aria-label={
-                        selectedDueDate
-                          ? `Due date: ${format(selectedDueDate, "PPP")}. Change due date`
-                          : "Set due date"
-                      }
-                      className={cn(
-                        "w-full justify-start text-left font-normal",
-                        !selectedDueDate && "text-muted-foreground",
-                      )}
-                    >
-                      <HugeiconsIcon
-                        icon={Calendar03Icon}
-                        size={16}
-                        strokeWidth={2}
-                        className="mr-2 shrink-0"
-                      />
-                      {selectedDueDate
-                        ? format(selectedDueDate, "PPP")
-                        : "No due date"}
+                    <Button type="button" variant="outline" size="sm">
+                      <HugeiconsIcon icon={UserMultipleIcon} size={16} strokeWidth={2} />
+                      Add
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="single"
-                      autoFocus
-                      selected={selectedDueDate}
-                      defaultMonth={selectedDueDate}
-                      onSelect={(date) => {
-                        if (!date) {
-                          return;
-                        }
-                        const next = toDueDateValue(date);
-                        setDraftDueDate(next);
-                        setError("");
-                        saveDueDate(next);
-                        setDueDateOpen(false);
-                      }}
-                    />
-                    {draftDueDate ? (
-                      <div className="border-t p-2">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="w-full justify-center"
-                          disabled={!canEdit || isPending}
-                          onClick={() => {
-                            setDraftDueDate("");
-                            setError("");
-                            saveDueDate("");
-                            setDueDateOpen(false);
-                          }}
-                        >
-                          Clear due date
-                        </Button>
-                      </div>
-                    ) : null}
-                  </PopoverContent>
-                </Popover>
-              </div>
-            </section>
-
-            <section id="card-section-members" className="space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-base font-semibold">Members</h3>
-                <span className="text-xs text-muted-foreground">
-                  {canEdit ? "Manage assignees" : "Visible to all members"}
-                </span>
-              </div>
-
-              {assignees.length === 0 ? (
-                <div className="rounded-lg border bg-background p-4">
-                  <p className="text-sm text-muted-foreground">
-                    No members assigned yet.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {assignees.map((member) => (
-                    <div
-                      key={member.id}
-                      className="flex items-center justify-between rounded-lg border bg-background px-3 py-2"
-                    >
-                      <div className="flex min-w-0 items-center gap-3">
-                        <MemberAvatar name={member.name} image={member.image} />
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-medium">{member.name}</div>
-                          <div className="truncate text-xs text-muted-foreground">{member.email}</div>
-                        </div>
-                      </div>
-                      {canEdit ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={isPending}
-                          onClick={() => {
-                            handleRemoveMember(member.id);
-                          }}
-                        >
-                          Remove
-                        </Button>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {canEdit ? (
-                <div className="space-y-3">
-                  <h4 className="text-sm font-semibold">Add members</h4>
-                  {availableMembers.length === 0 ? (
-                    <div className="rounded-lg border bg-background p-3">
+                  <PopoverContent align="start" className="w-72 space-y-2">
+                    <p className="text-sm font-semibold">Assign members</p>
+                    {availableMembers.length === 0 ? (
                       <p className="text-sm text-muted-foreground">
                         All workspace members are already assigned to this card.
                       </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {availableMembers.map((member) => (
-                        <Button
-                          key={member.id}
-                          variant="outline"
-                          className="h-auto w-full justify-start gap-3 py-2"
-                          disabled={isPending}
-                          onClick={() => {
-                            handleAssignMember(member.id);
-                          }}
-                        >
-                          <MemberAvatar name={member.name} image={member.image} size="sm" />
-                          <span className="flex min-w-0 flex-col text-left">
-                            <span className="truncate text-sm font-medium">{member.name}</span>
-                            <span className="truncate text-xs font-normal text-muted-foreground">
-                              {member.email}
+                    ) : (
+                      <div className="space-y-1">
+                        {availableMembers.map((member) => (
+                          <Button
+                            key={member.id}
+                            variant="ghost"
+                            className="h-auto w-full justify-start gap-3 py-1.5"
+                            disabled={isPending}
+                            onClick={() => handleAssignMember(member.id)}
+                          >
+                            <MemberAvatar name={member.name} image={member.image} size="sm" />
+                            <span className="flex min-w-0 flex-col text-left">
+                              <span className="truncate text-sm font-medium">{member.name}</span>
+                              <span className="truncate text-xs font-normal text-muted-foreground">
+                                {member.email}
+                              </span>
                             </span>
-                          </span>
-                        </Button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                  </PopoverContent>
+                </Popover>
               ) : null}
-            </section>
+            </div>
+          </div>
 
-            <div id="card-section-attachments">
-              <CardAttachments
-                cardId={card.id}
-                attachments={attachments}
-                canEdit={canEdit}
-              />
+          <div id="card-section-labels" className="flex items-start gap-3">
+            <span className="w-20 shrink-0 pt-1.5 text-sm text-muted-foreground">
+              Labels
+            </span>
+            <CardLabelsSection
+              cardId={card.id}
+              boardId={boardId}
+              boardLabels={boardLabels}
+              cardLabelIds={cardLabelIds}
+              canEdit={canEdit}
+            />
+          </div>
+
+          <div id="card-section-priority" className="flex items-center gap-3">
+            <label htmlFor="card-priority" className="w-20 shrink-0 text-sm text-muted-foreground">
+              Priority
+            </label>
+            <Select
+              value={draftPriority}
+              onValueChange={(value) => {
+                setDraftPriority(value);
+                setError("");
+                const fd = new FormData();
+                fd.set("cardId", card.id);
+                fd.set("priority", value);
+                startTransition(async () => {
+                  const result = await updateCardPriorityAction(fd);
+                  if (!result.success) {
+                    setError(result.error);
+                    setDraftPriority(card.priority ?? "NONE");
+                  } else router.refresh();
+                });
+              }}
+              disabled={!canEdit || isPending}
+            >
+              <SelectTrigger id="card-priority" className="w-full max-w-[15rem]">
+                <SelectValue placeholder="No priority" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="NONE">No priority</SelectItem>
+                <SelectItem value="URGENT">🔴 Urgent</SelectItem>
+                <SelectItem value="HIGH">🟠 High</SelectItem>
+                <SelectItem value="MEDIUM">🟡 Medium</SelectItem>
+                <SelectItem value="LOW">🔵 Low</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div id="card-section-dates" className="flex items-center gap-3">
+            <span id="card-due-date-label" className="w-20 shrink-0 text-sm text-muted-foreground">
+              Due date
+            </span>
+            <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  id="card-due-date"
+                  type="button"
+                  variant="outline"
+                  disabled={!canEdit || isPending}
+                  aria-labelledby="card-due-date-label card-due-date"
+                  aria-label={
+                    selectedDueDate
+                      ? `Due date: ${format(selectedDueDate, "PPP")}. Change due date`
+                      : "Set due date"
+                  }
+                  className={cn(
+                    "w-full max-w-[15rem] justify-start text-left font-normal",
+                    !selectedDueDate && "text-muted-foreground",
+                  )}
+                >
+                  <HugeiconsIcon
+                    icon={Calendar03Icon}
+                    size={16}
+                    strokeWidth={2}
+                    className="mr-2 shrink-0"
+                  />
+                  {selectedDueDate ? format(selectedDueDate, "PPP") : "No due date"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  autoFocus
+                  selected={selectedDueDate}
+                  defaultMonth={selectedDueDate}
+                  onSelect={(date) => {
+                    if (!date) {
+                      return;
+                    }
+                    const next = toDueDateValue(date);
+                    setDraftDueDate(next);
+                    setError("");
+                    saveDueDate(next);
+                    setDueDateOpen(false);
+                  }}
+                />
+                {draftDueDate ? (
+                  <div className="border-t p-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-center"
+                      disabled={!canEdit || isPending}
+                      onClick={() => {
+                        setDraftDueDate("");
+                        setError("");
+                        saveDueDate("");
+                        setDueDateOpen(false);
+                      }}
+                    >
+                      Clear due date
+                    </Button>
+                  </div>
+                ) : null}
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <label htmlFor="card-estimate-hours" className="w-20 shrink-0 text-sm text-muted-foreground">
+              Estimate
+            </label>
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <Select
+                value={draftEstimateHours === "" ? "none" : draftEstimateHours}
+                onValueChange={(value) => {
+                  const next = value === "none" ? "" : value;
+                  setDraftEstimateHours(next);
+                  setError("");
+                  saveEstimate(next);
+                }}
+                disabled={!canEdit || isPending || Boolean(card.completedAt)}
+              >
+                <SelectTrigger id="card-estimate-hours" className="w-full max-w-[10rem]">
+                  <SelectValue placeholder="No estimate" />
+                </SelectTrigger>
+                <SelectContent>
+                  {estimateOptions.map((option) => (
+                    <SelectItem key={option || "none"} value={option || "none"}>
+                      {option ? `${option}h` : "No estimate"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {card.completedAt ? (
+                <span className="text-xs text-muted-foreground">
+                  Locked after first completion.
+                </span>
+              ) : null}
             </div>
           </div>
         </div>
 
-        <aside className="min-h-0 overflow-y-auto border-t bg-muted/10 px-6 py-6 lg:border-l lg:border-t-0">
-          <div className="space-y-5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-base font-semibold">Comments and activity</h3>
-                <p className="text-sm text-muted-foreground">
-                  Collaboration history for this card.
-                </p>
-              </div>
+        {/* Document body — hairline-divided sections (no boxed sub-cards).
+            Description + comment body read at 16px / 1.55 leading. */}
+        <section className="mt-6 space-y-3 border-t border-border pt-6">
+          <h3 className="text-base font-semibold">Description</h3>
+
+          {canEdit ? (
+            <Textarea
+              id="card-detail-description"
+              value={draftDescription}
+              onChange={(e) => {
+                setDraftDescription(e.target.value);
+                setError("");
+              }}
+              onFocus={() => setDescriptionEditing(true)}
+              onBlur={() => {
+                setDescriptionEditing(false);
+                saveDetails(draftTitle, draftDescription);
+              }}
+              disabled={isPending}
+              rows={8}
+              placeholder="Add a more detailed description..."
+              className="min-h-40 text-base leading-[1.55] md:text-base"
+            />
+          ) : (
+            <div className="min-h-[3rem] whitespace-pre-wrap text-base leading-[1.55]">
+              {card.description || (
+                <span className="text-muted-foreground">No description yet.</span>
+              )}
             </div>
+          )}
+        </section>
 
-            <CommentComposer cardId={card.id} canComment={canComment} assignableMembers={assignableMembers} />
+        <div id="card-section-checklist" className="mt-6 border-t border-border pt-6">
+          <CardChecklistsSection
+            cardId={card.id}
+            checklists={checklists}
+            canEdit={canEdit}
+          />
+        </div>
 
-            {comments.length === 0 && activity.length === 0 ? (
-              <div className="rounded-lg border bg-background p-4">
-                <p className="text-sm text-muted-foreground">
-                  No comments or activity yet. Start the conversation!
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {comments.length > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="text-sm font-semibold">Comments</h4>
-                    {comments.map((comment) => (
-                      <CommentItem key={comment.id} comment={comment} memberNames={assignableMembers.map((m) => m.name)} />
-                    ))}
-                  </div>
-                )}
+        <section className="mt-6 space-y-4 border-t border-border pt-6">
+          <h3 className="text-base font-semibold">Comments and activity</h3>
 
-                {activity.length > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="text-sm font-semibold">Activity</h4>
-                    {activity.map((entry) => (
-                      <ActivityItem key={entry.id} activity={entry} />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </aside>
+          <CommentComposer cardId={card.id} canComment={canComment} assignableMembers={assignableMembers} />
+
+          {comments.length === 0 && activity.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No comments or activity yet. Start the conversation!
+            </p>
+          ) : (
+            <div className="space-y-5">
+              {comments.length > 0 && (
+                <div className="space-y-3">
+                  <h4 className="text-sm font-medium text-muted-foreground">Comments</h4>
+                  {comments.map((comment) => (
+                    <CommentItem key={comment.id} comment={comment} memberNames={assignableMembers.map((m) => m.name)} />
+                  ))}
+                </div>
+              )}
+
+              {activity.length > 0 && (
+                <div className="space-y-3">
+                  <h4 className="text-sm font-medium text-muted-foreground">Activity</h4>
+                  {activity.map((entry) => (
+                    <ActivityItem key={entry.id} activity={entry} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+
+        <div id="card-section-attachments" className="mt-6 border-t border-border pt-6">
+          <CardAttachments
+            cardId={card.id}
+            attachments={attachments}
+            canEdit={canEdit}
+          />
+        </div>
       </div>
     </div>
   );
@@ -1304,16 +1287,16 @@ function CommentItem({ comment, memberNames }: CommentItemProps) {
   });
 
   return (
-    <div className="rounded-lg border bg-background p-3">
-      <div className="flex items-start gap-3">
-        <MemberAvatar name={comment.user.name} image={comment.user.image} />
-        <div className="min-w-0 space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">{comment.user.name}</span>
-            <span className="text-xs text-muted-foreground">{date}</span>
-          </div>
-          <p className="whitespace-pre-wrap text-sm">{renderMentionContent(comment.content, memberNames)}</p>
+    <div className="flex items-start gap-3">
+      <MemberAvatar name={comment.user.name} image={comment.user.image} />
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">{comment.user.name}</span>
+          <span className="text-xs text-muted-foreground">{date}</span>
         </div>
+        <p className="whitespace-pre-wrap text-base leading-[1.55]">
+          {renderMentionContent(comment.content, memberNames)}
+        </p>
       </div>
     </div>
   );
@@ -1334,16 +1317,13 @@ function ActivityItem({ activity }: ActivityItemProps) {
   const actionLabel = getActivityLabel(activity.action, activity.entityType, activity.metadata);
 
   return (
-    <div className="rounded-lg border bg-background p-3">
-      <div className="flex items-start gap-3">
-        <MemberAvatar name={activity.user.name} image={activity.user.image} />
-        <div className="min-w-0 space-y-1">
-          <p className="text-sm">
-            <span className="font-medium">{activity.user.name}</span>{" "}
-            {actionLabel}
-          </p>
-          <p className="text-xs text-muted-foreground">{date}</p>
-        </div>
+    <div className="flex items-start gap-3">
+      <MemberAvatar name={activity.user.name} image={activity.user.image} />
+      <div className="min-w-0 flex-1 space-y-1">
+        <p className="text-sm">
+          <span className="font-medium">{activity.user.name}</span> {actionLabel}
+        </p>
+        <p className="text-xs text-muted-foreground">{date}</p>
       </div>
     </div>
   );
