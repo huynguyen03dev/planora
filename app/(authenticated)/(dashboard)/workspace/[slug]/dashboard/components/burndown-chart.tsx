@@ -290,7 +290,7 @@ export function BurndownChart({ data }: BurndownChartProps) {
         </div>
         <div>
           <span className="text-muted-foreground">Change</span>
-          <div className={`font-medium ${delta <= 0 ? "text-green-600" : "text-red-600"}`}>
+          <div className={`font-medium ${delta <= 0 ? "text-success-foreground" : "text-destructive"}`}>
             {delta <= 0 ? "−" : "+"}
             {formatHours(Math.abs(delta))}
           </div>

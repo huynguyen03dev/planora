@@ -255,7 +255,7 @@ export function FlowChart({ data, createdTotal, completedTotal }: FlowChartProps
         </div>
         <div>
           <span className="text-muted-foreground">Net open</span>
-          <div className={`font-medium ${net > 0 ? "text-red-600" : net < 0 ? "text-green-600" : ""}`}>
+          <div className={`font-medium ${net > 0 ? "text-destructive" : net < 0 ? "text-success-foreground" : ""}`}>
             {net > 0 ? "+" : ""}
             {net}
           </div>

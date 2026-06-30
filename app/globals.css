@@ -26,6 +26,10 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -70,6 +74,16 @@
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  /* US-050 semantic status tokens (IN-03, decision 0013) — tint + deeper
+     same-hue text, modeled on --selected-tint. STATUS color for data surfaces,
+     not a chrome accent (no button fills / section bg / hover). Green hue ~150,
+     amber hue ~70-80, both distinct from the blue chart ramp (~260).
+     success-foreground vs white card 5.54:1, vs --success tint 4.85:1 (AA).
+     warning-foreground vs white card 5.65:1, vs --warning tint 4.82:1 (AA). */
+  --success: oklch(0.95 0.04 150);
+  --success-foreground: oklch(0.5 0.15 150);
+  --warning: oklch(0.95 0.06 80);
+  --warning-foreground: oklch(0.52 0.12 70);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   /* focus ring = brand hue. button.tsx adds full-opacity border-ring on focus
@@ -118,6 +132,14 @@
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  /* US-050 status tokens (dark) — deep tint + bright same-hue text; shadows read
+     weakly on dark so status leans on the brighter text (§285).
+     success-foreground vs card 10.07:1, vs --success tint 6.96:1 (AA).
+     warning-foreground vs card 10.91:1, vs --warning tint 7.50:1 (AA). */
+  --success: oklch(0.32 0.06 150);
+  --success-foreground: oklch(0.8 0.13 150);
+  --warning: oklch(0.33 0.05 75);
+  --warning-foreground: oklch(0.84 0.11 85);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   /* brighter brand ring for visibility on the dark canvas (5.31:1 full vs bg). */
