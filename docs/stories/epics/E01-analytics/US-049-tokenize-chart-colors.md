@@ -2,7 +2,11 @@
 
 ## Status
 
-planned
+done — implemented 2026-06-30 on `feat/us-049-tokenize-chart-colors`; manual QA
+passed (light + dark, DOM-verified token resolution + measured contrast). The
+burndown line uses **`--chart-2`**, not `--chart-1` as originally specced —
+`--chart-1` is the palest ramp rung and fails WCAG 3:1 on the white card
+(1.81:1); see Evidence.
 
 ## Lane
 
@@ -43,7 +47,11 @@ like the rest of the surface.
 ## Acceptance Criteria
 
 - `burndown-chart.tsx` and `flow-chart.tsx` series colors resolve from CSS
-  tokens — no inline hex remains in these files. Burndown line → `--chart-1`.
+  tokens — no inline hex remains in these files. Burndown line → **`--chart-2`**
+  (revised from `--chart-1`: that rung measures only 1.81:1 on the white card,
+  below the 3:1 graphical-object bar; `--chart-2` clears it at 3.76:1 light /
+  4.73:1 dark and matches the prior `#3b82f6`. Still a `--chart-*` token, so the
+  contract — series resolve through tokens, no hex — holds).
 - The created-vs-completed flow keeps **two categorically distinct** series:
   **completed → `--success-foreground`** (deep saturated green for a visible
   stroke/area — not the pale `--success` tint), **created → `--chart-2`** (per the
@@ -89,4 +97,64 @@ None.
 
 ## Evidence
 
-_Pending implementation._
+**Migration (2 files, 3 hex literals retired):**
+
+| Series | Was | Now | File |
+| --- | --- | --- | --- |
+| Burndown remaining-work line | `#3b82f6` | `var(--chart-2)` | `burndown-chart.tsx:14` |
+| Flow "Created" line | `#6366f1` | `var(--chart-2)` | `flow-chart.tsx:16` |
+| Flow "Completed" line | `#10b981` | `var(--success-foreground)` | `flow-chart.tsx:17` |
+
+Each constant feeds every usage site in its file (stroke, hover marker `fill`,
+legend swatch / tooltip-dot inline `style`, and the burndown gradient `stop`s),
+so the single-constant swap tokenizes all of them. No `#hex` /
+`indigo|emerald|sky|blue|green-N` literal remains in either file (grep-verified).
+
+**Why the burndown line is `--chart-2`, not `--chart-1` (spec revision):** the
+`--chart-1…5` ramp is a monochrome blue value-ladder (only lightness varies);
+`--chart-1` is its palest rung (L\*≈0.81) and was designed as a light *fill*
+step, not a foreground stroke. Measured on the white card it is **1.81:1** —
+below WCAG 1.4.11's 3:1 for graphical objects, and a regression from the prior
+`#3b82f6` (~3.7:1). `--chart-2` is the closest legible rung and is what the flow
+chart already uses for its primary blue series, so both single-blue lines now
+share one token.
+
+**Measured WCAG contrast** (computed oklch→sRGB; graphical objects need ≥3:1):
+
+| Series | Token | Light vs card | Dark vs card |
+| --- | --- | --- | --- |
+| Burndown / Created | `--chart-2` | 3.76:1 | 4.73:1 |
+| Completed | `--success-foreground` | 5.54:1 | 10.0:1 |
+
+`--chart-1` for reference: 1.81:1 light (rejected) / 9.83:1 dark. The two flow
+series are categorically distinct hues (blue vs green) in both themes — their
+low luminance ratio to each other (1.47 light / 2.11 dark) is irrelevant because
+hue, not lightness, separates them.
+
+**Manual QA — light + dark, no console errors/warnings:**
+
+- DOM-verified `getComputedStyle` on the rendered SVG paths: flow "Created" =
+  `var(--chart-2)` → blue `lab(54.2 13.3 -74.7)`; flow "Completed" =
+  `var(--success-foreground)` → green (light `lab(43.8 -45.8 30.9)`, dark
+  `lab(78.5 -38.9 25.3)`) — the green correctly swaps to the brighter dark-theme
+  value. Legend swatches resolve through the same tokens.
+- The burndown chart is in its empty state in the QA workspace (no estimated
+  cards in range), so its line is not exercised by this dataset; its
+  `--chart-2` token resolves at the document level and the identical token +
+  SVG-attribute mechanism is proven legible by the flow "Created" line, which
+  renders as a clean blue on the card in both themes.
+- No deviation in the semantic *delta* text (burndown "Change", flow "Net open")
+  — that coloring is US-050's and was left untouched ("Net open: +2" still
+  renders destructive-red).
+
+**Automated checks (2026-06-30):** ESLint on both changed components = 0 errors;
+`npm test` = 523/523 pass; `npm run build` = app "Compiled successfully" (the lone
+TS error is in `scripts/perf-measure.ts`, an untracked pre-existing script not on
+this branch).
+
+Screenshots (scratchpad `qa049/`): `01-light-full`, `03-dark-flow`.
+
+**Note:** a stale Turbopack cache initially served a CSS bundle predating US-050's
+`--success-foreground` token (the completed line rendered `stroke: none`);
+resolved by clearing `.next` and restarting the dev server — source was always
+correct. Same gotcha as US-050.
