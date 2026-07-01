@@ -2,7 +2,7 @@
 
 ## Status
 
-planned
+implemented
 
 ## Lane
 
@@ -70,4 +70,11 @@ None.
 
 ## Evidence
 
-Add after implementation (record delete vs. activate decision here).
+- **Decision: deleted** `app/proxy.ts` (the recommended, lowest-risk option).
+  Re-verified before deletion: `grep -rn "proxy"` across `app/`, `components/`,
+  `lib/`, `server.ts`, `next.config.ts` found no importer of the module (the
+  only other hit was an unrelated Prisma-generated symbol). Route protection is
+  unchanged — pages still gate via `verifySession` (`lib/dal.ts`).
+- Activation (moving it to root `proxy.ts` to enforce edge-level auth) remains
+  out of scope, deferred to a future high-risk story per the Acceptance Criteria.
+- `npm run build` and `npm run lint`: see PR CI / commit for results.
