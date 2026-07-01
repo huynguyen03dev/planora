@@ -1,12 +1,14 @@
 import "server-only";
 
-import type { Prisma } from "@/app/generated/prisma/client";
-
 import db from "@/lib/prisma";
-import { renumberPositions } from "@/lib/ordering";
+import {
+  CARD_POSITION_GAP,
+  LIVE_CARD_SCOPE,
+  PositionSpaceExhaustedError,
+  normalizeCardPositions,
+  resolveCardPosition,
+} from "@/lib/ordering";
 
-const CARD_POSITION_GAP = 16384;
-const MIN_POSITION_GAP = 0.0001;
 const MAX_REORDER_CARD_RETRIES = 3;
 
 function isUniqueConstraintError(error: unknown): error is { code: string } {
@@ -83,7 +85,7 @@ export async function createCard(data: {
   const lastCard = await db.card.findFirst({
     where: {
       listId: data.listId,
-      archivedAt: null,
+      ...LIVE_CARD_SCOPE,
     },
     orderBy: [{ position: "desc" }, { createdAt: "desc" }],
     select: { position: true },
@@ -130,89 +132,14 @@ export async function archiveCard(cardId: string): Promise<void> {
   });
 }
 
-async function resolveCardPosition(
-  client: Prisma.TransactionClient,
-  data: {
-    targetListId: string;
-    prevCardId?: string | null;
-    nextCardId?: string | null;
-  },
-): Promise<number> {
-  const prevCard = data.prevCardId
-    ? await client.card.findUnique({
-        where: { id: data.prevCardId, archivedAt: null },
-        select: { id: true, listId: true, position: true },
-      })
-    : null;
-  const nextCard = data.nextCardId
-    ? await client.card.findUnique({
-        where: { id: data.nextCardId, archivedAt: null },
-        select: { id: true, listId: true, position: true },
-      })
-    : null;
-
-  if (data.prevCardId && (!prevCard || prevCard.listId !== data.targetListId)) {
-    throw new Error("Invalid prevCardId");
-  }
-
-  if (data.nextCardId && (!nextCard || nextCard.listId !== data.targetListId)) {
-    throw new Error("Invalid nextCardId");
-  }
-
-  if (prevCard && nextCard) {
-    const lower = Math.min(prevCard.position, nextCard.position);
-    const upper = Math.max(prevCard.position, nextCard.position);
-    return (lower + upper) / 2;
-  }
-
-  if (prevCard) {
-    return prevCard.position + CARD_POSITION_GAP;
-  }
-
-  if (nextCard) {
-    return nextCard.position - CARD_POSITION_GAP;
-  }
-
-  const lastCard = await client.card.findFirst({
-    where: {
-      listId: data.targetListId,
-      archivedAt: null,
-    },
-    orderBy: [{ position: "desc" }, { createdAt: "desc" }],
-    select: { position: true },
-  });
-
-  return lastCard ? lastCard.position + CARD_POSITION_GAP : CARD_POSITION_GAP;
-}
-
-/**
- * Renumber a list's live cards onto a fresh evenly-spaced sequence, collision
- * safe under the `card_listId_position_live_key` partial unique index. Runs on
- * the caller's transaction client so it can share the reorder's transaction.
- */
-async function normalizeCardPositionsInTx(
-  tx: Prisma.TransactionClient,
-  listId: string,
-): Promise<void> {
-  const cards = await tx.card.findMany({
-    where: { listId, archivedAt: null },
-    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
-    select: { id: true, position: true },
-  });
-
-  await renumberPositions(cards, CARD_POSITION_GAP, (id, position) =>
-    tx.card.update({ where: { id }, data: { position } }),
-  );
-}
-
 export async function reorderCardWithinListByNeighbors(data: {
   cardId: string;
   prevCardId?: string | null;
   nextCardId?: string | null;
 }): Promise<CardRecord> {
   for (let attempt = 0; attempt < MAX_REORDER_CARD_RETRIES; attempt += 1) {
-    // Retained across the catch so a P2002 collision can renumber the right
-    // list before the next attempt; set once the card is read inside the tx.
+    // Retained across the catch so a collision can renumber the right list
+    // before the next attempt; set once the card is read inside the tx.
     let listIdForRetry: string | null = null;
 
     try {
@@ -220,7 +147,7 @@ export async function reorderCardWithinListByNeighbors(data: {
         const existingCard = await tx.card.findUnique({
           where: {
             id: data.cardId,
-            archivedAt: null,
+            ...LIVE_CARD_SCOPE,
           },
           select: {
             id: true,
@@ -235,25 +162,19 @@ export async function reorderCardWithinListByNeighbors(data: {
 
         listIdForRetry = existingCard.listId;
 
-        let nextPosition = await resolveCardPosition(tx, {
+        // Exclude the card being moved so the adjacency search bisects against
+        // the real occupants, not the mover's own (stale) slot.
+        const nextPosition = await resolveCardPosition(tx, {
           targetListId: existingCard.listId,
           prevCardId: data.prevCardId,
           nextCardId: data.nextCardId,
+          excludeCardId: data.cardId,
         });
-
-        if (Math.abs(nextPosition - existingCard.position) < MIN_POSITION_GAP) {
-          await normalizeCardPositionsInTx(tx, existingCard.listId);
-          nextPosition = await resolveCardPosition(tx, {
-            targetListId: existingCard.listId,
-            prevCardId: data.prevCardId,
-            nextCardId: data.nextCardId,
-          });
-        }
 
         return await tx.card.update({
           where: {
             id: data.cardId,
-            archivedAt: null,
+            ...LIVE_CARD_SCOPE,
           },
           data: {
             position: nextPosition,
@@ -278,13 +199,16 @@ export async function reorderCardWithinListByNeighbors(data: {
         });
       });
     } catch (error) {
+      // A P2002 (a rival grabbed the slot) or a PositionSpaceExhaustedError (no
+      // gap left to bisect) both mean: renumber the list to restore full gaps,
+      // then retry the reorder against the fresh layout.
       if (
-        isUniqueConstraintError(error) &&
+        (isUniqueConstraintError(error) || error instanceof PositionSpaceExhaustedError) &&
         attempt < MAX_REORDER_CARD_RETRIES - 1 &&
         listIdForRetry
       ) {
         const listId = listIdForRetry;
-        await db.$transaction((tx) => normalizeCardPositionsInTx(tx, listId));
+        await db.$transaction((tx) => normalizeCardPositions(tx, listId));
         continue;
       }
 

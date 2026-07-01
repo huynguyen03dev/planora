@@ -1,7 +1,9 @@
 import "server-only";
 
+import type { Prisma } from "@/app/generated/prisma/client";
+
 import db from "@/lib/prisma";
-import { renumberPositions } from "@/lib/ordering";
+import { PositionSpaceExhaustedError, renumberPositions } from "@/lib/ordering";
 
 const LIST_POSITION_GAP = 16384;
 const MAX_CREATE_LIST_RETRIES = 5;
@@ -82,8 +84,12 @@ export async function getListsByBoardId(
       createdAt: true,
       updatedAt: true,
       cards: {
+        // "live" = matches the card_listId_position_live_key index predicate
+        // (archived AND soft-deleted both excluded), so the board never renders
+        // — nor lets a user drag relative to — a card the position index ignores.
         where: {
           archivedAt: null,
+          deletedAt: null,
         },
         orderBy: [{ position: "asc" }, { createdAt: "asc" }],
         select: {
@@ -251,20 +257,19 @@ type PositionContext = {
   nextListId?: string | null;
 };
 
-async function resolveListPosition({
-  boardId,
-  prevListId,
-  nextListId,
-}: PositionContext): Promise<number> {
+async function resolveListPosition(
+  client: Prisma.TransactionClient,
+  { boardId, prevListId, nextListId }: PositionContext,
+): Promise<number> {
   const [prevList, nextList] = await Promise.all([
     prevListId
-      ? db.list.findUnique({
+      ? client.list.findUnique({
           where: { id: prevListId },
           select: { id: true, boardId: true, position: true },
         })
       : null,
     nextListId
-      ? db.list.findUnique({
+      ? client.list.findUnique({
           where: { id: nextListId },
           select: { id: true, boardId: true, position: true },
         })
@@ -293,7 +298,7 @@ async function resolveListPosition({
     return nextList.position - LIST_POSITION_GAP;
   }
 
-  const lastList = await db.list.findFirst({
+  const lastList = await client.list.findFirst({
     where: { boardId },
     orderBy: { position: "desc" },
     select: { position: true },
@@ -308,48 +313,63 @@ export async function reorderListByNeighbors(data: {
   nextListId?: string | null;
 }): Promise<ListRecord> {
   for (let attempt = 0; attempt < MAX_REORDER_LIST_RETRIES; attempt += 1) {
-    const currentList = await db.list.findUnique({
-      where: { id: data.listId },
-      select: {
-        id: true,
-        boardId: true,
-        position: true,
-      },
-    });
-
-    if (!currentList) {
-      throw new Error("List not found");
-    }
-
-    const nextPosition = await resolveListPosition({
-      boardId: currentList.boardId,
-      prevListId: data.prevListId,
-      nextListId: data.nextListId,
-    });
-
-    const gapToCurrent = Math.abs(nextPosition - currentList.position);
-    if (gapToCurrent < MIN_POSITION_GAP) {
-      await normalizeListPositions(currentList.boardId);
-      continue;
-    }
+    // boardId of the list being moved, captured inside the tx so a too-tight gap
+    // can renumber the right board before the next attempt.
+    let boardIdForRetry: string | null = null;
 
     try {
-      return await db.list.update({
-        where: { id: data.listId },
-        data: { position: nextPosition },
-        select: {
-          id: true,
-          boardId: true,
-          title: true,
-          position: true,
-          isDone: true,
-          createdAt: true,
-          updatedAt: true,
-        },
+      // Read-check-write in one transaction (ARCHITECTURE: "transaction for
+      // multi-row position writes") so the position decision and the update see
+      // a consistent snapshot, matching the card reorder path.
+      return await db.$transaction(async (tx) => {
+        const currentList = await tx.list.findUnique({
+          where: { id: data.listId },
+          select: {
+            id: true,
+            boardId: true,
+            position: true,
+          },
+        });
+
+        if (!currentList) {
+          throw new Error("List not found");
+        }
+
+        boardIdForRetry = currentList.boardId;
+
+        const nextPosition = await resolveListPosition(tx, {
+          boardId: currentList.boardId,
+          prevListId: data.prevListId,
+          nextListId: data.nextListId,
+        });
+
+        if (Math.abs(nextPosition - currentList.position) < MIN_POSITION_GAP) {
+          // No room to slot between neighbours — bail out of the tx and let the
+          // catch renumber the board, then retry against the fresh layout.
+          throw new PositionSpaceExhaustedError();
+        }
+
+        return await tx.list.update({
+          where: { id: data.listId },
+          data: { position: nextPosition },
+          select: {
+            id: true,
+            boardId: true,
+            title: true,
+            position: true,
+            isDone: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
       });
     } catch (error) {
-      if (isUniqueConstraintError(error) && attempt < MAX_REORDER_LIST_RETRIES - 1) {
-        await normalizeListPositions(currentList.boardId);
+      if (
+        (isUniqueConstraintError(error) || error instanceof PositionSpaceExhaustedError) &&
+        attempt < MAX_REORDER_LIST_RETRIES - 1 &&
+        boardIdForRetry
+      ) {
+        await normalizeListPositions(boardIdForRetry);
         continue;
       }
 

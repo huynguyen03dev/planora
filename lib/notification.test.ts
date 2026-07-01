@@ -36,7 +36,7 @@ vi.mock("@/emails/due-date-email", () => ({ DueDateEmail: vi.fn(() => null) }));
 // through the real resolveMentions (US-057), so these tests exercise the actual
 // matching logic — the prior mock left it unproven.
 
-function makeMember(userId: string, name: string, email: string | null) {
+function makeMember(userId: string, name: string | null, email: string | null) {
   return { userId, user: { name, email } };
 }
 
@@ -182,21 +182,80 @@ describe("notifyMentioned email sending", () => {
     );
   });
 
-  it("one failing email does not abort the others (Promise.allSettled)", async () => {
+  it("one rejecting email does not abort the sibling recipient (allSettled non-abort)", async () => {
     mockDb.workspaceMember.findMany.mockResolvedValue([
       makeMember("user-2", "Bob", "bob@test.com"),
       makeMember("user-3", "Charlie", "charlie@test.com"),
     ]);
     mockDb.notification.create.mockResolvedValue(mockNotification());
-    // First recipient's email rejects; the second must still be attempted.
-    mockSendEmail.mockRejectedValueOnce(new Error("Email API unavailable"));
+    // Bob's email rejects. The contract: Charlie's email is still sent, both
+    // MENTIONED rows are still created, and notifyMentioned does not throw.
+    mockSendEmail.mockImplementation(async ({ to }: { to: string }) => {
+      if (to === "bob@test.com") throw new Error("Email API unavailable");
+      return undefined;
+    });
 
     await expect(
       notifyMentioned({ ...defaultData, content: "Hey @Bob and @Charlie!" }),
     ).resolves.toBeUndefined();
 
-    expect(mockSendEmail).toHaveBeenCalledTimes(2);
     expect(mockDb.notification.create).toHaveBeenCalledTimes(2);
+    // The sibling (Charlie) was still emailed despite Bob's rejection.
+    expect(mockSendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "charlie@test.com" }),
+    );
+  });
+
+  it("notifies the LAST member when two share a display name (no recipient swap)", async () => {
+    // Duplicate display names: the notify path must pick the same member the
+    // pre-US-057 scanner did (last-inserted), not silently swap recipients.
+    mockDb.workspaceMember.findMany.mockResolvedValue([
+      makeMember("user-2", "Sam", "sam1@test.com"),
+      makeMember("user-9", "Sam", "sam2@test.com"),
+    ]);
+    mockDb.notification.create.mockResolvedValue(mockNotification());
+
+    await notifyMentioned({ ...defaultData, content: "@Sam take a look" });
+
+    expect(mockDb.notification.create).toHaveBeenCalledTimes(1);
+    expect(mockDb.notification.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ userId: "user-9" }) }),
+    );
+  });
+
+  it("a member with no name never matches a bare '@' or any mention (guard is load-bearing)", async () => {
+    // If a null name leaked through as "", `startsWith("")` would match EVERY
+    // '@', notifying the nameless member on every comment. The filter must drop
+    // them. Bob (named) still resolves normally.
+    mockDb.workspaceMember.findMany.mockResolvedValue([
+      makeMember("ghost", null, "ghost@test.com"),
+      makeMember("user-2", "Bob", "bob@test.com"),
+    ]);
+    mockDb.notification.create.mockResolvedValue(mockNotification());
+
+    await notifyMentioned({ ...defaultData, content: "email me @ @Bob" });
+
+    // Only Bob — never the nameless "ghost".
+    expect(mockDb.notification.create).toHaveBeenCalledTimes(1);
+    expect(mockDb.notification.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ userId: "user-2" }) }),
+    );
+  });
+
+  it("matches a name after an '@' even mid-token, e.g. an email-like 'foo@Bob' (documents existing behavior)", async () => {
+    // The scanner keys on any '@', so "foo@Bob" resolves Bob — same as the
+    // pre-US-057 behavior. Pinned so a future boundary change is a conscious one.
+    mockDb.workspaceMember.findMany.mockResolvedValue([
+      makeMember("user-2", "Bob", "bob@test.com"),
+    ]);
+    mockDb.notification.create.mockResolvedValue(mockNotification());
+
+    await notifyMentioned({ ...defaultData, content: "mail foo@Bob now" });
+
+    expect(mockDb.notification.create).toHaveBeenCalledTimes(1);
+    expect(mockDb.notification.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ userId: "user-2" }) }),
+    );
   });
 });
 

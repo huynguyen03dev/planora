@@ -145,6 +145,17 @@ describe("resolveMentions", () => {
   it("ignores members without a name", () => {
     expect(resolveMentions("@Alice", [{ userId: "x", name: "" }])).toEqual([]);
   });
+
+  it("resolves duplicate display names to the LAST member (pre-US-057 parity)", () => {
+    // The old name-keyed Map kept the last-inserted member for identical names;
+    // resolveMentions preserves that so notify recipients don't silently swap.
+    const dupes = [
+      { userId: "first", name: "Sam" },
+      { userId: "second", name: "Sam" },
+    ];
+    const [match] = resolveMentions("@Sam ping", dupes);
+    expect(match.member.userId).toBe("second");
+  });
 });
 
 describe("extractMentionQuery", () => {
