@@ -182,53 +182,66 @@ export async function openCardDetail(page: Page, title: string): Promise<void> {
 }
 
 /**
- * Rename the card whose detail sheet is open and save. Resolves once the save
- * action has resolved (button back to "Save changes" and disabled because the
- * draft now matches the persisted title) — i.e. the `card:updated` emit fired.
+ * Rename the card whose detail sheet is open and save. US-032 removed the
+ * "Save changes" button — every field now autosaves on blur. So: fill the
+ * title, press Enter (which blurs → triggers the autosave transition), then
+ * wait for the inline "Saving…" status to clear, i.e. the `card:updated` emit
+ * has fired and the action resolved.
  */
 export async function renameOpenCard(page: Page, newTitle: string): Promise<void> {
-  await page.locator("#card-detail-title").fill(newTitle);
-  const save = page.getByRole("button", { name: /save changes/i });
-  await save.click();
-  await expect(save).toHaveText(/save changes/i);
-  await expect(save).toBeDisabled();
+  const title = page.locator("#card-detail-title");
+  await title.fill(newTitle);
+  await title.press("Enter");
+  await expect(page.getByText(/saving/i)).toHaveCount(0);
 }
 
 // ── Label management (in the open card detail sheet) ──────────────────────
-// Label-set CRUD lives in the card detail sheet's "Board labels" list
-// (card-labels-section.tsx): each label is an <li> with Edit / Delete controls.
-// Driving rename/delete here exercises the real updateLabelAction /
-// deleteLabelAction — the Server Actions whose realtime emit US-010 adds.
+// US-033 moved board-label CRUD (rename / recolor / delete / create) out of the
+// inline card list into a "Manage labels" dialog (card-labels-section.tsx →
+// ManageLabelsDialog). Each label there is an <li> that renders its name as text
+// plus Edit / Delete controls. Driving rename/delete here exercises the real
+// updateLabelAction / deleteLabelAction — the Server Actions whose realtime emit
+// US-010 adds.
 
-/** The board-labels list row for a label, scoped by its current name. */
-function boardLabelRow(page: Page, labelName: string) {
-  return page.locator("li").filter({ hasText: labelName });
+/** Open the "Manage labels" dialog from the open card sheet; returns its locator. */
+async function openManageLabelsDialog(page: Page) {
+  await page.getByRole("button", { name: /manage labels/i }).click();
+  const dialog = page.getByRole("dialog", { name: /manage board labels/i });
+  await expect(dialog).toBeVisible();
+  return dialog;
 }
 
 /**
- * Rename a board label via the open card detail sheet: Edit → fill name → Save.
- * Resolves once the editor has closed (the action resolved and router.refresh
- * reseeded the sheet), i.e. the `card:labels-updated` fan-out has been emitted.
+ * Rename a board label via the "Manage labels" dialog: open → Edit → fill name →
+ * Save. Resolves once the inline editor has closed (the action resolved and
+ * router.refresh reseeded), i.e. the `card:labels-updated` fan-out was emitted.
  */
 export async function renameBoardLabel(
   page: Page,
   currentName: string,
   newName: string,
 ): Promise<void> {
-  await boardLabelRow(page, currentName).getByRole("button", { name: /^edit$/i }).click();
-  const nameInput = page.getByPlaceholder("Label name");
+  const dialog = await openManageLabelsDialog(page);
+  await dialog
+    .locator("li")
+    .filter({ hasText: currentName })
+    .getByRole("button", { name: /^edit$/i })
+    .click();
+  const nameInput = dialog.getByPlaceholder("Label name");
   await nameInput.fill(newName);
-  await page.getByRole("button", { name: /^save$/i }).click();
+  await dialog.getByRole("button", { name: /^save$/i }).click();
   await expect(nameInput).toHaveCount(0);
 }
 
 /**
- * Delete a board label via the open card detail sheet. Resolves once the label
+ * Delete a board label via the "Manage labels" dialog. Resolves once the label
  * row is gone (the delete resolved), i.e. the fan-out has been emitted.
  */
 export async function deleteBoardLabel(page: Page, name: string): Promise<void> {
-  await boardLabelRow(page, name).getByRole("button", { name: /^delete$/i }).click();
-  await expect(boardLabelRow(page, name)).toHaveCount(0);
+  const dialog = await openManageLabelsDialog(page);
+  const row = dialog.locator("li").filter({ hasText: name });
+  await row.getByRole("button", { name: /^delete$/i }).click();
+  await expect(row).toHaveCount(0);
 }
 
 // ── Card members (in the open card detail sheet) ──────────────────────────
@@ -236,25 +249,36 @@ export async function deleteBoardLabel(page: Page, name: string): Promise<void> 
 // realtime proof observes the open sheet. assignCardMemberAction /
 // removeCardMemberAction are the actions whose realtime emit US-011 adds.
 
-/** The "Members" section of the open card detail sheet. */
+/**
+ * The Members section of the open card detail sheet. US-043/052 replaced the
+ * old `<section>` + "Members" heading with a `<div id="card-section-members">`
+ * (a plain label span, no heading), so scope by that id.
+ */
 export function cardMembersSection(page: Page) {
-  return page
-    .locator("section")
-    .filter({ has: page.getByRole("heading", { name: "Members", exact: true }) });
+  return page.locator("#card-section-members");
 }
 
 /**
- * Assigned-member "Remove" buttons in the open sheet — exactly one per assignee
- * (editor-only; the "Add members" list uses name+email buttons, not "Remove").
- * Count is therefore the live assignee count.
+ * Assigned-member remove buttons in the open sheet — exactly one per assignee.
+ * US-043 made each an icon-only "×" button labelled `aria-label="Remove {name}"`
+ * (not a text "Remove" button), so match names starting "Remove ". Count is
+ * therefore the live assignee count.
  */
 export function assignedMemberRemoveButtons(page: Page) {
-  return cardMembersSection(page).getByRole("button", { name: /^remove$/i });
+  return cardMembersSection(page).getByRole("button", { name: /^remove\s/i });
 }
 
-/** Assign a member to the open card via the "Add members" list, matched by name/email. */
+/**
+ * Assign a member to the open card. US-043/052 moved the assignable list behind
+ * an "Add" popover: click the trigger, then pick the member (by name/email)
+ * from the portaled popover content.
+ */
 export async function assignMemberInOpenCard(page: Page, match: string | RegExp): Promise<void> {
-  await cardMembersSection(page)
+  await cardMembersSection(page).getByRole("button", { name: /^add$/i }).click();
+  const popover = page
+    .locator('[data-slot="popover-content"]')
+    .filter({ hasText: "Assign members" });
+  await popover
     .getByRole("button", { name: typeof match === "string" ? new RegExp(match) : match })
     .click();
 }
@@ -274,4 +298,15 @@ export function listColumnById(page: Page, listId: string) {
 /** A card by title, scoped to a specific list's droppable (by list id). */
 export function cardInListById(page: Page, listId: string, cardTitle: string) {
   return page.locator(`[data-rfd-droppable-id="${listId}"]`).getByText(cardTitle, { exact: true });
+}
+
+/**
+ * A card-face label mark by name, scoped to a list's droppable. US-044 renders
+ * labels as a compact color "bar" by default (name only in `aria-label`/`title`,
+ * no visible text node) and as a text "chip" when labels are expanded — so
+ * `getByText` misses the default. Both variants set `title={label.name}`, so
+ * match by title to cover either rendering.
+ */
+export function cardLabelInListById(page: Page, listId: string, labelName: string) {
+  return page.locator(`[data-rfd-droppable-id="${listId}"]`).getByTitle(labelName, { exact: true });
 }
