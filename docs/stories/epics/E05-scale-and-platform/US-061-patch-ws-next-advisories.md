@@ -2,7 +2,7 @@
 
 ## Status
 
-planned
+implemented
 
 ## Lane
 
@@ -76,4 +76,45 @@ Consider a recurring `npm audit` check (backlog / CI gate US-008) — note if fr
 
 ## Evidence
 
-Add after implementation (attach the pre/post audit diff).
+- **Pre-fix `npm audit` (`next` runtime HIGHs):** DoS with Server Components
+  (`<16.2.3`/`<16.2.5`), Middleware/Proxy bypass via segment-prefetch routes incl.
+  incomplete-fix follow-up (`<16.2.5`/`<16.2.6`), SSRF via WebSocket upgrades
+  (`<16.2.5`), DoS via connection exhaustion with Cache Components (`<16.2.5`),
+  Middleware/Proxy bypass via dynamic route parameter injection (`<16.2.5`),
+  Middleware/Proxy bypass in Pages Router i18n (`<16.2.5`). The highest lower
+  bound across all of these is `<16.2.6`; picked `16.2.9` (latest stable 16.x at
+  fix time) per the AC's `≥16.2.9` floor. `ws` HIGH: memory-exhaustion DoS from
+  tiny fragments (`>=8.0.0 <8.21.0`), transitively via `socket.io`.
+- **Fix applied:**
+  - `package.json`: bumped the exact `next` pin `"16.1.6"` → `"16.2.9"` (a
+    deliberate manual bump, not `npm audit fix`, since the pin is exact and
+    `--force` would sweep in unrelated Prisma-chain churn). Bumped the
+    lockstep-pinned `eslint-config-next` `"16.1.6"` → `"16.2.9"` alongside it.
+  - Added a scoped `"overrides": { "ws": "^8.21.0" }` (no prior `overrides`
+    block existed) to force the transitive `ws` resolution past the fixed
+    version without touching `socket.io`/`socket.io-client` themselves.
+  - `npm install` — `package-lock.json` diff confirmed scoped to exactly: `next`,
+    its `@next/*` platform packages, `eslint-config-next`, and `ws` (verified via
+    `git diff package-lock.json | grep -oE '"node_modules/...' | sort -u`; no
+    unrelated package churn).
+- **Post-fix `npm audit`:** `ws` — cleared entirely. `next` — all the HIGH
+  advisories above are gone; the only remaining `next` audit entry is an
+  unrelated **moderate** transitive-`postcss` issue with a `fixAvailable` that
+  requires a major (`9.3.3`) downgrade — explicitly out of this story's scope
+  (not one of the cited HIGHs, and "fixing" it means going backwards).
+- **Verification:**
+  - `npm run build` — Turbopack compiles successfully under Next.js **16.2.9**
+    (banner confirms the new version); the only failure is the pre-existing,
+    unrelated `scripts/perf-measure.ts:36` TS error (an untracked WIP script —
+    confirmed identical on `dev` before this change, same as noted in US-060's
+    evidence).
+  - `npm test` → 523/523 pass (matches the story's stated baseline exactly).
+  - `npm run lint` → 100 problems, unchanged from baseline.
+  - **Manual smoke** (`npm run dev`, real `server.ts` boot, not mocked): `GET /`
+    → `200`; `GET /socket.io/?EIO=4&transport=polling` → `200` with a real
+    Engine.IO handshake body (`sid`, `upgrades: ["websocket"]`, `pingInterval`,
+    `pingTimeout`) — confirms Socket.io still serves correctly over the patched
+    `ws` after the override.
+- The CRITICAL `vitest` advisory and the remaining non-`ws`/`next` HIGHs (Hono,
+  Prisma dev-tooling chain, kysely, lodash, etc.) are out of scope per the AC and
+  tracked separately, not touched here.
