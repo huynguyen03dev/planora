@@ -219,10 +219,15 @@ export function BoardContent({
           isDropDisabled={!canEdit}
         >
           {(provided) => (
+            // No flex `gap` between lists: like the cards, @hello-pangea/dnd
+            // sizes its horizontal list placeholder from the dragged column's
+            // box (margins included) but not from this row's flex gap, so a gap
+            // made the row shrink/shift mid-drag. Spacing now lives as mr-4 on
+            // each ListColumn's draggable wrapper.
             <div
               ref={provided.innerRef}
               {...provided.droppableProps}
-              className="flex h-full w-max min-w-full items-start gap-4 p-3 sm:p-4"
+              className="flex h-full w-max min-w-full items-start p-3 sm:p-4"
             >
               {boardLists.map((list, index) => (
                 <ListColumn
