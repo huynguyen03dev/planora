@@ -59,6 +59,7 @@ import type { ActivityRecord } from "@/lib/activity";
 import type { AttachmentRecord } from "@/lib/attachment";
 import type { CardMemberRecord, AssignableWorkspaceMemberRecord } from "@/lib/card-member";
 import { cn, getInitials } from "@/lib/utils";
+import { resolveMentions } from "@/lib/mention";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
 import { useMentionAutocomplete } from "./use-mention-autocomplete";
 
@@ -1230,56 +1231,36 @@ type CommentItemProps = {
 function renderMentionContent(content: string, memberNames: string[]) {
   if (!memberNames.length) return content;
 
-  const lowerNames = memberNames.map((n) => n.toLowerCase());
+  // Share the single mention resolver (lib/mention.ts) with the notify path so
+  // what is highlighted and what is notified never diverge.
+  const matches = resolveMentions(
+    content,
+    memberNames.map((name) => ({ name })),
+  );
+  if (!matches.length) return content;
+
   const result: React.ReactNode[] = [];
-  let i = 0;
   let plainStart = 0;
 
-  function flushPlain(end: number) {
-    if (end > plainStart) {
-      result.push(content.slice(plainStart, end));
-      plainStart = end;
+  for (const match of matches) {
+    if (match.start > plainStart) {
+      result.push(content.slice(plainStart, match.start));
     }
+    result.push(
+      <span
+        key={match.start}
+        className="rounded bg-[var(--chart-2)]/10 px-0.5 font-medium text-[var(--chart-2)]"
+      >
+        @{match.member.name}
+      </span>
+    );
+    plainStart = match.end;
   }
 
-  while (i < content.length) {
-    if (content[i] === "@" && i + 1 < content.length) {
-      let bestMatch: { name: string; endIndex: number } | null = null;
-
-      for (let j = 0; j < memberNames.length; j++) {
-        const name = memberNames[j];
-        const lowerName = lowerNames[j];
-        const afterAt = content.slice(i + 1);
-        if (afterAt.toLowerCase().startsWith(lowerName)) {
-          const endIdx = i + 1 + name.length;
-          const nextChar = content[endIdx];
-          if (!nextChar || !/[a-zA-Z]/.test(nextChar)) {
-            if (!bestMatch || name.length > bestMatch.name.length) {
-              bestMatch = { name, endIndex: endIdx };
-            }
-          }
-        }
-      }
-
-      if (bestMatch) {
-        flushPlain(i);
-        result.push(
-          <span
-            key={i}
-            className="rounded bg-[var(--chart-2)]/10 px-0.5 font-medium text-[var(--chart-2)]"
-          >
-            @{bestMatch.name}
-          </span>
-        );
-        i = bestMatch.endIndex;
-        plainStart = i;
-        continue;
-      }
-    }
-    i++;
+  if (plainStart < content.length) {
+    result.push(content.slice(plainStart));
   }
 
-  flushPlain(content.length);
   return result;
 }
 

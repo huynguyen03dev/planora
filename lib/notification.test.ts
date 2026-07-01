@@ -32,11 +32,9 @@ vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
 vi.mock("@/lib/realtime/server", () => ({ emitNotificationNew: vi.fn() }));
 vi.mock("@/emails/mention-email", () => ({ MentionEmail: vi.fn(() => null) }));
 vi.mock("@/emails/due-date-email", () => ({ DueDateEmail: vi.fn(() => null) }));
-vi.mock("./mention", () => ({
-  parseMentions: vi.fn(),
-  mentionMatchesName: vi.fn(),
-  extractMentionQuery: vi.fn(),
-}));
+// NB: ./mention is intentionally NOT mocked. The notify path resolves mentions
+// through the real resolveMentions (US-057), so these tests exercise the actual
+// matching logic — the prior mock left it unproven.
 
 function makeMember(userId: string, name: string, email: string | null) {
   return { userId, user: { name, email } };
@@ -134,6 +132,71 @@ describe("notifyMentioned email sending", () => {
     // Notification was still created
     expect(mockDb.notification.create).toHaveBeenCalledTimes(1);
     expect(mockSendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves a full-name mention through the real resolver", async () => {
+    mockDb.workspaceMember.findMany.mockResolvedValue([
+      makeMember("user-2", "Bob", "bob@test.com"),
+    ]);
+    mockDb.notification.create.mockResolvedValue(mockNotification());
+
+    await notifyMentioned(defaultData); // content: "@Bob look at this card"
+
+    expect(mockDb.notification.create).toHaveBeenCalledTimes(1);
+    expect(mockDb.notification.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ userId: "user-2", type: "MENTIONED" }),
+      }),
+    );
+  });
+
+  it("does NOT notify on a partial/prefix mention (full-name matching preserved)", async () => {
+    // "@Bo" is a prefix of "Bob" — autocomplete would suggest it, but the notify
+    // path requires the full name, so no one is notified. This pins the chosen
+    // no-behavior-change semantics.
+    mockDb.workspaceMember.findMany.mockResolvedValue([
+      makeMember("user-2", "Bob", "bob@test.com"),
+    ]);
+
+    await notifyMentioned({ ...defaultData, content: "@Bo are you around?" });
+
+    expect(mockDb.notification.create).not.toHaveBeenCalled();
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
+  it("resolves a multi-word display name", async () => {
+    mockDb.workspaceMember.findMany.mockResolvedValue([
+      makeMember("user-2", "Bob", "bob@test.com"),
+      makeMember("user-3", "Bob Smith", "bobsmith@test.com"),
+    ]);
+    mockDb.notification.create.mockResolvedValue(mockNotification());
+
+    await notifyMentioned({ ...defaultData, content: "cc @Bob Smith on this" });
+
+    // Longest-name wins: Bob Smith, not Bob.
+    expect(mockDb.notification.create).toHaveBeenCalledTimes(1);
+    expect(mockDb.notification.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ userId: "user-3" }),
+      }),
+    );
+  });
+
+  it("one failing email does not abort the others (Promise.allSettled)", async () => {
+    mockDb.workspaceMember.findMany.mockResolvedValue([
+      makeMember("user-2", "Bob", "bob@test.com"),
+      makeMember("user-3", "Charlie", "charlie@test.com"),
+    ]);
+    mockDb.notification.create.mockResolvedValue(mockNotification());
+    // First recipient's email rejects; the second must still be attempted.
+    mockSendEmail.mockRejectedValueOnce(new Error("Email API unavailable"));
+
+    await expect(
+      notifyMentioned({ ...defaultData, content: "Hey @Bob and @Charlie!" }),
+    ).resolves.toBeUndefined();
+
+    expect(mockSendEmail).toHaveBeenCalledTimes(2);
+    expect(mockDb.notification.create).toHaveBeenCalledTimes(2);
   });
 });
 
