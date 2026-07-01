@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { Prisma } from "@/app/generated/prisma/client";
 
 import db from "@/lib/prisma";
+import { renumberPositions } from "@/lib/ordering";
 import { getBoardById } from "@/lib/board";
 import {
   updateCardDetails,
@@ -202,16 +203,11 @@ async function normalizeCardPositionsForTx(
   const cards = await tx.card.findMany({
     where: { listId, archivedAt: null },
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
-    select: { id: true },
+    select: { id: true, position: true },
   });
 
-  await Promise.all(
-    cards.map((card, index) =>
-      tx.card.update({
-        where: { id: card.id },
-        data: { position: CARD_POSITION_GAP * (index + 1) },
-      }),
-    ),
+  await renumberPositions(cards, CARD_POSITION_GAP, (id, position) =>
+    tx.card.update({ where: { id }, data: { position } }),
   );
 }
 
