@@ -30,7 +30,7 @@ import {
   openCardDetail,
   renameBoardLabel,
   deleteBoardLabel,
-  cardInListById,
+  cardLabelInListById,
 } from "./helpers/app";
 import {
   addWorkspaceMember,
@@ -111,15 +111,15 @@ test("a label renamed by one user updates the chip live for another (no reload)"
 
   // Bob opens the board; the "Triage" chip is on the card face.
   await bobPage.goto(`/boards/${boardId}`);
-  await expect(cardInListById(bobPage, todo, "Triage")).toBeVisible();
+  await expect(cardLabelInListById(bobPage, todo, "Triage")).toBeVisible();
 
   // Act: Alice opens the card and renames the label via the detail sheet.
   await openCardDetail(alicePage, "Task");
   await renameBoardLabel(alicePage, "Triage", "Renamed-Triage");
 
   // Assert: the chip text updates live on Bob's board — no reload.
-  await expect(cardInListById(bobPage, todo, "Renamed-Triage")).toBeVisible();
-  await expect(cardInListById(bobPage, todo, "Triage")).toHaveCount(0);
+  await expect(cardLabelInListById(bobPage, todo, "Renamed-Triage")).toBeVisible();
+  await expect(cardLabelInListById(bobPage, todo, "Triage")).toHaveCount(0);
 });
 
 test("a label deleted by one user removes the chip live for another (no reload)", async ({
@@ -137,12 +137,12 @@ test("a label deleted by one user removes the chip live for another (no reload)"
 
   // Bob opens the board; the "Obsolete" chip is on the card face.
   await bobPage.goto(`/boards/${boardId}`);
-  await expect(cardInListById(bobPage, todo, "Obsolete")).toBeVisible();
+  await expect(cardLabelInListById(bobPage, todo, "Obsolete")).toBeVisible();
 
   // Act: Alice opens the card and deletes the label via the detail sheet.
   await openCardDetail(alicePage, "Task");
   await deleteBoardLabel(alicePage, "Obsolete");
 
   // Assert: the chip disappears live on Bob's board — no reload.
-  await expect(cardInListById(bobPage, todo, "Obsolete")).toHaveCount(0);
+  await expect(cardLabelInListById(bobPage, todo, "Obsolete")).toHaveCount(0);
 });

@@ -336,10 +336,13 @@ function ListColumnComponent({
                     // The single vertical scroller: shrinks (min-h-0) within the
                     // capped column and scrolls its own cards when they overflow.
                     // themed-scrollbar keeps the native scrollbar on-theme.
-                    "themed-scrollbar min-h-0 overflow-y-auto rounded-md border border-transparent transition-colors",
-                    list.cards.length === 0 && !dropSnapshot.isDraggingOver
-                      ? "-mt-2 p-0"
-                      : "min-h-[2.5rem] p-1",
+                    // A permanent min-h + an empty-state child (below) keep the
+                    // droppable a real, non-collapsed drop target even when empty —
+                    // without a child element in the list, @hello-pangea/dnd can't
+                    // move a card into it (esp. via keyboard). (fbf98f7 dropped the
+                    // "No cards yet" child and collapsed the zone, which broke
+                    // dragging a card into an empty list.)
+                    "themed-scrollbar min-h-0 overflow-y-auto rounded-md border border-transparent p-1 transition-colors",
                     dropSnapshot.isDraggingOver
                       ? "border-primary/40 bg-background/80"
                       : "hover:bg-muted/30",
@@ -359,6 +362,15 @@ function ListColumnComponent({
                       />
                     ))}
                   </div>
+                  {list.cards.length === 0 && !dropSnapshot.isDraggingOver ? (
+                    // "No cards yet" is not just a hint: an empty list needs a sized
+                    // child inside the droppable so a card can be dropped into it
+                    // (without it the collapsed droppable is not a drop target).
+                    // (fbf98f7 removed this, which broke dragging into an empty list.)
+                    <p className="px-2 py-1.5 text-xs text-muted-foreground/70">
+                      No cards yet
+                    </p>
+                  ) : null}
                   {narrowing && list.cards.length > 0 && visibleCount === 0 ? (
                     <p className="px-1 py-2 text-xs text-muted-foreground">
                       No cards match

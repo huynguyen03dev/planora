@@ -109,8 +109,14 @@ test("a card moved across lists by one user relocates live for another (no reloa
   const todo = lists["To Do"];
   const doing = lists["Doing"];
 
-  // Alice seeds a card in "To Do".
+  // Alice seeds "Card X" in "To Do", plus an anchor card in the "Doing" target.
+  // The keyboard drag sensor can't land on a *completely empty* droppable
+  // (a known @hello-pangea/dnd limitation — mouse drag into an empty list works
+  // and is covered by list-column's drop-zone). Seeding one card makes "Doing" a
+  // populated target, so this test proves what it's actually about: the realtime
+  // card:moved propagation to Bob.
   await addCardToList(alicePage, todo, "Card X");
+  await addCardToList(alicePage, doing, "Anchor");
   const cardId = await getCardIdByTitle(boardId, "Card X");
 
   // Bob opens the board; the card starts in "To Do" and is NOT in "Doing".
