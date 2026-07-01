@@ -1,6 +1,7 @@
 import "server-only";
 
 import db from "@/lib/prisma";
+import { resolveMentions } from "@/lib/mention";
 import { emitNotificationNew } from "@/lib/realtime/server";
 import { sendEmail } from "@/lib/email";
 import { AssignEmail } from "@/emails/assign-email";
@@ -247,55 +248,31 @@ export async function notifyMentioned(data: {
 
     if (members.length === 0) return;
 
-    // Build a set of resolved user IDs by scanning the content for @memberName
-    // patterns. Uses the same algorithm as renderMentionContent: find each '@',
-    // then try to match the longest member name that follows it with a word
-    // boundary after.
-    const content = data.content;
-    const memberMap = new Map<string, { userId: string; name: string; email: string | null }>();
-    for (const m of members) {
-      if (m.user.name) memberMap.set(m.user.name.toLowerCase(), { userId: m.userId, name: m.user.name, email: m.user.email ?? null });
+    // Resolve mentions through the one shared resolver (lib/mention.ts), the
+    // same matcher the comment highlighter uses. Dedupe by userId and drop the
+    // commenter's own self-mention.
+    const resolved = new Map<string, { userId: string; name: string; email: string | null }>();
+    const matches = resolveMentions(
+      data.content,
+      members.map((m) => ({
+        userId: m.userId,
+        name: m.user.name ?? "",
+        email: m.user.email ?? null,
+      })),
+    );
+    for (const { member } of matches) {
+      resolved.set(member.userId, member);
     }
+    resolved.delete(data.commenterUserId);
 
-    const resolvedUserIds = new Set<string>();
-    let i = 0;
-    while (i < content.length) {
-      if (content[i] === "@" && i + 1 < content.length) {
-        let bestUserId: string | null = null;
-        let bestEnd = 0;
+    if (resolved.size === 0) return;
 
-        for (const [lowerName, { userId, name }] of memberMap) {
-          const afterAt = content.slice(i + 1);
-          if (afterAt.toLowerCase().startsWith(lowerName)) {
-            const endIdx = i + 1 + name.length;
-            const nextChar = content[endIdx];
-            if (nextChar === undefined || !/[a-zA-Z]/.test(nextChar)) {
-              if (name.length > (bestEnd - i - 1)) {
-                bestUserId = userId;
-                bestEnd = endIdx;
-              }
-            }
-          }
-        }
-
-        if (bestUserId) {
-          resolvedUserIds.add(bestUserId);
-          i = bestEnd;
-          continue;
-        }
-      }
-      i++;
-    }
-
-    // Filter out commenter
-    resolvedUserIds.delete(data.commenterUserId);
-
-    if (resolvedUserIds.size === 0) return;
+    const recipients = Array.from(resolved.values());
 
     await Promise.all(
-      Array.from(resolvedUserIds).map((userId) =>
+      recipients.map((member) =>
         createNotification({
-          userId,
+          userId: member.userId,
           type: "MENTIONED",
           title: `Mentioned in "${data.cardTitle}"`,
           message: `${data.commenterName} mentioned you in a comment on "${data.cardTitle}" in "${data.boardTitle}".`,
@@ -304,28 +281,30 @@ export async function notifyMentioned(data: {
       ),
     );
 
-    // Best-effort mention emails
+    // Best-effort mention emails — sent concurrently so one slow or failing
+    // recipient neither blocks nor drops the others.
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-    for (const userId of resolvedUserIds) {
-      const member = Array.from(memberMap.values()).find((m) => m.userId === userId);
-      if (!member?.email) continue;
+    await Promise.allSettled(
+      recipients.map(async (member) => {
+        if (!member.email) return;
 
-      try {
-        await sendEmail({
-          to: member.email,
-          subject: `You were mentioned in "${data.cardTitle}"`,
-          react: MentionEmail({
-            mentionedByName: data.commenterName,
-            cardTitle: data.cardTitle,
-            boardName: data.boardTitle,
-            cardLink: `${appUrl}/boards/${data.boardId}`,
-          }),
-          fromName: `${data.commenterName} mentioned you (Planora)`,
-        });
-      } catch (emailError) {
-        console.error("[notification] Failed to send mention email:", emailError);
-      }
-    }
+        try {
+          await sendEmail({
+            to: member.email,
+            subject: `You were mentioned in "${data.cardTitle}"`,
+            react: MentionEmail({
+              mentionedByName: data.commenterName,
+              cardTitle: data.cardTitle,
+              boardName: data.boardTitle,
+              cardLink: `${appUrl}/boards/${data.boardId}`,
+            }),
+            fromName: `${data.commenterName} mentioned you (Planora)`,
+          });
+        } catch (emailError) {
+          console.error("[notification] Failed to send mention email:", emailError);
+        }
+      }),
+    );
   } catch (error) {
     console.error("[notification] Failed to send mention notifications:", error);
   }

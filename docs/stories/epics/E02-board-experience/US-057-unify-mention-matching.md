@@ -2,7 +2,20 @@
 
 ## Status
 
-planned
+implemented — 2026-07-01, `feat/us-057-unify-mention-matching`. Shipped the
+**"unify + test, no behavior change"** option (the story's default behavior
+change was NOT adopted). Added `resolveMentions(content, members)` to
+`lib/mention.ts` — the single full-name longest-match resolver, matching the
+prior inline scanners exactly — and reconciled both divergent copies onto it:
+the `lib/notification.ts` notify scanner and the `card-detail-sheet.tsx`
+`renderMentionContent` highlighter. Mention emails now go out via
+`Promise.allSettled` (one failure no longer blocks or drops the rest).
+`parseMentions` / `mentionMatchesName` remain the autocomplete-suggestion
+helpers (prefix rule), unchanged. Proof: `lib/mention.test.ts` (+9
+`resolveMentions` cases incl. multi-word, partial→no-match, boundary); the 5
+`notifyMentioned` tests rewritten to drop the inert `./mention` mock and run the
+real resolver, +4 cases (full-name resolve, partial→no-notify parity, multi-word,
+`allSettled` non-abort). Full suite 559 green; tsc + lint clean on changed files.
 
 ## Lane
 
