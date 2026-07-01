@@ -215,7 +215,11 @@ function ListColumnComponent({
               // max-h-full caps the column at the board height so the card area
               // (below) scrolls internally instead of growing the page; short
               // lists stay compact (the column sizes to its content under the cap).
-              "flex max-h-full min-h-0 w-[80vw] max-w-80 shrink-0 flex-col gap-2 rounded-lg bg-muted p-3 sm:w-80 sm:max-w-none",
+              // mr-4 (not a parent flex `gap`) is the inter-list spacing, so
+              // @hello-pangea/dnd's horizontal placeholder reserves it and the
+              // row doesn't shift when a list is lifted/dropped. The gap-2 here
+              // is unrelated: it's this column's internal vertical rhythm.
+              "mr-4 flex max-h-full min-h-0 w-[80vw] max-w-80 shrink-0 flex-col gap-2 rounded-lg bg-muted p-3 sm:w-80 sm:max-w-none",
               snapshot.isDragging && "shadow-md ring-2 ring-primary/30",
             )}
           >
@@ -348,7 +352,15 @@ function ListColumnComponent({
                       : "hover:bg-muted/30",
                   )}
                 >
-                  <div className="flex flex-col gap-2">
+                  {/* No flex `gap` between cards: @hello-pangea/dnd sizes its
+                      drop placeholder from the dragged card's box (margins
+                      included) but NOT from the parent's flex gap. With gap,
+                      lifting a card removed one gap the placeholder never
+                      replaced, so the column shrank ~8px on lift and shoved the
+                      neighbor back on drop. Spacing now lives as mb-2 on each
+                      card (see list-card-item.tsx), which the placeholder
+                      mirrors, so the column height stays put through a drag. */}
+                  <div className="flex flex-col">
                     {list.cards.map((card, cardIndex) => (
                       <ListCardItem
                         key={card.id}

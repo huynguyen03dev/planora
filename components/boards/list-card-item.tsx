@@ -204,6 +204,11 @@ function ListCardItemComponent({
           <div
             ref={provided.innerRef}
             {...provided.draggableProps}
+            // mb-2 (not a parent flex `gap`) is the inter-card spacing: it's
+            // part of the card's own box, so @hello-pangea/dnd's placeholder
+            // reserves it during a drag and the column height doesn't shift on
+            // lift/drop. See the sibling note in list-column.tsx.
+            className="mb-2"
             style={{
               ...provided.draggableProps.style,
               ...(hidden ? { display: "none" } : null),
