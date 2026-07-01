@@ -2,7 +2,7 @@
 
 ## Status
 
-planned
+implemented
 
 ## Lane
 
@@ -79,8 +79,37 @@ interpreted as a formula.
 
 ## Harness Delta
 
-None.
+`csvCell` moved out of the `"use server"` actions file into `lib/csv.ts` —
+Next.js requires every export of a `"use server"` module to be an async
+function, so the synchronous helper couldn't be exported for direct unit
+testing in place. `dashboard/actions.ts` now imports it from `@/lib/csv`.
 
 ## Evidence
 
-Add after implementation.
+- `lib/csv.ts` (new): `csvCell` extracted verbatim + the formula-prefix guard
+  (`typeof value === "string" && /^[=+\-@\t\r]/.test(value)`), applied before
+  the existing comma/quote-wrap check. `lib/csv.test.ts` (new, 13 tests) unit
+  tests it directly, including the numeric carve-out (`csvCell(-50)` stays
+  `"-50"`; `csvCell("-50")` — a string that merely looks numeric — still gets
+  guarded to `"'-50"`, which is correct: the carve-out is on the JS type of the
+  input, not on whether the text looks like a number).
+- **Correction to plan:** the numeric-carve-out AC item can't be proven through
+  `generateAnalyticsCSV`'s `leadTimeRows` path, because `row.leadTimeHours` is
+  already `.toFixed(2)`'d to a **string** before it reaches `csvCell` — by the
+  time it arrives, `typeof value` is `"string"`, indistinguishable from real
+  text. (Lead time is a duration and can't be negative in practice, so this
+  isn't a live bug — but it means the carve-out is a property of `csvCell`
+  itself, tested directly in `lib/csv.test.ts`, not an integration-level case.)
+- Estimation Coverage row fix: initially routed the **whole** 4-field row
+  through `.map(csvCell)`, which incorrectly formula-guarded the static `"-"`
+  placeholder into `"'-"` (caught by the new test). Fixed to only pass the one
+  field that actually needs escaping — `Estimated: N, Unestimated: M` — through
+  `csvCell`; the static labels/placeholders are joined as plain literals.
+  Output: `Estimation Coverage (%),50.00,-,"Estimated: 3, Unestimated: 2"`.
+- `tests/analytics-export.test.ts` extended (not duplicated) with: formula-char
+  prefix on a card title, all five trigger chars (`= + - @` tab CR — note CR
+  additionally triggers the pre-existing quote-wrap since `\r` is in
+  `/[",\n\r]/`, tab does not), embedded newline stays quoted, Estimation
+  Coverage single-column. 540/540 project tests pass; lint unchanged at 100
+  pre-existing problems (none new).
+- PR: (opened after this commit) into `dev`.

@@ -162,8 +162,22 @@ describe("analytics export actions", () => {
     );
   });
 
-  it("escapes CSV cells that contain commas and quotes", async () => {
-    const csv = await generateAnalyticsCSV({
+  function basePayload(overrides: {
+    leadTimeRows?: Array<{
+      cardId: string;
+      cardTitle: string;
+      createdAt: string;
+      completedAt: string;
+      leadTimeHours: number;
+      wasLate: boolean;
+    }>;
+    estimationCoveragePercent?: {
+      current: number;
+      estimatedCount: number;
+      unestimatedCount: number;
+    };
+  } = {}) {
+    return {
       burndown: [],
       kpis: {
         remainingHours: { current: 0, previous: 0, change: 0 },
@@ -172,13 +186,13 @@ describe("analytics export actions", () => {
         overdueCount: { current: 0, previous: 0, change: 0 },
         completedLateCount: { current: 0, previous: 0, change: 0 },
         reopenRatePercent: { current: 0, previous: 0, change: 0 },
-        estimationCoveragePercent: {
+        estimationCoveragePercent: overrides.estimationCoveragePercent ?? {
           current: 0,
           estimatedCount: 0,
           unestimatedCount: 0,
         },
       },
-      leadTimeRows: [
+      leadTimeRows: overrides.leadTimeRows ?? [
         {
           cardId: "card-1",
           cardTitle: "Ship analytics, phase \"one\"",
@@ -198,10 +212,101 @@ describe("analytics export actions", () => {
         includeArchivedBoards: false,
         exportedAt: "2026-01-06T00:00:00.000Z",
       },
-    });
+    };
+  }
+
+  it("escapes CSV cells that contain commas and quotes", async () => {
+    const csv = await generateAnalyticsCSV(basePayload());
 
     expect(csv).toContain(
       'card-1,"Ship analytics, phase ""one""",2026-01-01T09:00:00.000Z,2026-01-04T09:00:00.000Z,72.00,true',
+    );
+  });
+
+  it("prefixes a formula-leading card title so it round-trips as inert text", async () => {
+    const csv = await generateAnalyticsCSV(
+      basePayload({
+        leadTimeRows: [
+          {
+            cardId: "card-1",
+            cardTitle: "=cmd|'/C calc'!A1",
+            createdAt: "2026-01-01T09:00:00.000Z",
+            completedAt: "2026-01-04T09:00:00.000Z",
+            leadTimeHours: 72,
+            wasLate: true,
+          },
+        ],
+      }),
+    );
+
+    expect(csv).toContain(
+      "card-1,'=cmd|'/C calc'!A1,2026-01-01T09:00:00.000Z",
+    );
+  });
+
+  it("guards +, -, @, tab, and CR leading card titles the same way", async () => {
+    const csv = await generateAnalyticsCSV(
+      basePayload({
+        leadTimeRows: [
+          "+1+1",
+          "-1+1",
+          "@SUM(1,1)",
+          "\tsneaky",
+          "\rsneaky",
+        ].map((cardTitle, i) => ({
+          cardId: `card-${i}`,
+          cardTitle,
+          createdAt: "2026-01-01T09:00:00.000Z",
+          completedAt: "2026-01-04T09:00:00.000Z",
+          leadTimeHours: 1,
+          wasLate: false,
+        })),
+      }),
+    );
+
+    expect(csv).toContain("card-0,'+1+1,");
+    expect(csv).toContain("card-1,'-1+1,");
+    expect(csv).toContain('card-2,"\'@SUM(1,1)"');
+    expect(csv).toContain("card-3,'\tsneaky,");
+    // \r also trips the existing quote-wrap check (it's in /[",\n\r]/), so
+    // the guarded cell is additionally quoted, same as a comma/quote would be.
+    expect(csv).toContain('card-4,"\'\rsneaky"');
+  });
+
+  it("keeps an embedded newline in a card title quoted", async () => {
+    const csv = await generateAnalyticsCSV(
+      basePayload({
+        leadTimeRows: [
+          {
+            cardId: "card-1",
+            cardTitle: "Line one\nLine two",
+            createdAt: "2026-01-01T09:00:00.000Z",
+            completedAt: "2026-01-04T09:00:00.000Z",
+            leadTimeHours: 1,
+            wasLate: false,
+          },
+        ],
+      }),
+    );
+
+    expect(csv).toContain('"Line one\nLine two"');
+  });
+
+  it("emits Estimation Coverage as a single quoted column, not split by the embedded comma", async () => {
+    const csv = await generateAnalyticsCSV(
+      basePayload({
+        estimationCoveragePercent: {
+          current: 50,
+          estimatedCount: 3,
+          unestimatedCount: 2,
+        },
+      }),
+    );
+
+    const lines = csv.split("\n");
+    const row = lines.find((line) => line.startsWith("Estimation Coverage"));
+    expect(row).toBe(
+      'Estimation Coverage (%),50.00,-,"Estimated: 3, Unestimated: 2"',
     );
   });
 });
