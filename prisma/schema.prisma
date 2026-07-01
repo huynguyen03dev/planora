@@ -283,6 +283,12 @@ model Card {
   @@index([listId, position])
   @@index([listId, archivedAt])
   @@index([dueDate, completedAt])
+  // Partial UNIQUE index `card_listId_position_live_key` on (listId, position)
+  // WHERE archivedAt IS NULL AND deletedAt IS NULL enforces live-card position
+  // uniqueness (US-056, decision 0015). It cannot be expressed as `@@unique`
+  // (Prisma has no WHERE predicate), so it lives in the
+  // 20260701134906_card_position_integrity migration only and is intentionally
+  // invisible to `prisma migrate` — expect a drift report; never drop it.
   @@map("card")
 }
 

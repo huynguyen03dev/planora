@@ -1,6 +1,7 @@
 import "server-only";
 
 import db from "@/lib/prisma";
+import { renumberPositions } from "@/lib/ordering";
 
 const LIST_POSITION_GAP = 16384;
 const MAX_CREATE_LIST_RETRIES = 5;
@@ -228,24 +229,20 @@ export async function updateListIsDone(listId: string, isDone: boolean): Promise
 }
 
 async function normalizeListPositions(boardId: string): Promise<void> {
-  const lists = await db.list.findMany({
-    where: { boardId },
-    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
-    select: { id: true },
+  // Collision-safe under the live `list_boardId_position_key` unique index: an
+  // in-place renumber can transiently assign a position another list still
+  // holds and abort mid-transaction, so renumber via a disjoint staging band.
+  await db.$transaction(async (tx) => {
+    const lists = await tx.list.findMany({
+      where: { boardId },
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+      select: { id: true, position: true },
+    });
+
+    await renumberPositions(lists, LIST_POSITION_GAP, (id, position) =>
+      tx.list.update({ where: { id }, data: { position } }),
+    );
   });
-
-  if (lists.length === 0) {
-    return;
-  }
-
-  await db.$transaction(
-    lists.map((list, index) =>
-      db.list.update({
-        where: { id: list.id },
-        data: { position: LIST_POSITION_GAP * (index + 1) },
-      }),
-    ),
-  );
 }
 
 type PositionContext = {

@@ -5,6 +5,21 @@ US-056 — Card position integrity under concurrent reorders. Epic:
 validation pass (2026-06-30); gated by decision
 `docs/decisions/0015-card-position-integrity.md`.
 
+## Status
+
+implemented — 2026-07-01, `feat/us-056-card-position-integrity`. Scoped per the
+"core + unique-index backstop" decision: FK-index perf work (V-7) deferred to a
+separate change. Shipped: partial unique index `card_listId_position_live_key`
+(live cards only) + dedupe migration `20260701134906_card_position_integrity`;
+shared collision-safe two-pass renumber `lib/ordering.ts` adopted by
+`normalizeCardPositions` (now in-tx, `lib/card.ts`), `normalizeCardPositionsForTx`
+(`actions.ts`, was `Promise.all`), and `normalizeListPositions` (`lib/list.ts`,
+V-8); same-list reorder wrapped in `db.$transaction` (V-4); dead
+`moveCardToListByNeighbors` deleted (V-5). Proof: `lib/ordering.test.ts` (6
+cases, collision-safety under a simulated unique index), full suite 552 green,
+tsc + lint clean, migration applied and index verified against the live DB with
+zero live duplicates.
+
 ## Current Behavior
 
 Card ordering uses gap-based `Float` positions (Planka pattern). Three linked
