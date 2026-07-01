@@ -2,7 +2,7 @@
 
 ## Status
 
-planned
+implemented
 
 ## Lane
 
@@ -81,4 +81,39 @@ None.
 
 ## Evidence
 
-Add after implementation.
+- **Fix** (`lib/authorization.ts`): wrapped the `auth.api.hasPermission` call in
+  `hasWorkspacePermission` with a `try/catch`. Verified the exact discriminator
+  against Better Auth 1.5.5 source rather than assuming it:
+  `organization.mjs:75` throws `APIError.from("UNAUTHORIZED", ...)`, and
+  `better-call`'s `InternalAPIError` constructor sets `this.status` to the
+  **string** status key (`"UNAUTHORIZED"`), not the numeric code — the numeric
+  `401` lands on `err.statusCode`, not `err.status`. The catch discriminates on
+  `err instanceof APIError && err.status === "UNAUTHORIZED"` (imported from the
+  `better-auth` package root, which re-exports the same `@better-auth/core/error`
+  class the organization plugin throws — confirmed via `instanceof` in tests, not
+  just type-checked) and returns `false`; anything else re-throws unchanged.
+- **Unit tests** (`lib/authorization.test.ts`, new, 5 tests): role-grants → `true`;
+  role-denies → `false`; non-member (`hasPermission` rejects with the exact
+  `APIError.from("UNAUTHORIZED", ...)` shape) → `false`, no throw; a non-member
+  `INTERNAL_SERVER_ERROR` (`has-permission.mjs`'s misconfigured-role/AC throw) →
+  still rejects, proving it is not swallowed into a deny; a non-`APIError` failure
+  (e.g. a network error) also still rejects unchanged.
+- **Server Action regression test** (`tests/server-actions/board.test.ts`, +1 test):
+  extends the existing US-006 security-boundary suite for `updateBoardAction`.
+  Makes the mocked `auth.api.hasPermission` reject with the same `UNAUTHORIZED`
+  shape for one call (`mockRejectedValueOnce`) to simulate a genuine non-member,
+  and asserts the action still returns the existing clean
+  `{ success: false, error: "Board not found" }` deny with no writes — proving
+  the fix at the Server Action boundary, not just inside the helper. Confirmed
+  the pre-existing A2/A3 tests in this suite exercise *role*-denial (mocked
+  `hasPermission` resolving `{ success: false }`), not the real non-member throw
+  path — so this new test was a genuine gap, not a duplicate.
+  Existence-masking is preserved: same error message as the role-deny branch.
+- **Results:** `npm test` → 529/529 pass (24 files; count differs from other
+  stories' evidence because this branch is cut from `dev` before US-058's PR is
+  merged in). `npm run lint` → 100 problems, unchanged from baseline (confirmed
+  clean on the touched files directly: `npx eslint lib/authorization.ts
+  lib/authorization.test.ts tests/server-actions/board.test.ts` → no output).
+  `npx tsc --noEmit` → only the pre-existing, unrelated
+  `scripts/perf-measure.ts:36` error (untracked WIP script; same failure
+  confirmed present on `dev` before this branch).
