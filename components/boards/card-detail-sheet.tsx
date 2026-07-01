@@ -1199,9 +1199,6 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
                   >
                     <MemberAvatar name={member.name} image={member.image} size="sm" />
                     <span className="flex-1 truncate">{member.name}</span>
-                    <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-                      {member.role}
-                    </span>
                   </div>
                 ))
               )}

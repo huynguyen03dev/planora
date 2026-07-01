@@ -289,7 +289,7 @@ export function BoardHeader({
         </div>
       </div>
 
-      {error ? <p className="text-sm text-destructive-foreground">{error}</p> : null}
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </header>
   );
 }

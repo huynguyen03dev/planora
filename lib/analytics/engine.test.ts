@@ -288,4 +288,86 @@ describe("getWorkspaceAnalytics", () => {
     expect(analytics.leadTime.median.lowConfidence).toBe(true);
     expect(analytics.estimationCoverage.lowConfidence).toBe(true);
   });
+
+  it("caps the lead-time detail rows at the newest completions, not creation order (MJ2)", async () => {
+    // Regression for the cap-before-sort bug: rows were capped at
+    // MAX_LEAD_TIME_ROWS (100) in context.cardIds (creation) order, THEN sorted
+    // by completedAt — so with >100 completions the table showed an arbitrary
+    // slice that disagreed with totalCompleted. It must now show the *newest*
+    // completions.
+    const TOTAL = 120; // > MAX_LEAD_TIME_ROWS
+    const createdEvents: TestHistoryEvent[] = [];
+    const completedEvents: TestHistoryEvent[] = [];
+    const titles: Record<string, string> = {};
+    const completedBaseMs = Date.parse("2026-02-01T00:00:00.000Z");
+
+    for (let i = 0; i < TOTAL; i += 1) {
+      const id = `card-${String(i).padStart(3, "0")}`;
+      titles[id] = `Card ${i}`;
+      // CARD_CREATED events carry sequence 1..TOTAL in id order, so
+      // context.cardIds is card-000..card-119 (creation order).
+      createdEvents.push(
+        historyEvent(
+          i + 1,
+          id,
+          $Enums.CardHistoryEventType.CARD_CREATED,
+          "2026-01-01T00:00:00.000Z",
+          {
+            listId: "todo",
+            listIsDone: false,
+            estimateHours: 1,
+            dueDate: null,
+            memberIds: ["user-1"],
+            archivedAt: null,
+            deletedAt: null,
+          },
+        ),
+      );
+      // completedAt increases with i, so the 100 newest completions are
+      // card-020..card-119. The old cap kept card-000..card-099 (creation order),
+      // which wrongly dropped the 20 newest and kept the 20 oldest.
+      const completedAt = new Date(completedBaseMs + i * 3_600_000).toISOString();
+      completedEvents.push(
+        historyEvent(
+          TOTAL + 1 + i,
+          id,
+          $Enums.CardHistoryEventType.CARD_COMPLETED,
+          completedAt,
+          {
+            listId: "done",
+            estimateHours: 1,
+            dueDate: null,
+            memberIds: ["user-1"],
+            firstCompletion: true,
+          },
+        ),
+      );
+    }
+
+    setMockCards(titles);
+    setMockHistory([...createdEvents, ...completedEvents]);
+
+    const analytics = await getWorkspaceAnalytics({
+      workspaceId: "workspace-1",
+      filters: {
+        from: utcDate("2026-01-01T00:00:00.000Z"),
+        to: utcDate("2026-07-01T00:00:00.000Z"),
+      },
+    });
+
+    const returnedIds = analytics.leadTime.rows.map((row) => row.cardId);
+
+    expect(analytics.leadTime.rows).toHaveLength(100);
+    // The table count reports every completion; the two must be consistent.
+    expect(analytics.leadTime.totalCompleted).toBe(TOTAL);
+    // Newest-completed first, oldest-of-the-kept last.
+    expect(returnedIds[0]).toBe("card-119");
+    expect(returnedIds[99]).toBe("card-020");
+    // The 20 oldest completions must NOT appear (the bug would include them).
+    expect(returnedIds).not.toContain("card-000");
+    expect(returnedIds).not.toContain("card-019");
+    // Strictly sorted by completedAt descending.
+    const times = analytics.leadTime.rows.map((row) => row.completedAt.getTime());
+    expect(times).toEqual([...times].sort((a, b) => b - a));
+  });
 });

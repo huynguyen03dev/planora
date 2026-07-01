@@ -234,6 +234,9 @@ model BoardStar {
   createdAt DateTime @default(now())
 
   @@unique([boardId, userId])
+  // getStarredBoardIds filters by userId alone; the [boardId, userId] composite
+  // above can't serve it (leading column is boardId), so index userId directly.
+  @@index([userId])
   @@map("boardStar")
 }
 
@@ -313,6 +316,7 @@ model Label {
 
   cards CardLabel[]
 
+  @@index([boardId])
   @@map("label")
 }
 

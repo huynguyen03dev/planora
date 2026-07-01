@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
+import { z } from "zod";
 import { getWorkspaceAnalyticsAction } from "./actions";
 import { DashboardShell } from "./components/dashboard-shell";
 import { BurndownChart } from "./components/burndown-chart";
@@ -14,6 +15,9 @@ import { verifySession } from "@/lib/dal";
 import { isWorkspaceMember } from "@/lib/authorization";
 import type { AnalyticsFilters } from "@/lib/analytics/types";
 import { WorkspaceDashboardClient } from "@/components/workspace/workspace-dashboard-client";
+
+const boardIdSchema = z.string().uuid();
+const memberIdSchema = z.string().min(1).max(255);
 
 interface DashboardPageProps {
   params: Promise<{ slug: string }>;
@@ -87,11 +91,17 @@ function parseSearchParams(
     preset: searchParams.range ?? "30d",
   };
 
-  if (searchParams.board) {
+  // Defense-in-depth: drop malformed ids before they reach the DB or the CSV
+  // export. boardId is a UUID (Board.id @default(uuid())); memberId is a Better
+  // Auth user id (nanoid-style, NOT a UUID — see lib/schemas/card-member.ts), so
+  // it gets a bounded-length check rather than a UUID parse. A formula-injection
+  // string is never a valid UUID, so this also neutralises the boardId vector at
+  // the source (csvCell remains the authoritative guard for both).
+  if (searchParams.board && boardIdSchema.safeParse(searchParams.board).success) {
     filters.boardId = searchParams.board;
   }
 
-  if (searchParams.member) {
+  if (searchParams.member && memberIdSchema.safeParse(searchParams.member).success) {
     filters.memberId = searchParams.member;
   }
 
