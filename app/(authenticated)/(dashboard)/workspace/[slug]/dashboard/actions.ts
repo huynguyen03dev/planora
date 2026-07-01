@@ -6,6 +6,7 @@ import type {
   WorkspaceAnalyticsPayload,
 } from "@/lib/analytics/types";
 import { isWorkspaceMember } from "@/lib/authorization";
+import { csvCell } from "@/lib/csv";
 import db from "@/lib/prisma";
 import { verifySession } from "@/lib/dal";
 
@@ -188,11 +189,6 @@ export async function exportWorkspaceAnalyticsAction(
   }
 }
 
-function csvCell(value: string | number | boolean | null): string {
-  const text = value == null ? "" : String(value);
-  return /[",\n\r]/.test(text) ? `"${text.replaceAll("\"", "\"\"")}"` : text;
-}
-
 /**
  * Generate CSV content for analytics export.
  * Note: This is an async function because it's in a server actions file.
@@ -243,8 +239,15 @@ export async function generateAnalyticsCSV(payload: AnalyticsExportPayload): Pro
   lines.push(
     `Reopen Rate (%),${payload.kpis.reopenRatePercent.current.toFixed(2)},${payload.kpis.reopenRatePercent.previous.toFixed(2)},${payload.kpis.reopenRatePercent.change.toFixed(2)}%`,
   );
+  const coverage = payload.kpis.estimationCoveragePercent;
   lines.push(
-    `Estimation Coverage (%),${payload.kpis.estimationCoveragePercent.current.toFixed(2)},-,Estimated: ${payload.kpis.estimationCoveragePercent.estimatedCount}, Unestimated: ${payload.kpis.estimationCoveragePercent.unestimatedCount}`,
+    [
+      "Estimation Coverage (%)",
+      coverage.current.toFixed(2),
+      "-",
+    ].join(",") +
+      "," +
+      csvCell(`Estimated: ${coverage.estimatedCount}, Unestimated: ${coverage.unestimatedCount}`),
   );
   lines.push("");
 
