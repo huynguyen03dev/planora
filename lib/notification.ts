@@ -281,30 +281,32 @@ export async function notifyMentioned(data: {
       ),
     );
 
-    // Best-effort mention emails — sent concurrently so one slow or failing
-    // recipient neither blocks nor drops the others.
+    // Best-effort mention emails — fired concurrently and awaited with
+    // allSettled so one slow or rejecting recipient neither blocks the request
+    // nor aborts the others (a plain Promise.all would reject on the first
+    // failure and drop the rest). Per-recipient failures are logged, not thrown.
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-    await Promise.allSettled(
-      recipients.map(async (member) => {
-        if (!member.email) return;
-
-        try {
-          await sendEmail({
-            to: member.email,
-            subject: `You were mentioned in "${data.cardTitle}"`,
-            react: MentionEmail({
-              mentionedByName: data.commenterName,
-              cardTitle: data.cardTitle,
-              boardName: data.boardTitle,
-              cardLink: `${appUrl}/boards/${data.boardId}`,
-            }),
-            fromName: `${data.commenterName} mentioned you (Planora)`,
-          });
-        } catch (emailError) {
-          console.error("[notification] Failed to send mention email:", emailError);
-        }
-      }),
+    const withEmail = recipients.filter((member) => member.email);
+    const results = await Promise.allSettled(
+      withEmail.map((member) =>
+        sendEmail({
+          to: member.email as string,
+          subject: `You were mentioned in "${data.cardTitle}"`,
+          react: MentionEmail({
+            mentionedByName: data.commenterName,
+            cardTitle: data.cardTitle,
+            boardName: data.boardTitle,
+            cardLink: `${appUrl}/boards/${data.boardId}`,
+          }),
+          fromName: `${data.commenterName} mentioned you (Planora)`,
+        }),
+      ),
     );
+    for (const result of results) {
+      if (result.status === "rejected") {
+        console.error("[notification] Failed to send mention email:", result.reason);
+      }
+    }
   } catch (error) {
     console.error("[notification] Failed to send mention notifications:", error);
   }

@@ -54,7 +54,12 @@ export function resolveMentions<M extends { name: string }>(
         // Reject if the name runs straight into another letter (so "@Jo" does
         // not match member "John", and "@Ann" does not match "Anna").
         if (nextChar !== undefined && /[a-zA-Z]/.test(nextChar)) continue;
-        if (!best || member.name.length > best.member.name.length) {
+        // `>=` keeps the LAST member among identical display names. Two different
+        // names cannot both prefix-match the same '@' unless they are equal, so
+        // this only affects true duplicates — where it preserves the pre-US-057
+        // notify behavior (the old name-keyed Map kept the last-inserted member),
+        // honoring this story's "no behavior change" contract.
+        if (!best || member.name.length >= best.member.name.length) {
           best = { member, start: i, end };
         }
       }
