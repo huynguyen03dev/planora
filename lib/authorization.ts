@@ -1,6 +1,7 @@
 import "server-only";
 
 import { headers } from "next/headers";
+import { APIError } from "better-auth";
 
 import { auth } from "@/lib/auth";
 import db from "@/lib/prisma";
@@ -116,13 +117,26 @@ export async function hasWorkspacePermission(
   workspaceId: string,
   permissions: PermissionRequest,
 ): Promise<boolean> {
-  const result = await auth.api.hasPermission({
-    headers: await headers(),
-    body: {
-      organizationId: workspaceId,
-      permissions,
-    },
-  });
+  try {
+    const result = await auth.api.hasPermission({
+      headers: await headers(),
+      body: {
+        organizationId: workspaceId,
+        permissions,
+      },
+    });
 
-  return result.success;
+    return result.success;
+  } catch (err) {
+    // Better Auth's organization plugin throws UNAUTHORIZED for a caller who
+    // is not a member of the organization, instead of returning
+    // { success: false }. Normalize that one case to a soft deny. Anything
+    // else (e.g. INTERNAL_SERVER_ERROR from a misconfigured role/AC) must
+    // keep propagating — swallowing it would mask a config bug as a deny.
+    if (err instanceof APIError && err.status === "UNAUTHORIZED") {
+      return false;
+    }
+
+    throw err;
+  }
 }
