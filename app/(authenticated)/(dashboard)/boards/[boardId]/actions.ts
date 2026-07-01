@@ -4,7 +4,13 @@ import { revalidatePath } from "next/cache";
 import type { Prisma } from "@/app/generated/prisma/client";
 
 import db from "@/lib/prisma";
-import { renumberPositions } from "@/lib/ordering";
+import {
+  CARD_POSITION_GAP,
+  LIVE_CARD_SCOPE,
+  PositionSpaceExhaustedError,
+  normalizeCardPositions,
+  resolveCardPosition,
+} from "@/lib/ordering";
 import { getBoardById } from "@/lib/board";
 import {
   updateCardDetails,
@@ -119,7 +125,6 @@ import {
 } from "@/lib/card-history";
 import { validateFileForUpload, uploadToCloudinary } from "@/lib/cloudinary";
 
-const CARD_POSITION_GAP = 16384;
 const MAX_REORDER_CARD_RETRIES = 3;
 
 function toIsoOrNull(date: Date | null | undefined): string | null {
@@ -137,78 +142,6 @@ async function getMemberIdsForCard(
   });
 
   return members.map((member) => member.userId);
-}
-
-async function resolveCardPositionForTx(
-  tx: Prisma.TransactionClient,
-  data: {
-    targetListId: string;
-    prevCardId?: string | null;
-    nextCardId?: string | null;
-  },
-): Promise<number> {
-  const [prevCard, nextCard] = await Promise.all([
-    data.prevCardId
-      ? tx.card.findUnique({
-          where: { id: data.prevCardId, archivedAt: null },
-          select: { id: true, listId: true, position: true },
-        })
-      : null,
-    data.nextCardId
-      ? tx.card.findUnique({
-          where: { id: data.nextCardId, archivedAt: null },
-          select: { id: true, listId: true, position: true },
-        })
-      : null,
-  ]);
-
-  if (data.prevCardId && (!prevCard || prevCard.listId !== data.targetListId)) {
-    throw new Error("Invalid prevCardId");
-  }
-
-  if (data.nextCardId && (!nextCard || nextCard.listId !== data.targetListId)) {
-    throw new Error("Invalid nextCardId");
-  }
-
-  if (prevCard && nextCard) {
-    const lower = Math.min(prevCard.position, nextCard.position);
-    const upper = Math.max(prevCard.position, nextCard.position);
-    return (lower + upper) / 2;
-  }
-
-  if (prevCard) {
-    return prevCard.position + CARD_POSITION_GAP;
-  }
-
-  if (nextCard) {
-    return nextCard.position - CARD_POSITION_GAP;
-  }
-
-  const lastCard = await tx.card.findFirst({
-    where: {
-      listId: data.targetListId,
-      archivedAt: null,
-    },
-    orderBy: [{ position: "desc" }, { createdAt: "desc" }],
-    select: { position: true },
-  });
-
-  return lastCard ? lastCard.position + CARD_POSITION_GAP : CARD_POSITION_GAP;
-}
-
-async function normalizeCardPositionsForTx(
-  tx: Prisma.TransactionClient,
-  listId: string,
-): Promise<void> {
-  const cards = await tx.card.findMany({
-    where: { listId, archivedAt: null },
-    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
-    select: { id: true, position: true },
-  });
-
-  await renumberPositions(cards, CARD_POSITION_GAP, (id, position) =>
-    tx.card.update({ where: { id }, data: { position } }),
-  );
 }
 
 function isUniqueConstraintError(error: unknown): error is { code: string } {
@@ -502,7 +435,7 @@ export async function createCardAction(
       const lastCard = await tx.card.findFirst({
         where: {
           listId,
-          archivedAt: null,
+          ...LIVE_CARD_SCOPE,
         },
         orderBy: [{ position: "desc" }, { createdAt: "desc" }],
         select: { position: true },
@@ -1271,10 +1204,13 @@ export async function moveCardAction(
     for (let attempt = 0; attempt < MAX_REORDER_CARD_RETRIES; attempt += 1) {
       try {
         movedCard = await db.$transaction(async (tx) => {
-          const nextPosition = await resolveCardPositionForTx(tx, {
+          const nextPosition = await resolveCardPosition(tx, {
             targetListId,
             prevCardId: prevCardId ?? null,
             nextCardId: nextCardId ?? null,
+            // The card is arriving from another list, but exclude it defensively
+            // so a same-list re-drop never bisects against its own stale slot.
+            excludeCardId: cardId,
           });
           const movesOutOfDone = snapshot.list.isDone && !targetListResult.list.isDone;
           const nextCompletedAt = movesIntoDone
@@ -1285,7 +1221,7 @@ export async function moveCardAction(
           const updatedCard = await tx.card.update({
             where: {
               id: cardId,
-              archivedAt: null,
+              ...LIVE_CARD_SCOPE,
             },
             data: {
               listId: targetListId,
@@ -1322,12 +1258,17 @@ export async function moveCardAction(
         });
         break;
       } catch (error) {
-        if (!isUniqueConstraintError(error) || attempt === MAX_REORDER_CARD_RETRIES - 1) {
+        // P2002 (rival grabbed the slot) or PositionSpaceExhaustedError (no gap
+        // to bisect) both recover the same way: renumber the target list, retry.
+        if (
+          (!isUniqueConstraintError(error) && !(error instanceof PositionSpaceExhaustedError)) ||
+          attempt === MAX_REORDER_CARD_RETRIES - 1
+        ) {
           throw error;
         }
 
         await db.$transaction(async (tx) => {
-          await normalizeCardPositionsForTx(tx, targetListId);
+          await normalizeCardPositions(tx, targetListId);
         });
       }
     }

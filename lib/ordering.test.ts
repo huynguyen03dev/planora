@@ -1,8 +1,62 @@
 import { describe, expect, it } from "vitest";
 
-import { renumberPositions } from "./ordering";
+import {
+  CARD_POSITION_GAP,
+  PositionSpaceExhaustedError,
+  renumberPositions,
+  resolveCardPosition,
+} from "./ordering";
 
 const GAP = 16384;
+
+type FakeCard = { id: string; listId: string; position: number };
+
+/**
+ * A minimal in-memory stand-in for the subset of `Prisma.TransactionClient`
+ * that `resolveCardPosition` touches (`card.findUnique` / `card.findFirst`).
+ * It honours the `position` gt/lt filter, the `id: { not }` exclusion, and
+ * asc/desc ordering so we can reproduce the concurrent-drop scenarios.
+ */
+function makeClient(cards: FakeCard[]) {
+  const matches = (card: FakeCard, where: Record<string, unknown>): boolean => {
+    if (where.id) {
+      if (typeof where.id === "object" && where.id !== null && "not" in where.id) {
+        if (card.id === (where.id as { not: string }).not) return false;
+      } else if (card.id !== where.id) {
+        return false;
+      }
+    }
+    if (where.listId && card.listId !== where.listId) return false;
+    if (where.position && typeof where.position === "object") {
+      const pos = where.position as { gt?: number; lt?: number };
+      if (pos.gt !== undefined && !(card.position > pos.gt)) return false;
+      if (pos.lt !== undefined && !(card.position < pos.lt)) return false;
+    }
+    return true;
+  };
+
+  const order = (rows: FakeCard[], orderBy: unknown): FakeCard[] => {
+    const first = Array.isArray(orderBy) ? orderBy[0] : orderBy;
+    const dir = (first as { position?: "asc" | "desc" })?.position ?? "asc";
+    return [...rows].sort((a, b) =>
+      dir === "asc" ? a.position - b.position : b.position - a.position,
+    );
+  };
+
+  return {
+    card: {
+      findUnique: async ({ where }: { where: Record<string, unknown> }) =>
+        cards.find((c) => matches(c, where)) ?? null,
+      findFirst: async ({
+        where,
+        orderBy,
+      }: {
+        where: Record<string, unknown>;
+        orderBy?: unknown;
+      }) => order(cards.filter((c) => matches(c, where)), orderBy)[0] ?? null,
+    },
+  };
+}
 
 /**
  * Simulate a non-deferrable `(scope, position)` unique index over a single
@@ -91,6 +145,21 @@ describe("renumberPositions", () => {
     expect(state.get("c")).toBe(GAP * 3);
   });
 
+  it("completes over a very large list without a RangeError from argument spread", async () => {
+    // A pathologically large list would overflow the JS call-argument limit if
+    // the min were computed via `Math.min(...rows.map(...))`. The reduce-based
+    // fold must handle it — this is the integrity-recovery path.
+    const N = 200_000;
+    const rows = Array.from({ length: N }, (_, i) => ({ id: `r${i}`, position: 1 }));
+    const writes: number[] = [];
+    await renumberPositions(rows, GAP, async (_id, position) => {
+      writes.push(position);
+    });
+    expect(writes).toHaveLength(N * 2);
+    // Last write is the final slot of the last row.
+    expect(writes[writes.length - 1]).toBe(GAP * N);
+  });
+
   it("performs a full two-pass renumber (2N writes) that stages before compacting", async () => {
     const writes: Array<{ id: string; position: number }> = [];
     const rows = [
@@ -108,5 +177,108 @@ describe("renumberPositions", () => {
       { id: "a", position: GAP * 1 },
       { id: "b", position: GAP * 2 },
     ]);
+  });
+});
+
+describe("resolveCardPosition", () => {
+  const L = "list-1";
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const client = (cards: FakeCard[]) => makeClient(cards) as any;
+
+  it("appends after the last live card when only prev is given and prev is truly last", async () => {
+    const cards: FakeCard[] = [
+      { id: "a", listId: L, position: GAP },
+      { id: "b", listId: L, position: GAP * 2 },
+    ];
+    const pos = await resolveCardPosition(client(cards), {
+      targetListId: L,
+      prevCardId: "b",
+      excludeCardId: "mover",
+    });
+    expect(pos).toBe(GAP * 2 + CARD_POSITION_GAP);
+  });
+
+  it("bisects against the real follower — the concurrent end-drop that used to loop forever (US-056 #10)", async () => {
+    // A rival's card ("rival") has just committed immediately after the client's
+    // prev hint ("b"). The old code returned b.position + GAP = rival's slot and
+    // re-collided every retry. Anchored bisection must instead land BETWEEN b and
+    // the rival, i.e. a distinct, collision-free position.
+    const cards: FakeCard[] = [
+      { id: "a", listId: L, position: GAP },
+      { id: "b", listId: L, position: GAP * 2 },
+      { id: "rival", listId: L, position: GAP * 3 },
+    ];
+    const pos = await resolveCardPosition(client(cards), {
+      targetListId: L,
+      prevCardId: "b",
+      excludeCardId: "mover",
+    });
+    expect(pos).toBe((GAP * 2 + GAP * 3) / 2);
+    expect(pos).not.toBe(GAP * 2 + CARD_POSITION_GAP); // not the rival's slot
+  });
+
+  it("ignores the card being moved when finding the follower", async () => {
+    // The mover currently sits right after prev; excluding it means prev is
+    // treated as last, so we append rather than bisect against ourselves.
+    const cards: FakeCard[] = [
+      { id: "b", listId: L, position: GAP * 2 },
+      { id: "mover", listId: L, position: GAP * 3 },
+    ];
+    const pos = await resolveCardPosition(client(cards), {
+      targetListId: L,
+      prevCardId: "b",
+      excludeCardId: "mover",
+    });
+    expect(pos).toBe(GAP * 2 + CARD_POSITION_GAP);
+  });
+
+  it("bisects before the real preceder for a start-drop (only next given)", async () => {
+    const cards: FakeCard[] = [
+      { id: "rival", listId: L, position: GAP },
+      { id: "b", listId: L, position: GAP * 2 },
+    ];
+    const pos = await resolveCardPosition(client(cards), {
+      targetListId: L,
+      nextCardId: "b",
+      excludeCardId: "mover",
+    });
+    expect(pos).toBe((GAP + GAP * 2) / 2);
+  });
+
+  it("places before first when next is truly first", async () => {
+    const cards: FakeCard[] = [{ id: "b", listId: L, position: GAP * 2 }];
+    const pos = await resolveCardPosition(client(cards), {
+      targetListId: L,
+      nextCardId: "b",
+      excludeCardId: "mover",
+    });
+    expect(pos).toBe(GAP * 2 - CARD_POSITION_GAP);
+  });
+
+  it("throws PositionSpaceExhaustedError when neighbours are too close to split", async () => {
+    const cards: FakeCard[] = [
+      { id: "b", listId: L, position: 1000 },
+      { id: "rival", listId: L, position: 1000.00005 }, // gap < MIN_POSITION_GAP
+    ];
+    await expect(
+      resolveCardPosition(client(cards), {
+        targetListId: L,
+        prevCardId: "b",
+        excludeCardId: "mover",
+      }),
+    ).rejects.toBeInstanceOf(PositionSpaceExhaustedError);
+  });
+
+  it("appends at CARD_POSITION_GAP into an empty list", async () => {
+    const pos = await resolveCardPosition(client([]), { targetListId: L });
+    expect(pos).toBe(CARD_POSITION_GAP);
+  });
+
+  it("rejects a prev hint that points outside the target list", async () => {
+    const cards: FakeCard[] = [{ id: "x", listId: "other-list", position: GAP }];
+    await expect(
+      resolveCardPosition(client(cards), { targetListId: L, prevCardId: "x" }),
+    ).rejects.toThrow("Invalid prevCardId");
   });
 });
