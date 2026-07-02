@@ -2,7 +2,8 @@
 
 ## Status
 
-in progress — FIX-NOW complete (2026-07-01); FIX-SOON open
+in progress — FIX-NOW complete (2026-07-01); FIX-SOON complete (2026-07-02),
+with mn7 + mn12·email-verification + deps-track explicitly deferred (reasons below)
 
 ## Lane
 
@@ -125,7 +126,7 @@ Each: `[id]` validated-severity · per-item-lane · `file:line` — change → p
 
 ## FIX SOON — real hardening (larger effort / lower urgency)
 
-- [ ] **[tg1] test gap — HIGH RISK surface** · **high-risk (authorization coverage —
+- [x] **[tg1] test gap — HIGH RISK surface** · **high-risk (authorization coverage —
   decision record; extends US-006/US-009)** · `lib/realtime/auth.ts`
   (`getBoardMembershipRole` / `canUserJoinWorkspace` / `authenticateSocket`) has
   **zero unit tests** (grep: referenced only by `server.ts`). This is the socket
@@ -133,22 +134,43 @@ Each: `[id]` validated-severity · per-item-lane · `file:line` — change → p
   non-members. **Change:** add `lib/realtime/auth.test.ts` — deny non-member join,
   deny archived/foreign board, unknown role handled. **Proof:** new unit tests +
   `docs/TEST_MATRIX.md` row.
+  **DONE:** `lib/realtime/auth.test.ts` (19 cases) — missing/archived/foreign board
+  + non-member all deny; unknown role → `viewer` (least privilege); fail-closed on db
+  error; `canUserJoinWorkspace` + `authenticateSocket` + `getUserProfile`. Decision
+  **0017**; TEST_MATRIX row added.
 
-- [ ] **[tg2] test gap** · normal (extends US-006) · `tests/server-actions/list-card.test.ts`
+- [x] **[tg2] test gap** · normal (extends US-006) · `tests/server-actions/list-card.test.ts`
   — `$transaction` is `vi.fn().mockResolvedValue` (never `mockImplementation`), so the
   transaction body never runs and the reorder libs are themselves mocked (`:70,:72`);
   the tests assert only that the write seam was *reached* (self-admitted, header
   `:10-14`). **Change:** `mockImplementation` that runs the callback against a fake tx
   so position / multi-row writes are exercised at the action layer. **Proof:** allow-path
   tests assert DB effects, not just that `$transaction` was called.
+  **DONE:** a shared `makeTx()` fake tx + `mockImplementation` runs the real callback for
+  a representative set — `createCard` (inserts at a gap position), `deleteList` (deletes
+  the list), `moveCard` (relocates to target list at a resolved position via the real
+  `resolveCardPosition`), `assign`/`removeCardMember` (member row created/deleted + history)
+  — each asserting the tx effect. Reorder-lib seams stay mocked; their bodies are now
+  unit-tested directly (see MJ3/mn2). Header comment updated.
 
-- [ ] **[MJ3]+[mn2] MINOR (reorder robustness)** · normal · give
+- [x] **[MJ3]+[mn2] MINOR (reorder robustness)** · normal · give
   `resolveListPosition` (`lib/list.ts:287-291`) the same **live-adjacent-occupant
   re-query** cards use (`lib/ordering.ts:96-130`) instead of bisecting the client's
   stale prev/next hints; and make the retry guards (`lib/card.ts:205-207`,
   `actions.ts:1263-1264`) treat the stale-neighbor `Error("Invalid prev/nextCardId")`
   (`ordering.ts:87,91`) as **retryable** (renumber/append + retry, parity with the
   P2002 path). **Proof:** unit test simulating a concurrently-moved neighbor.
+  **DONE:** `resolveListPosition` rewritten to re-query the live adjacent occupant
+  (mover excluded), mirroring `resolveCardPosition`; new `bisectListPosition` throws
+  `PositionSpaceExhaustedError` on a tight gap (dropped the old `Math.abs(...)` heuristic).
+  New `StaleNeighborError` (tagged `prev|next`) replaces the hard `Error("Invalid …")`
+  in both resolvers; the card, list, and cross-list-move retry loops **drop the offending
+  hint and retry** (self-heal to the surviving neighbour / append) — genuine recovery,
+  not just delayed failure. Position is not an authz boundary (the card still lands in the
+  already-authorized target), so appending on a bogus hint is safe. Proof:
+  `lib/list.test.ts` (list resolver + `reorderListByNeighbors` recovery), `lib/card.test.ts`
+  (`reorderCardWithinListByNeighbors` recovery), `lib/ordering.test.ts` (both resolvers
+  throw the tagged StaleNeighborError).
 
 - [ ] **[mn7] MINOR (authz staleness)** · **high-risk (authorization — decision
   record)** · `server.ts:56` + `lib/realtime/auth.ts:41-67` — board role is resolved
@@ -157,49 +179,90 @@ Each: `[id]` validated-severity · per-item-lane · `file:line` — change → p
   user's sockets (`io.in(ROOMS.user(id)).socketsLeave(ROOMS.board(boardId))`) or
   re-check membership on sensitive emits. **Proof:** test/manual — demoted user stops
   receiving broadcasts.
+  **DEFERRED (reason):** there is **no first-party demote/remove Server Action** in the
+  codebase to host the eviction — member management (role change / removal) has no UI or
+  action yet (grep: only `card-member` removal exists; `organization` is exported from
+  `auth-client` but the app never calls `removeMember`/`updateMemberRole`). Better Auth's
+  org endpoints run inside the `/api/auth/[...all]` catch-all with no clean seam to the
+  socket `io` instance (which lives in `server.ts`, not importable from `lib/auth.ts`).
+  Building an adjacent half-mechanism would violate "preserve the claim or stop" — the
+  eviction must land **with** the member-management feature. The read-only exposure window
+  is bounded (demoted user keeps *viewing* until disconnect; all *writes* stay gated by the
+  DB RBAC path, which re-checks per action). Revisit when member management ships.
 
-- [ ] **[mn12] MODERATE (pre-launch)** · **high-risk (auth hard gate — decision
+- [~] **[mn12] MODERATE (pre-launch)** · **high-risk (auth hard gate — decision
   record)** · `lib/auth.ts:31-33` — `emailAndPassword.enabled` with no
   `requireEmailVerification` and no explicit session expiry; combined with
   invitation-accept-by-email match, an unverified signup on an invited email could
   accept another's invite. **Change:** enable `requireEmailVerification` (+
   `sendVerificationEmail`) and set `session.expiresIn`/`updateAge` **before public
   launch**. **Proof:** manual/e2e — unverified user cannot accept an invite.
+  **PARTIAL — session hardening DONE, email verification DEFERRED (decision 0018):**
+  shipped explicit `session.expiresIn = 7d` / `updateAge = 1d` (was implicit defaults —
+  safe, no behaviour change). `requireEmailVerification` is **deferred to pre-launch**
+  because (a) `lib/email.ts` logs instead of sending when `RESEND_API_KEY` is unset (the
+  dev default), so enabling it now would lock out **every** new signup, and (b) the proof
+  is E2E ("unverified user cannot accept an invite") and there is no E2E harness in-repo,
+  so it can't be verified here — enabling an unprovable auth gate that breaks signup fails
+  "preserve the claim or stop". A `NOTE` in `lib/auth.ts` + decision 0018 record the gate
+  and its prerequisites (provision RESEND, wire `sendVerificationEmail`, add E2E).
 
-- [ ] **[mn17] LOW (footgun)** · tiny · `dashboard/actions.ts:196` — `generateAnalyticsCSV`
+- [x] **[mn17] LOW (footgun)** · tiny · `dashboard/actions.ts:196` — `generateAnalyticsCSV`
   is a `"use server"` export with no auth (pure formatter today; `db` imported `:10`
   but unused in it). **Change:** move it to a non-`"use server"` helper (e.g.
   `lib/analytics/csv-export.ts`) or add `verifySession`, so it can't become an
   unauthenticated endpoint if it ever reads the DB.
+  **DONE:** moved to pure, sync `lib/analytics/csv-export.ts`; `AnalyticsExportPayload`
+  type relocated to `lib/analytics/types.ts` (re-exported from the action for compat).
+  Consumers (`analytics-export-buttons.tsx`, `tests/analytics-export.test.ts`) updated.
 
-- [ ] **[mn11] consistency** · tiny · `workspace/actions.ts:137,176,216` — take raw
+- [x] **[mn11] consistency** · tiny · `workspace/actions.ts:137,176,216` — take raw
   `workspaceId` with no Zod (safe: `hasWorkspacePermission` denies foreign/bogus ids
   before any write). **Change:** add `z.string().uuid()` parse per CLAUDE.md gotcha #4.
+  **DONE + correction:** the story (and CLAUDE.md gotcha #4) said `.uuid()`, but a
+  workspace IS a Better Auth **organization** — its id is a 32-char nanoid, NOT a UUID
+  (same correction class as FIX-NOW MJ1; caught by `workspace.test.ts`, which uses a
+  32-char org id). Shipped `z.string().min(1).max(255)` on all three settings actions.
+  `hasWorkspacePermission` remains the real gate.
 
-- [ ] **[mn3] MINOR** · tiny · `lib/analytics/engine.ts:103` — `metadataNullableDate`
+- [x] **[mn3] MINOR** · tiny · `lib/analytics/engine.ts:103` — `metadataNullableDate`
   does `new Date(value)` with no NaN guard → `Invalid Date` silently drops a card from
   overdue/late/burndown. **Change:** `Number.isNaN(d.getTime()) ? null : d`.
+  **DONE:** guarded (unparseable → null = treated as no date). Regression test in
+  `engine.test.ts` (garbage due date → card still counted/estimated, never overdue).
 
-- [ ] **[mn1] MINOR (latent; governed by decision 0015)** · normal · `lib/card.ts:222-260`
+- [x] **[mn1] MINOR (latent; governed by decision 0015)** · normal · `lib/card.ts:222-260`
   & `:433-479` — card resolvers filter `archivedAt: null` but not `deletedAt` (diverge
   from `LIVE_CARD_SCOPE`). Latent only — `softDeleteCard` (`lib/card.ts:502`) is **dead
   code** (no callers). **Change:** either add `deletedAt: null` to both resolvers when
   soft-delete is wired, OR delete the dead `softDeleteCard` now to remove the trap.
+  **DONE:** deleted the dead `softDeleteCard` (verified zero callers). It was the only
+  writer of `deletedAt`, so no live card can carry it — the `archivedAt`-only resolvers
+  are now safe by construction and the divergence trap is removed. `deletedAt` /
+  `LIVE_CARD_SCOPE` stay in the schema/index (decision 0015) for the reorder scope.
 
-- [ ] **[mn8] MINOR** · normal · `components/authenticated-header-actions.tsx:41-53` —
+- [x] **[mn8] MINOR** · normal · `components/authenticated-header-actions.tsx:41-53` —
   subscribes to `notification:new` once (`[]`), no reconnect refetch; the badge
   under-counts during a disconnect window (self-heals on nav). **Change:** refetch
   unread count on socket `"connect"`, mirroring `board-store-provider`.
+  **DONE:** on socket `"connect"` the header now calls a new
+  `getUnreadNotificationCountAction` (`app/(authenticated)/actions.ts`) and resets the
+  authoritative unread count (best-effort; keeps current count on failure).
 
-- [ ] **[fyi2] hygiene** · normal · `lib/prisma.ts:4` — `PrismaPg` constructed with only
+- [x] **[fyi2] hygiene** · normal · `lib/prisma.ts:4` — `PrismaPg` constructed with only
   `connectionString`, no pool bounds. **Change:** set `max`/`idleTimeoutMillis` before
   load.
+  **DONE:** `PrismaPg` now takes `max` (default 10) and `idleTimeoutMillis` (default 30s),
+  both env-overridable (`DATABASE_POOL_MAX` / `DATABASE_POOL_IDLE_MS`).
 
-- [ ] **[deps-track] watch** · normal — `resend` is a **prod** dep (`lib/email.ts`), so
+- [~] **[deps-track] watch** · normal — `resend` is a **prod** dep (`lib/email.ts`), so
   the `resend→svix→uuid` / `qs` advisories are in the prod tree. Not exploitable as
   used (no attacker-controlled input into those APIs), so not urgent; upgrade when a
   non-breaking `resend` lands. (Corrects the first pass, which mislabeled `resend` as a
   dev tool.)
+  **DEFERRED (watch, as designed):** no code change — this item is a standing watch, not
+  a fix. `npm audit --omit=dev` state re-checked below; upgrade `resend` when a
+  non-breaking release clears the transitive `svix→uuid` / `qs` advisories.
 
 ## Explicitly DEFERRED / NOT in this story (recorded so we don't re-litigate)
 
@@ -294,4 +357,43 @@ All 8 FIX-NOW items shipped. `npm test` = **580 pass / 26 files** (+2 new tests)
   `package-lock.json` changed (transitive bumps within semver).
 
 Full source of this backlog: the 2026-07-01 whole-project review + senior validation.
-**FIX-SOON items remain open** (see checklist above).
+
+### FIX-SOON landed — 2026-07-02 (branch `fix/us-062-fix-soon-remediation`)
+
+`npm test` = **610 pass / 29 files** (+30 from the 580 FIX-NOW baseline);
+`npx tsc --noEmit` = **0 errors**; `npx eslint` on changed source = **0 errors**.
+`npm audit` unchanged (**11**: 9 moderate + 1 high + 1 critical) — no dependency
+changes in this bucket; the critical (`vitest`) + high (`vite`) remain dev-only,
+gated on the deferred `vitest 2→4` major; moderates include the prod `better-auth
+<1.6.2` + `postcss` (tracked under deps-track).
+
+**Shipped:**
+
+- **tg1** — `lib/realtime/auth.test.ts` (19 cases); decision **0017**; TEST_MATRIX row.
+- **tg2** — `list-card` positive controls now run the tx body against a fake tx and
+  assert DB effects (createCard/deleteList/moveCard/assign+removeCardMember).
+- **MJ3+mn2** — `resolveListPosition` re-queries the live adjacent occupant; new
+  `StaleNeighborError` makes stale prev/next hints self-heal (drop hint → retry) in the
+  card, list, and move loops. Proof: `lib/list.test.ts`, `lib/card.test.ts`,
+  `lib/ordering.test.ts`.
+- **mn17** — `generateAnalyticsCSV` → pure `lib/analytics/csv-export.ts` (no longer
+  `"use server"`); type moved to `lib/analytics/types.ts`.
+- **mn11** — workspaceId validated as a bounded string (NOT `.uuid()` — it's a Better
+  Auth org id; see correction note above).
+- **mn3** — NaN-date guard in `metadataNullableDate` + regression test.
+- **mn1** — deleted dead `softDeleteCard` (removes the `deletedAt` resolver trap).
+- **mn8** — unread-count resync on socket `"connect"` + `getUnreadNotificationCountAction`.
+- **fyi2** — pg pool bounds (`max` / `idleTimeoutMillis`, env-overridable).
+- **mn12 (session half)** — explicit `session.expiresIn`/`updateAge`; decision **0018**.
+
+**Deferred (with reasons, per acceptance criteria):**
+
+- **mn7** (socket eviction on demote/remove) — no first-party demote/remove action exists
+  to host it; no clean seam from Better Auth's org endpoints to the socket `io`. Land it
+  with member-management UI. Read-only exposure window is bounded; writes stay RBAC-gated.
+- **mn12 email verification** — pre-launch gate (decision 0018): enabling it now locks out
+  signups without a verified email transport, and the claim is E2E-only (no harness here).
+- **deps-track** — standing watch; no code change.
+
+**Harness delta applied:** `AGENTS.md` test-coverage section corrected (was stale — it
+claimed Server Actions/auth/RBAC/realtime untested and denied E2E/CI; both exist).

@@ -39,9 +39,11 @@ Config: `prisma.config.ts` (schema at `prisma/schema.prisma`, migrations at
 ### Tests
 
 **Vitest 2** (node env) is configured (`vitest.config.ts`). It includes
-`lib/**/*.test.ts` and `tests/**/*.test.ts`. There is **no** React Testing
-Library, **no** E2E (Playwright), and **no** CI test step yet — component and
-browser flows are currently unverified. See `docs/TEST_MATRIX.md` for the
+`lib/**/*.test.ts` and `tests/**/*.test.ts` (610 tests as of US-062). **E2E is
+Playwright** (`npm run test:e2e`, `e2e/**`, added US-009 — a two-client realtime
+harness). **CI** runs the unit/integration gate (`ci.yml`) plus the E2E suite
+(`e2e.yml`). There is still **no** React Testing Library, so React component
+internals remain the largest gap. See `docs/TEST_MATRIX.md` for the
 contract-to-proof map.
 
 ```bash
@@ -51,10 +53,17 @@ npx vitest run path/to/file.test.ts           # single file
 npx vitest run -t "test name"                 # single test by name
 ```
 
-Proven today: `lib/dnd/apply-drop.test.ts`, `lib/card-history.test.ts`,
-`lib/analytics/engine.test.ts`, `tests/board-store.test.ts`,
-`tests/analytics-export.test.ts`. Server Actions, auth/RBAC, realtime, and
-React components are untested (the largest gaps).
+The security boundary IS tested. Proven today includes: the Server Action
+auth/permission/isolation matrix (`tests/server-actions/*.test.ts`, incl. a
+142-case RBAC matrix and sabotage-verified action tests), the socket
+room-authorization functions (`lib/realtime/auth.test.ts`, US-062 tg1), position
+math (`lib/dnd/apply-drop.test.ts`, `lib/ordering.test.ts`, `lib/list.test.ts`,
+`lib/card.test.ts`), card history/analytics (`lib/card-history.test.ts`,
+`lib/analytics/engine.test.ts`), the board store (`tests/board-store.test.ts`),
+and CSV export (`tests/analytics-export.test.ts`). The real remaining gaps:
+React component internals (no RTL) and much per-action **business** logic — the
+`list-card` positive controls exercise the transaction bodies for a representative
+set (US-062 tg2) but most CRUD/lifecycle math is still only boundary-tested.
 
 ---
 
