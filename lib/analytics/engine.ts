@@ -571,7 +571,7 @@ function computeCompletedMetrics(
       reopenedCardIds.add(cardId);
     }
 
-    if (includeRows && rows.length < MAX_LEAD_TIME_ROWS) {
+    if (includeRows) {
       rows.push({
         cardId,
         cardTitle: context.cardTitles.get(cardId) ?? "Untitled card",
@@ -584,6 +584,9 @@ function computeCompletedMetrics(
     }
   }
 
+  // Cap AFTER sorting by completedAt desc so the detail table shows the newest
+  // completions, not an arbitrary MAX_LEAD_TIME_ROWS in cardIds (creation) order.
+  // Capping during collection would let the table disagree with totalCompleted.
   rows.sort((a, b) => b.completedAt.getTime() - a.completedAt.getTime());
 
   return {
@@ -591,7 +594,7 @@ function computeCompletedMetrics(
     completedLateCount,
     completedCardIds,
     reopenedCardIds,
-    rows,
+    rows: rows.slice(0, MAX_LEAD_TIME_ROWS),
   };
 }
 

@@ -292,6 +292,20 @@ describe("analytics export actions", () => {
     expect(csv).toContain('"Line one\nLine two"');
   });
 
+  it("guards formula-leading Board ID / Member ID header cells (MJ1)", async () => {
+    // boardId/memberId come from unvalidated searchParams; before US-062 they were
+    // interpolated raw into the header, bypassing csvCell. A spreadsheet must see
+    // them as inert text, not a formula.
+    const payload = basePayload();
+    const csv = await generateAnalyticsCSV({
+      ...payload,
+      metadata: { ...payload.metadata, boardId: "=1+1", memberId: "+1+1" },
+    });
+
+    expect(csv).toContain("Board ID,'=1+1");
+    expect(csv).toContain("Member ID,'+1+1");
+  });
+
   it("emits Estimation Coverage as a single quoted column, not split by the embedded comma", async () => {
     const csv = await generateAnalyticsCSV(
       basePayload({

@@ -202,8 +202,8 @@ export async function generateAnalyticsCSV(payload: AnalyticsExportPayload): Pro
   lines.push(`Timezone,${payload.metadata.workspaceTimezone}`);
   lines.push(`From,${payload.metadata.from}`);
   lines.push(`To,${payload.metadata.to}`);
-  lines.push(`Board ID,${payload.metadata.boardId ?? ""}`);
-  lines.push(`Member ID,${payload.metadata.memberId ?? ""}`);
+  lines.push(`Board ID,${csvCell(payload.metadata.boardId ?? "")}`);
+  lines.push(`Member ID,${csvCell(payload.metadata.memberId ?? "")}`);
   lines.push(`Include Archived Boards,${payload.metadata.includeArchivedBoards}`);
   lines.push(`Exported At,${payload.metadata.exportedAt}`);
   lines.push("");

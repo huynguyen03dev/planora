@@ -3,11 +3,14 @@ import "server-only";
 import type { Prisma } from "@/app/generated/prisma/client";
 
 import db from "@/lib/prisma";
-import { PositionSpaceExhaustedError, renumberPositions } from "@/lib/ordering";
+import {
+  MIN_POSITION_GAP,
+  PositionSpaceExhaustedError,
+  renumberPositions,
+} from "@/lib/ordering";
 
 const LIST_POSITION_GAP = 16384;
 const MAX_CREATE_LIST_RETRIES = 5;
-const MIN_POSITION_GAP = 0.0001;
 const MAX_REORDER_LIST_RETRIES = 3;
 
 function isUniqueConstraintError(error: unknown): error is { code: string } {
