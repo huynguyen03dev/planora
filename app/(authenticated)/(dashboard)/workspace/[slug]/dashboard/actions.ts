@@ -14,10 +14,6 @@ export type AnalyticsActionResult<T> =
   | { success: true; data: T }
   | { success: false; error: string };
 
-// Re-exported for existing importers; canonical definition lives in
-// @/lib/analytics/types (kept out of this "use server" module).
-export type { AnalyticsExportPayload };
-
 /**
  * Resolve workspace by slug.
  */
