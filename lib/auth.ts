@@ -30,6 +30,21 @@ export const auth = betterAuth({
 
   emailAndPassword: {
     enabled: true,
+    // NOTE (US-062 mn12): `requireEmailVerification` is intentionally NOT enabled
+    // here yet. It is a pre-launch gate that must land together with a verified
+    // transactional-email transport (RESEND_API_KEY provisioned) and an E2E proof
+    // that an unverified account cannot accept an invitation — enabling it before
+    // reliable delivery would lock every new signup out. Tracked in US-062 /
+    // decision 0018.
+  },
+
+  // Explicit session lifetime (US-062 mn12): a 7-day absolute expiry, refreshed
+  // at most once per day so an active session rolls forward without a write on
+  // every request. Previously these were implicit Better Auth defaults; making
+  // them explicit documents intent and pins them against a library default drift.
+  session: {
+    expiresIn: 60 * 60 * 24 * 7, // 7 days
+    updateAge: 60 * 60 * 24, // refresh at most once per day
   },
 
   plugins: [

@@ -496,38 +496,6 @@ export async function getCardWithListAndMembers(cardId: string): Promise<{
 }
 
 /**
- * Soft delete a card (sets deletedAt).
- * Used for analytics tracking before hard delete.
- */
-export async function softDeleteCard(cardId: string): Promise<CardRecord> {
-  return db.card.update({
-    where: {
-      id: cardId,
-    },
-    data: {
-      deletedAt: new Date(),
-    },
-    select: {
-      id: true,
-      listId: true,
-      title: true,
-      description: true,
-      position: true,
-      priority: true,
-      dueDate: true,
-      estimateHours: true,
-      completedAt: true,
-      deletedAt: true,
-      coverImage: true,
-      archivedAt: true,
-      createdById: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  });
-}
-
-/**
  * A board's archived card, summarized for the Archived-cards view.
  */
 export type ArchivedCardRecord = {
