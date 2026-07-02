@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CARD_POSITION_GAP,
   PositionSpaceExhaustedError,
+  StaleNeighborError,
   renumberPositions,
   resolveCardPosition,
 } from "./ordering";
@@ -275,10 +276,26 @@ describe("resolveCardPosition", () => {
     expect(pos).toBe(CARD_POSITION_GAP);
   });
 
-  it("rejects a prev hint that points outside the target list", async () => {
+  it("throws a retryable StaleNeighborError when a prev hint is not a live card in the list (US-062 mn2)", async () => {
+    // A prev hint pointing outside the target list (foreign id, or a rival
+    // concurrently moved it away) is no longer a hard failure — it surfaces as a
+    // StaleNeighborError the reorder loop recovers from by dropping the hint.
     const cards: FakeCard[] = [{ id: "x", listId: "other-list", position: GAP }];
-    await expect(
-      resolveCardPosition(client(cards), { targetListId: L, prevCardId: "x" }),
-    ).rejects.toThrow("Invalid prevCardId");
+    const err = await resolveCardPosition(client(cards), {
+      targetListId: L,
+      prevCardId: "x",
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(StaleNeighborError);
+    expect((err as StaleNeighborError).side).toBe("prev");
+  });
+
+  it("throws a StaleNeighborError tagged 'next' when the next hint is stale", async () => {
+    const cards: FakeCard[] = [{ id: "x", listId: "other-list", position: GAP }];
+    const err = await resolveCardPosition(client(cards), {
+      targetListId: L,
+      nextCardId: "x",
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(StaleNeighborError);
+    expect((err as StaleNeighborError).side).toBe("next");
   });
 });

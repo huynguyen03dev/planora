@@ -5,6 +5,7 @@ import {
   CARD_POSITION_GAP,
   LIVE_CARD_SCOPE,
   PositionSpaceExhaustedError,
+  StaleNeighborError,
   normalizeCardPositions,
   resolveCardPosition,
 } from "@/lib/ordering";
@@ -137,6 +138,11 @@ export async function reorderCardWithinListByNeighbors(data: {
   prevCardId?: string | null;
   nextCardId?: string | null;
 }): Promise<CardRecord> {
+  // Hints are mutable across retries: a StaleNeighborError drops the offending
+  // side so the next attempt re-anchors on the surviving neighbour (or appends).
+  let prevHint = data.prevCardId ?? null;
+  let nextHint = data.nextCardId ?? null;
+
   for (let attempt = 0; attempt < MAX_REORDER_CARD_RETRIES; attempt += 1) {
     // Retained across the catch so a collision can renumber the right list
     // before the next attempt; set once the card is read inside the tx.
@@ -166,8 +172,8 @@ export async function reorderCardWithinListByNeighbors(data: {
         // the real occupants, not the mover's own (stale) slot.
         const nextPosition = await resolveCardPosition(tx, {
           targetListId: existingCard.listId,
-          prevCardId: data.prevCardId,
-          nextCardId: data.nextCardId,
+          prevCardId: prevHint,
+          nextCardId: nextHint,
           excludeCardId: data.cardId,
         });
 
@@ -199,6 +205,17 @@ export async function reorderCardWithinListByNeighbors(data: {
         });
       });
     } catch (error) {
+      // A stale neighbour hint is recoverable without a renumber: drop that side
+      // and retry so the move re-anchors on the surviving neighbour / appends.
+      if (error instanceof StaleNeighborError && attempt < MAX_REORDER_CARD_RETRIES - 1) {
+        if (error.side === "prev") {
+          prevHint = null;
+        } else {
+          nextHint = null;
+        }
+        continue;
+      }
+
       // A P2002 (a rival grabbed the slot) or a PositionSpaceExhaustedError (no
       // gap left to bisect) both mean: renumber the list to restore full gaps,
       // then retry the reorder against the fresh layout.

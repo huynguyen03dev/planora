@@ -6,6 +6,7 @@ import db from "@/lib/prisma";
 import {
   MIN_POSITION_GAP,
   PositionSpaceExhaustedError,
+  StaleNeighborError,
   renumberPositions,
 } from "@/lib/ordering";
 
@@ -258,51 +259,103 @@ type PositionContext = {
   boardId: string;
   prevListId?: string | null;
   nextListId?: string | null;
+  excludeListId?: string | null;
 };
 
-async function resolveListPosition(
+/** Midpoint of two list positions, or throw if too close to split cleanly. */
+function bisectListPosition(a: number, b: number): number {
+  const lower = Math.min(a, b);
+  const upper = Math.max(a, b);
+  if (upper - lower < MIN_POSITION_GAP) {
+    throw new PositionSpaceExhaustedError();
+  }
+  return (lower + upper) / 2;
+}
+
+/**
+ * Compute the position for a list dropped between `prevListId` and `nextListId`
+ * on `boardId`, collision-safe under concurrency — the list analogue of
+ * {@link resolveCardPosition} (US-062 MJ3).
+ *
+ * The client's prev/next hints describe the *intended* neighbours, but a rival
+ * reorder committing between read and write can make them stale, so we never
+ * trust `prev.position ± GAP` blindly. We anchor on the surviving hint and
+ * bisect against the list that CURRENTLY occupies the adjacent slot:
+ *
+ * - prev given → bisect between prev and the live list immediately after prev
+ *   (or `prev + GAP` if prev is genuinely last). Fixes the concurrent end-drop
+ *   that the old direct-bisect looped on.
+ * - only next given → symmetric, bisecting before `next`.
+ * - neither → append after the last live list.
+ *
+ * `excludeListId` omits the list being moved from the adjacency search so a
+ * reorder never bisects against the mover's own stale slot. Throws
+ * {@link StaleNeighborError} when a hint no longer names a live list on the
+ * board, and {@link PositionSpaceExhaustedError} when there is no room to bisect.
+ */
+export async function resolveListPosition(
   client: Prisma.TransactionClient,
-  { boardId, prevListId, nextListId }: PositionContext,
+  { boardId, prevListId, nextListId, excludeListId }: PositionContext,
 ): Promise<number> {
-  const [prevList, nextList] = await Promise.all([
-    prevListId
-      ? client.list.findUnique({
-          where: { id: prevListId },
-          select: { id: true, boardId: true, position: true },
-        })
-      : null,
-    nextListId
-      ? client.list.findUnique({
-          where: { id: nextListId },
-          select: { id: true, boardId: true, position: true },
-        })
-      : null,
-  ]);
+  const prevList = prevListId
+    ? await client.list.findUnique({
+        where: { id: prevListId },
+        select: { id: true, boardId: true, position: true },
+      })
+    : null;
+  const nextList = nextListId
+    ? await client.list.findUnique({
+        where: { id: nextListId },
+        select: { id: true, boardId: true, position: true },
+      })
+    : null;
 
   if (prevListId && (!prevList || prevList.boardId !== boardId)) {
-    throw new Error("Invalid prevListId");
+    throw new StaleNeighborError("prev");
   }
 
   if (nextListId && (!nextList || nextList.boardId !== boardId)) {
-    throw new Error("Invalid nextListId");
+    throw new StaleNeighborError("next");
   }
 
-  if (prevList && nextList) {
-    const lower = Math.min(prevList.position, nextList.position);
-    const upper = Math.max(prevList.position, nextList.position);
-    return (lower + upper) / 2;
-  }
+  const notMoved = excludeListId ? { id: { not: excludeListId } } : {};
 
   if (prevList) {
-    return prevList.position + LIST_POSITION_GAP;
+    const following = await client.list.findFirst({
+      where: {
+        boardId,
+        position: { gt: prevList.position },
+        ...notMoved,
+      },
+      orderBy: { position: "asc" },
+      select: { position: true },
+    });
+
+    if (!following) {
+      return prevList.position + LIST_POSITION_GAP;
+    }
+    return bisectListPosition(prevList.position, following.position);
   }
 
   if (nextList) {
-    return nextList.position - LIST_POSITION_GAP;
+    const preceding = await client.list.findFirst({
+      where: {
+        boardId,
+        position: { lt: nextList.position },
+        ...notMoved,
+      },
+      orderBy: { position: "desc" },
+      select: { position: true },
+    });
+
+    if (!preceding) {
+      return nextList.position - LIST_POSITION_GAP;
+    }
+    return bisectListPosition(preceding.position, nextList.position);
   }
 
   const lastList = await client.list.findFirst({
-    where: { boardId },
+    where: { boardId, ...notMoved },
     orderBy: { position: "desc" },
     select: { position: true },
   });
@@ -315,6 +368,12 @@ export async function reorderListByNeighbors(data: {
   prevListId?: string | null;
   nextListId?: string | null;
 }): Promise<ListRecord> {
+  // Hints are mutable across retries: a StaleNeighborError drops the offending
+  // side so the next attempt re-anchors on the surviving neighbour (or appends),
+  // parity with the card reorder path (US-062 mn2).
+  let prevHint = data.prevListId ?? null;
+  let nextHint = data.nextListId ?? null;
+
   for (let attempt = 0; attempt < MAX_REORDER_LIST_RETRIES; attempt += 1) {
     // boardId of the list being moved, captured inside the tx so a too-tight gap
     // can renumber the right board before the next attempt.
@@ -340,17 +399,14 @@ export async function reorderListByNeighbors(data: {
 
         boardIdForRetry = currentList.boardId;
 
+        // Exclude the list being moved so the adjacency search bisects against
+        // the real occupants, not the mover's own (stale) slot.
         const nextPosition = await resolveListPosition(tx, {
           boardId: currentList.boardId,
-          prevListId: data.prevListId,
-          nextListId: data.nextListId,
+          prevListId: prevHint,
+          nextListId: nextHint,
+          excludeListId: data.listId,
         });
-
-        if (Math.abs(nextPosition - currentList.position) < MIN_POSITION_GAP) {
-          // No room to slot between neighbours — bail out of the tx and let the
-          // catch renumber the board, then retry against the fresh layout.
-          throw new PositionSpaceExhaustedError();
-        }
 
         return await tx.list.update({
           where: { id: data.listId },
@@ -367,6 +423,19 @@ export async function reorderListByNeighbors(data: {
         });
       });
     } catch (error) {
+      // A stale neighbour hint is recoverable without a renumber: drop that side
+      // and retry so the move re-anchors on the surviving neighbour / appends.
+      if (error instanceof StaleNeighborError && attempt < MAX_REORDER_LIST_RETRIES - 1) {
+        if (error.side === "prev") {
+          prevHint = null;
+        } else {
+          nextHint = null;
+        }
+        continue;
+      }
+
+      // P2002 (a rival grabbed the slot) or PositionSpaceExhaustedError (no gap
+      // left to bisect) both mean: renumber the board, then retry.
       if (
         (isUniqueConstraintError(error) || error instanceof PositionSpaceExhaustedError) &&
         attempt < MAX_REORDER_LIST_RETRIES - 1 &&
