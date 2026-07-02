@@ -289,6 +289,46 @@ describe("getWorkspaceAnalytics", () => {
     expect(analytics.estimationCoverage.lowConfidence).toBe(true);
   });
 
+  it("treats an unparseable due-date string as no due date, not an Invalid Date (mn3)", async () => {
+    // Before the guard, `new Date("not-a-date")` produced an Invalid Date whose
+    // every comparison is false — silently dropping the card from the overdue
+    // tally instead of treating the bad metadata as "no due date". The card must
+    // still be counted (active, estimated) and simply not be flagged overdue.
+    setMockCards({ "card-1": "Garbage due date" });
+    setMockHistory([
+      historyEvent(
+        1,
+        "card-1",
+        $Enums.CardHistoryEventType.CARD_CREATED,
+        "2026-01-01T09:00:00.000Z",
+        {
+          listId: "todo",
+          listIsDone: false,
+          estimateHours: 4,
+          dueDate: "not-a-date",
+          memberIds: ["user-1"],
+          archivedAt: null,
+          deletedAt: null,
+        },
+      ),
+    ]);
+
+    const analytics = await getWorkspaceAnalytics({
+      workspaceId: "workspace-1",
+      filters: {
+        from: utcDate("2026-01-01T00:00:00.000Z"),
+        to: utcDate("2026-01-02T00:00:00.000Z"),
+      },
+    });
+
+    // Not dropped: still active and estimated in coverage / burndown.
+    expect(analytics.estimationCoverage.current).toBe(100);
+    expect(analytics.estimationCoverage.estimatedCount).toBe(1);
+    expect(analytics.remainingHours.current).toBe(4);
+    // Unparseable due date → no due date → never overdue.
+    expect(analytics.overdue.current).toBe(0);
+  });
+
   it("caps the lead-time detail rows at the newest completions, not creation order (MJ2)", async () => {
     // Regression for the cap-before-sort bug: rows were capped at
     // MAX_LEAD_TIME_ROWS (100) in context.cardIds (creation) order, THEN sorted

@@ -100,7 +100,14 @@ function metadataNullableDate(
   }
 
   const value = metadata[key];
-  return typeof value === "string" && value.length > 0 ? new Date(value) : null;
+  if (typeof value !== "string" || value.length === 0) {
+    return null;
+  }
+  // Guard against an unparseable date string: `new Date("nonsense")` yields an
+  // Invalid Date whose downstream comparisons are all false, silently dropping
+  // the card from overdue/late/burndown instead of surfacing the bad metadata.
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function metadataBoolean(

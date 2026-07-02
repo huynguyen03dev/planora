@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 
+import { z } from "zod";
+
 import { hasWorkspacePermission } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
 import db from "@/lib/prisma";
@@ -17,6 +19,15 @@ type InviteMemberResult =
   | { success: false; error: string };
 
 const PENDING_INVITATION_STATUS = "pending";
+
+// workspaceId reaches these settings actions straight from the client, so parse
+// it before any DB use (CLAUDE.md gotcha #4). NOTE: a workspace IS a Better Auth
+// organization, whose id is a 32-char nanoid — NOT a UUID (cf. the US-062 MJ1
+// memberId correction; app models like board/card use UUIDs, Better Auth models
+// do not). So bound it by length rather than parsing as a UUID; .uuid() would
+// reject every legitimate workspace id. hasWorkspacePermission remains the real
+// gate — this is defense-in-depth with a "not found" posture on malformed input.
+const workspaceIdSchema = z.string().min(1).max(255);
 
 function toErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim().length > 0) {
@@ -140,6 +151,10 @@ export async function updateWorkspaceTimezoneAction(
 ): Promise<UpdateWorkspaceTimezoneResult> {
   await verifySession();
 
+  if (!workspaceIdSchema.safeParse(workspaceId).success) {
+    return { success: false, error: "Workspace not found" };
+  }
+
   if (!isValidTimezone(timezone)) {
     return { success: false, error: "Invalid timezone. Please enter a valid IANA timezone string (e.g. America/New_York, UTC)." };
   }
@@ -178,6 +193,10 @@ export async function updateWorkspaceRequireEstimateAction(
   requireEstimateBeforeDone: boolean,
 ): Promise<UpdateWorkspaceRequireEstimateResult> {
   await verifySession();
+
+  if (!workspaceIdSchema.safeParse(workspaceId).success) {
+    return { success: false, error: "Workspace not found" };
+  }
 
   const canManageWorkspace = await hasWorkspacePermission(workspaceId, {
     organization: ["update"],
@@ -218,6 +237,10 @@ export async function updateWorkspaceAnalyticsLaunchAction(
   launchAt: Date,
 ): Promise<UpdateWorkspaceAnalyticsLaunchResult> {
   await verifySession();
+
+  if (!workspaceIdSchema.safeParse(workspaceId).success) {
+    return { success: false, error: "Workspace not found" };
+  }
 
   const canManageWorkspace = await hasWorkspacePermission(workspaceId, {
     organization: ["update"],

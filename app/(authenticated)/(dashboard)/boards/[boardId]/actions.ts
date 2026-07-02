@@ -8,6 +8,7 @@ import {
   CARD_POSITION_GAP,
   LIVE_CARD_SCOPE,
   PositionSpaceExhaustedError,
+  StaleNeighborError,
   normalizeCardPositions,
   resolveCardPosition,
 } from "@/lib/ordering";
@@ -1201,13 +1202,19 @@ export async function moveCardAction(
   try {
     let movedCard: { id: string; listId: string; position: number } | null = null;
 
+    // Hints are mutable across retries: a StaleNeighborError drops the offending
+    // side so the next attempt re-anchors on the surviving neighbour / appends
+    // (US-062 mn2).
+    let prevHint = prevCardId ?? null;
+    let nextHint = nextCardId ?? null;
+
     for (let attempt = 0; attempt < MAX_REORDER_CARD_RETRIES; attempt += 1) {
       try {
         movedCard = await db.$transaction(async (tx) => {
           const nextPosition = await resolveCardPosition(tx, {
             targetListId,
-            prevCardId: prevCardId ?? null,
-            nextCardId: nextCardId ?? null,
+            prevCardId: prevHint,
+            nextCardId: nextHint,
             // The card is arriving from another list, but exclude it defensively
             // so a same-list re-drop never bisects against its own stale slot.
             excludeCardId: cardId,
@@ -1258,6 +1265,17 @@ export async function moveCardAction(
         });
         break;
       } catch (error) {
+        // A stale neighbour hint recovers without a renumber: drop that side and
+        // retry so the move re-anchors on the surviving neighbour / appends.
+        if (error instanceof StaleNeighborError && attempt < MAX_REORDER_CARD_RETRIES - 1) {
+          if (error.side === "prev") {
+            prevHint = null;
+          } else {
+            nextHint = null;
+          }
+          continue;
+        }
+
         // P2002 (rival grabbed the slot) or PositionSpaceExhaustedError (no gap
         // to bisect) both recover the same way: renumber the target list, retry.
         if (

@@ -38,6 +38,26 @@ export class PositionSpaceExhaustedError extends Error {
 }
 
 /**
+ * Thrown by the position resolvers when a client-supplied `prev`/`next` neighbour
+ * hint no longer names a live occupant of the target list/board — either because
+ * a rival concurrently moved/deleted it, or because the hint was never valid.
+ *
+ * Reorder callers treat it as RETRYABLE: drop the offending side's hint and retry
+ * so the move re-anchors on the surviving neighbour (or appends), rather than
+ * failing the user's drag. Position is not an authorization boundary — the card
+ * still lands in the already-authorized target — so self-healing to append on a
+ * bogus hint is safe. `side` says which hint to drop.
+ */
+export class StaleNeighborError extends Error {
+  readonly side: "prev" | "next";
+  constructor(side: "prev" | "next") {
+    super(`Stale ${side} neighbour hint; occupant no longer in target`);
+    this.name = "StaleNeighborError";
+    this.side = side;
+  }
+}
+
+/**
  * Compute the position for a card dropped between `prevCardId` and `nextCardId`
  * within `targetListId`, collision-safe under concurrency.
  *
@@ -59,7 +79,9 @@ export class PositionSpaceExhaustedError extends Error {
  *
  * Runs on the caller's transaction client so the read-and-decide shares the
  * reorder's transaction. Throws {@link PositionSpaceExhaustedError} when there
- * is no room to bisect (caller should renumber and retry).
+ * is no room to bisect (caller should renumber and retry), or
+ * {@link StaleNeighborError} when a prev/next hint no longer names a live card in
+ * the target list (caller should drop that hint and retry).
  */
 export async function resolveCardPosition(
   client: Prisma.TransactionClient,
@@ -84,11 +106,11 @@ export async function resolveCardPosition(
     : null;
 
   if (data.prevCardId && (!prevCard || prevCard.listId !== data.targetListId)) {
-    throw new Error("Invalid prevCardId");
+    throw new StaleNeighborError("prev");
   }
 
   if (data.nextCardId && (!nextCard || nextCard.listId !== data.targetListId)) {
-    throw new Error("Invalid nextCardId");
+    throw new StaleNeighborError("next");
   }
 
   const notMoved = data.excludeCardId ? { id: { not: data.excludeCardId } } : {};

@@ -28,10 +28,8 @@ vi.mock("@/lib/dal", () => ({
   verifySession: mocks.verifySession,
 }));
 
-import {
-  exportWorkspaceAnalyticsAction,
-  generateAnalyticsCSV,
-} from "@/app/(authenticated)/(dashboard)/workspace/[slug]/dashboard/actions";
+import { exportWorkspaceAnalyticsAction } from "@/app/(authenticated)/(dashboard)/workspace/[slug]/dashboard/actions";
+import { generateAnalyticsCSV } from "@/lib/analytics/csv-export";
 
 describe("analytics export actions", () => {
   beforeEach(() => {
