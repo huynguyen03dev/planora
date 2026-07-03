@@ -57,7 +57,25 @@ match.)
 
 ## Members & invitations
 
-- Members are listed and managed under `/workspace`.
+- **Workspace shell (US-063):** `/workspace/[slug]` renders a left sidebar
+  (Boards · Analytics · Members · Settings) that wraps the analytics, members,
+  and settings pages. `/workspace` (no slug) is a pure workspace **chooser**.
+- **Member list:** `/workspace/[slug]/members` shows every `WorkspaceMember`
+  (avatar · name · email · role) with a name/email filter. All members can view
+  the list; management affordances are admin-only (gated server-side on
+  `member:["update"]`).
+- **Admin management (US-063):** admins can invite (shadcn `Dialog`, any role
+  incl. `admin`), change a member's role inline (`updateMemberRoleAction`),
+  remove a member (`removeMemberAction`), revoke a pending invitation
+  (`cancelInvitationAction`), and any member can leave (`leaveWorkspaceAction`).
+  All four route through Better Auth's `auth.api.*` (BA owns the org lifecycle);
+  destructive actions confirm via `AlertDialog`.
+- **Last-admin invariant (decision 0019):** a workspace always keeps ≥1 admin —
+  the sole admin cannot be removed, demoted, or leave. BA enforces the
+  single-actor case; the cross-actor race is closed by a per-workspace Postgres
+  transaction-scoped advisory lock (`lib/workspace-members.ts`). Leaving nulls
+  the active org, so the app reselects a remaining workspace and redirects to the
+  chooser.
 - **Invite by email:** `inviteMemberAction` creates an `Invitation` (role +
   expiry, `status` pending) and sends a React Email template
   (`emails/invite-email.tsx`) via Resend.
@@ -75,6 +93,9 @@ match.)
   `WorkspaceMember`.
 
 ## Workspace settings (admin)
+
+Hosted at `/workspace/[slug]/settings` (US-063), admin-only; a non-admin sees a
+read-only notice.
 
 - `updateWorkspaceTimezoneAction` — sets the timezone for analytics date math.
 - `updateWorkspaceRequireEstimateAction` — toggles the

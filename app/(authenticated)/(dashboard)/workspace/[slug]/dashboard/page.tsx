@@ -13,6 +13,7 @@ import { LeadTimeTable } from "./components/lead-time-table";
 import db from "@/lib/prisma";
 import { verifySession } from "@/lib/dal";
 import { isWorkspaceMember } from "@/lib/authorization";
+import { getWorkspaceIdBySlug } from "@/lib/workspace";
 import type { AnalyticsFilters } from "@/lib/analytics/types";
 import { WorkspaceDashboardClient } from "@/components/workspace/workspace-dashboard-client";
 
@@ -29,13 +30,6 @@ interface DashboardPageProps {
     to?: string;
     includeArchivedBoards?: string;
   }>;
-}
-
-async function getWorkspaceIdBySlug(slug: string) {
-  return db.workspace.findUnique({
-    where: { slug },
-    select: { id: true },
-  });
 }
 
 async function getWorkspaceData(workspaceId: string) {
