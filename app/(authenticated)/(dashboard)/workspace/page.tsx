@@ -1,131 +1,79 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
+import { Analytics01Icon, UserMultipleIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 
-import { hasWorkspacePermission } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
-import { listWorkspacePendingInvitations } from "@/lib/invitation";
-import db from "@/lib/prisma";
 import { listWorkspaceMembershipsByUserId } from "@/lib/workspace";
 
-import { AnalyticsSettingsForm } from "@/components/workspace/analytics-settings-form";
-import { InviteMemberForm } from "@/components/workspace/invite-member-form";
-import { WorkspaceInvitationsList } from "@/components/workspace/workspace-invitations-list";
-
-type WorkspacePageProps = {
-  searchParams: Promise<{
-    workspace?: string;
-  }>;
+const ROLE_LABEL: Record<string, string> = {
+  admin: "Admin",
+  editor: "Editor",
+  viewer: "Viewer",
 };
 
-export default async function WorkspacePage({ searchParams }: WorkspacePageProps) {
+export default async function WorkspacePage() {
   const { userId } = await verifySession();
-  const params = await searchParams;
 
   const memberships = await listWorkspaceMembershipsByUserId(userId);
-  const workspaces = memberships.map((membership) => ({
-    id: membership.workspace.id,
-    name: membership.workspace.name,
-  }));
-
-  const workspaceIds = new Set(workspaces.map((workspace) => workspace.id));
-  const selectedWorkspaceId = params.workspace ?? null;
-
-  if (selectedWorkspaceId && !workspaceIds.has(selectedWorkspaceId)) {
-    redirect("/workspace");
-  }
-
-  const canManageSelectedWorkspace = selectedWorkspaceId
-    ? await hasWorkspacePermission(selectedWorkspaceId, {
-        invitation: ["create"],
-      })
-    : false;
-
-  const selectedWorkspaceInvitations = selectedWorkspaceId && canManageSelectedWorkspace
-    ? await listWorkspacePendingInvitations(selectedWorkspaceId)
-    : [];
-  const selectedWorkspaceSettings = selectedWorkspaceId && canManageSelectedWorkspace
-    ? await db.workspace.findUnique({
-        where: { id: selectedWorkspaceId },
-        select: {
-          id: true,
-          timezone: true,
-          requireEstimateBeforeDone: true,
-        },
-      })
-    : null;
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 p-6">
+    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 p-6">
       <header className="space-y-1">
-        <h1 className="text-2xl font-semibold">Workspace invitations</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Workspaces</h1>
         <p className="text-sm text-muted-foreground">
-          Invite teammates and manage invitations for your workspaces.
+          Choose a workspace to open its boards, members, and settings.
         </p>
       </header>
 
-      <section className="space-y-4 rounded-xl border p-4">
-        <div className="space-y-2">
-          <h2 className="text-lg font-semibold">Workspace management</h2>
-          <p className="text-sm text-muted-foreground">
-            Select a workspace to send invitations and review pending invites.
-          </p>
-        </div>
-
-        {workspaces.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {workspaces.map((workspace) => {
-              const isActive = workspace.id === selectedWorkspaceId;
-
-              return (
+      {memberships.length > 0 ? (
+        <ul className="space-y-2">
+          {memberships.map((membership) => {
+            const { workspace, role } = membership;
+            return (
+              <li
+                key={workspace.id}
+                className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-4"
+              >
                 <Link
-                  key={workspace.id}
-                  href={`/workspace?workspace=${workspace.id}`}
-                  className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${
-                    isActive
-                      ? "border-primary bg-primary/10 text-foreground"
-                      : "border-border text-muted-foreground hover:text-foreground"
-                  }`}
+                  href={`/boards?workspace=${workspace.id}`}
+                  className="flex min-w-0 flex-1 items-center gap-3"
                 >
-                  {workspace.name}
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded bg-primary/10 text-sm font-bold text-primary">
+                    {workspace.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{workspace.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {ROLE_LABEL[role] ?? role}
+                    </p>
+                  </div>
                 </Link>
-              );
-            })}
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            You are not a member of any workspace yet.
-          </p>
-        )}
 
-        {selectedWorkspaceId ? (
-          canManageSelectedWorkspace ? (
-            <div className="space-y-5">
-              <InviteMemberForm workspaceId={selectedWorkspaceId} />
-              {selectedWorkspaceSettings ? (
-                <AnalyticsSettingsForm
-                  workspaceId={selectedWorkspaceSettings.id}
-                  timezone={selectedWorkspaceSettings.timezone}
-                  requireEstimateBeforeDone={
-                    selectedWorkspaceSettings.requireEstimateBeforeDone
-                  }
-                />
-              ) : null}
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold">Pending invitations</h3>
-                <WorkspaceInvitationsList invitations={selectedWorkspaceInvitations} />
-              </div>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              You do not have permission to manage invitations for this workspace.
-            </p>
-          )
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Select a workspace above to manage invitations.
-          </p>
-        )}
-      </section>
+                <div className="flex items-center gap-1">
+                  <Link
+                    href={`/workspace/${workspace.slug}/members`}
+                    className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <HugeiconsIcon icon={UserMultipleIcon} className="size-4" />
+                    Members
+                  </Link>
+                  <Link
+                    href={`/workspace/${workspace.slug}/dashboard`}
+                    className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <HugeiconsIcon icon={Analytics01Icon} className="size-4" />
+                    Analytics
+                  </Link>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">
+          You are not a member of any workspace yet.
+        </p>
+      )}
     </main>
   );
 }

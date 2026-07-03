@@ -52,10 +52,23 @@ export {
   inviteMemberSchema,
   acceptInvitationSchema,
   declineInvitationSchema,
+  workspaceIdSchema,
+  invitationIdSchema,
   type InviteMemberInput,
   type AcceptInvitationInput,
   type DeclineInvitationInput,
 } from "./invitation";
+
+export {
+  removeMemberSchema,
+  updateMemberRoleSchema,
+  leaveWorkspaceSchema,
+  cancelInvitationSchema,
+  type RemoveMemberInput,
+  type UpdateMemberRoleInput,
+  type LeaveWorkspaceInput,
+  type CancelInvitationInput,
+} from "./member";
 
 export {
   createCommentSchema,

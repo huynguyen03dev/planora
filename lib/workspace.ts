@@ -60,6 +60,20 @@ function toSlugSegment(value: string): string {
   return "workspace";
 }
 
+/**
+ * Resolve a workspace slug to its id. Returns null when no workspace matches.
+ * Promoted out of the dashboard page (US-063) so the `[slug]` shell, members,
+ * and settings routes share one query.
+ */
+export async function getWorkspaceIdBySlug(
+  slug: string,
+): Promise<{ id: string } | null> {
+  return db.workspace.findUnique({
+    where: { slug },
+    select: { id: true },
+  });
+}
+
 export async function listWorkspaceMembershipsByUserId(
   userId: string,
 ): Promise<WorkspaceMembership[]> {
