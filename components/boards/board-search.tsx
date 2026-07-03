@@ -4,6 +4,7 @@ import { Cancel01Icon, Search01Icon } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react"
 
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
 // Header control for the client-only board card search (US-014 slice 1: title).
@@ -29,14 +30,16 @@ export function BoardSearch() {
         className="h-8 w-40 bg-white/90 pl-8 pr-8 sm:w-56"
       />
       {searchQuery ? (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-xs"
           onClick={() => setSearchQuery("")}
           aria-label="Clear search"
-          className="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground p-0"
         >
           <HugeiconsIcon icon={Cancel01Icon} size={14} />
-        </button>
+        </Button>
       ) : null}
     </div>
   )

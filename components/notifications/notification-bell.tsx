@@ -1,28 +1,33 @@
 "use client";
 
-import { useCallback } from "react";
+import type { ComponentProps } from "react";
 
 import { Notification02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
-type NotificationBellProps = {
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+type NotificationBellProps = ComponentProps<typeof Button> & {
   count: number;
-  onClick: () => void;
   isOpen: boolean;
 };
 
-export function NotificationBell({ count, onClick, isOpen }: NotificationBellProps) {
-  const handleClick = useCallback(() => {
-    onClick();
-  }, [onClick]);
-
+// Rendered inside <PopoverTrigger asChild>: forwards ref + props (onClick,
+// aria-expanded, data-state) to the underlying Button so Radix can anchor the
+// popover and own the open state. Do NOT add a self-toggling onClick here — the
+// Popover toggles open state, and a second toggle would cancel it out.
+export function NotificationBell({ count, isOpen, className, ...props }: NotificationBellProps) {
   return (
-    <button
+    <Button
       type="button"
-      onClick={handleClick}
-      className={`relative flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent ${
-        isOpen ? "bg-accent font-medium" : "text-muted-foreground"
-      }`}
+      variant="ghost"
+      {...props}
+      className={cn(
+        "relative flex h-auto items-center gap-1.5 px-2 py-1.5",
+        isOpen ? "bg-accent font-medium text-foreground" : "text-muted-foreground",
+        className,
+      )}
       aria-label={`Notifications${count > 0 ? ` (${count} unread)` : ""}`}
     >
       <HugeiconsIcon icon={Notification02Icon} className="size-4" />
@@ -31,6 +36,6 @@ export function NotificationBell({ count, onClick, isOpen }: NotificationBellPro
           {count > 9 ? "9+" : count}
         </span>
       )}
-    </button>
+    </Button>
   );
 }

@@ -42,6 +42,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -800,15 +801,17 @@ function CardDetailDialogBody({
                     <MemberAvatar name={member.name} image={member.image} size="sm" />
                     <span className="max-w-40 truncate">{member.name}</span>
                     {canEdit ? (
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="icon"
                         aria-label={`Remove ${member.name}`}
-                        className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+                        className="h-4 w-4 p-0 rounded-full text-muted-foreground hover:text-foreground hover:bg-transparent"
                         disabled={isPending}
                         onClick={() => handleRemoveMember(member.id)}
                       >
                         ×
-                      </button>
+                      </Button>
                     ) : null}
                   </span>
                 ))
@@ -872,9 +875,9 @@ function CardDetailDialogBody({
           </div>
 
           <div id="card-section-priority" className="flex items-center gap-3">
-            <label htmlFor="card-priority" className="w-20 shrink-0 text-sm text-muted-foreground">
+            <Label htmlFor="card-priority" className="w-20 shrink-0 text-sm font-normal text-muted-foreground">
               Priority
-            </label>
+            </Label>
             <Select
               value={draftPriority}
               onValueChange={(value) => {
@@ -978,9 +981,9 @@ function CardDetailDialogBody({
           </div>
 
           <div className="flex items-center gap-3">
-            <label htmlFor="card-estimate-hours" className="w-20 shrink-0 text-sm text-muted-foreground">
+            <Label htmlFor="card-estimate-hours" className="w-20 shrink-0 text-sm font-normal text-muted-foreground">
               Estimate
-            </label>
+            </Label>
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <Select
                 value={draftEstimateHours === "" ? "none" : draftEstimateHours}

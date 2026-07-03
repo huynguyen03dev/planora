@@ -28,6 +28,7 @@ import {
   AvatarImage,
 } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { getBoardTheme } from "@/lib/constants";
 import { cn, getInitials } from "@/lib/utils";
@@ -173,16 +174,17 @@ export function BoardHeader({
               className="max-w-xl bg-white/90"
             />
           ) : canEdit ? (
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => {
                 setDraftTitle(board.title);
                 setEditing(true);
               }}
-              className="max-w-full text-left"
+              className="max-w-full h-auto p-1 -m-1 text-left text-white hover:bg-white/10"
             >
-              <h1 className="truncate text-xl font-semibold text-white sm:text-2xl">{board.title}</h1>
-            </button>
+              <h1 className="truncate text-xl font-semibold sm:text-2xl">{board.title}</h1>
+            </Button>
           ) : (
             <h1 className="truncate text-xl font-semibold text-white sm:text-2xl">{board.title}</h1>
           )}
@@ -190,13 +192,13 @@ export function BoardHeader({
 
         <div className="flex flex-wrap items-center justify-end gap-2">
           {showReconnecting ? (
-            <span
+            <Badge
               role="status"
-              className="flex items-center gap-1.5 rounded-full bg-amber-500/90 px-2.5 py-1 text-xs font-medium text-white"
+              className="flex h-6 items-center gap-1.5 rounded-full bg-amber-500/90 hover:bg-amber-500/90 px-2.5 py-1 text-xs font-medium text-white border-none"
             >
               <span className="size-1.5 animate-pulse rounded-full bg-white" />
               Reconnecting…
-            </span>
+            </Badge>
           ) : null}
 
           {watchers.length > 0 ? (

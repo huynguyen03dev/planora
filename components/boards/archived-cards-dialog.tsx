@@ -8,6 +8,7 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import { restoreCardAction } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions"
 import { boardHeaderControlClass } from "@/components/boards/board-header-controls"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import {
   Dialog,
@@ -82,9 +83,9 @@ export function ArchivedCardsDialog({
           <HugeiconsIcon icon={ArchiveIcon} size={16} />
           Archived
           {count > 0 ? (
-            <span className="ml-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-medium text-primary-foreground">
+            <Badge className="ml-0.5 h-5 min-w-5 rounded-full px-1.5 font-semibold text-[10px] bg-primary text-primary-foreground hover:bg-primary">
               {count}
-            </span>
+            </Badge>
           ) : null}
         </Button>
       </DialogTrigger>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, useTransition } from "react";
+import { useState, useEffect, useCallback, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -47,7 +47,6 @@ export function NotificationDropdown({
   const [isLoading, setIsLoading] = useState(false);
   const [errorByInvitationId, setErrorByInvitationId] = useState<Record<string, string>>({});
   const [isResolving, startResolving] = useTransition();
-  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const fetchInbox = useCallback(async () => {
     setIsLoading(true);
@@ -76,21 +75,10 @@ export function NotificationDropdown({
   }, [onInvitationCountChange]);
 
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        onClose();
-      }
-    }
-
     if (isOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
       fetchInbox();
     }
-
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [isOpen, onClose, fetchInbox]);
+  }, [isOpen, fetchInbox]);
 
   const handleNotificationClick = useCallback(
     async (notification: InboxNotificationItem) => {
@@ -180,21 +168,19 @@ export function NotificationDropdown({
   const hasUnreadNotifications = notifications.some((n) => !n.isRead);
 
   return (
-    <div
-      ref={dropdownRef}
-      className="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border bg-popover p-0 shadow-lg"
-    >
+    <div className="w-full flex flex-col">
       <div className="flex items-center justify-between border-b px-4 py-2">
         <span className="text-sm font-semibold">Notifications</span>
         {hasUnreadNotifications && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={handleMarkAllRead}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            className="flex h-auto items-center gap-1 p-1 text-xs text-muted-foreground hover:text-foreground"
           >
             <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-3.5" />
             Mark all read
-          </button>
+          </Button>
         )}
       </div>
 
@@ -264,7 +250,7 @@ export function NotificationDropdown({
                 key={`notification-${item.id}`}
                 type="button"
                 onClick={() => handleNotificationClick(item)}
-                className={`flex w-full items-start gap-3 border-b px-4 py-3 text-left transition-colors hover:bg-accent ${
+                className={`flex w-full items-start gap-3 border-b px-4 py-3 text-left transition-colors hover:bg-accent outline-none focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring ${
                   item.isRead ? "opacity-60" : "bg-accent/50"
                 }`}
               >

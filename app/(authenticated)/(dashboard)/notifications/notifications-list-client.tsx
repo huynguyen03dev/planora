@@ -8,6 +8,8 @@ import {
   markAllNotificationsReadAction,
 } from "@/lib/notification-actions";
 
+import { Button } from "@/components/ui/button";
+
 type NotificationItem = {
   id: string;
   type: string;
@@ -55,13 +57,15 @@ export function NotificationsListClient({ notifications: initialNotifications }:
     <div className="space-y-2">
       {hasUnread && (
         <div className="flex justify-end">
-          <button
+          <Button
             type="button"
+            variant="link"
+            size="sm"
             onClick={handleMarkAllRead}
-            className="text-sm text-muted-foreground hover:text-foreground"
+            className="h-auto p-0 text-sm text-muted-foreground hover:text-foreground hover:no-underline font-normal"
           >
             Mark all as read
-          </button>
+          </Button>
         </div>
       )}
 
@@ -71,7 +75,7 @@ export function NotificationsListClient({ notifications: initialNotifications }:
             key={notification.id}
             type="button"
             onClick={() => handleNotificationClick(notification)}
-            className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-accent ${
+            className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-accent outline-none focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring ${
               notification.isRead ? "opacity-60" : "bg-accent/50"
             }`}
           >
