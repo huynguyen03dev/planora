@@ -9,6 +9,7 @@ import {
   boardHeaderControlClass,
 } from "@/components/boards/board-header-controls"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -57,9 +58,9 @@ export function BoardFilter() {
           <HugeiconsIcon icon={FilterIcon} size={16} />
           Filter
           {activeCount > 0 ? (
-            <span className="ml-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-medium text-primary-foreground">
+            <Badge className="ml-0.5 h-5 min-w-5 rounded-full px-1.5 font-semibold text-[10px] bg-primary text-primary-foreground hover:bg-primary">
               {activeCount}
-            </span>
+            </Badge>
           ) : null}
         </Button>
       </DropdownMenuTrigger>

@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 export type ChecklistItemData = {
@@ -171,16 +172,16 @@ export function CardChecklistsSection({
                         disabled={!canEdit || isPending}
                         onCheckedChange={() => toggleItem(item.id, item.isCompleted)}
                       />
-                      <label
+                      <Label
                         htmlFor={`checklist-item-${item.id}`}
                         className={cn(
-                          "flex-1 text-sm",
+                          "flex-1 text-sm font-normal cursor-pointer select-text",
                           canEdit && !isPending ? "cursor-pointer" : "cursor-default",
                           item.isCompleted && "text-muted-foreground line-through",
                         )}
                       >
                         {item.title}
-                      </label>
+                      </Label>
                     </div>
                     {canEdit ? (
                       <Button

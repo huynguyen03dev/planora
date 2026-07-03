@@ -7,7 +7,9 @@ import {
   updateWorkspaceTimezoneAction,
 } from "@/app/(authenticated)/(dashboard)/workspace/actions";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 type AnalyticsSettingsFormProps = {
   workspaceId: string;
@@ -61,31 +63,32 @@ export function AnalyticsSettingsForm({
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
-      <label className="block space-y-1 text-sm">
-        <span className="font-medium">Timezone</span>
+      <div className="block space-y-1">
+        <Label htmlFor="timezone-input">Timezone</Label>
         <Input
+          id="timezone-input"
           value={draftTimezone}
           onChange={(event) => setDraftTimezone(event.target.value)}
           placeholder="UTC"
           disabled={isPending}
         />
-      </label>
+      </div>
 
-      <label className="flex items-start gap-2 text-sm">
-        <input
-          type="checkbox"
+      <div className="flex items-start gap-2 text-sm">
+        <Checkbox
+          id="require-estimate"
           checked={draftRequireEstimate}
-          onChange={(event) => setDraftRequireEstimate(event.target.checked)}
+          onCheckedChange={(checked) => setDraftRequireEstimate(!!checked)}
           disabled={isPending}
           className="mt-1"
         />
-        <span>
-          <span className="block font-medium">Require estimate before done</span>
-          <span className="text-muted-foreground">
+        <Label htmlFor="require-estimate" className="flex flex-col gap-0.5 font-normal cursor-pointer select-text">
+          <span className="font-medium text-sm text-foreground">Require estimate before done</span>
+          <span className="text-xs text-muted-foreground">
             Prevent moving unestimated cards from active lists into done lists.
           </span>
-        </span>
-      </label>
+        </Label>
+      </div>
 
       <Button type="button" size="sm" disabled={isPending} onClick={handleSave}>
         {isPending ? "Saving..." : "Save analytics settings"}

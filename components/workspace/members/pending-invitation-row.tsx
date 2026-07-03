@@ -13,6 +13,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -78,17 +79,19 @@ export function PendingInvitationRow({
           if (!next) setError("");
         }}
       >
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            setError("");
-            setOpen(true);
-          }}
-          disabled={isPending}
-        >
-          Revoke
-        </Button>
+        <AlertDialogTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setError("");
+              setOpen(true);
+            }}
+            disabled={isPending}
+          >
+            Revoke
+          </Button>
+        </AlertDialogTrigger>
 
         <AlertDialogContent>
           <AlertDialogHeader>

@@ -14,6 +14,7 @@ import {
   AvatarGroupCount,
   AvatarImage,
 } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import { getBoardTheme } from "@/lib/constants";
 import { getInitials } from "@/lib/utils";
 import type { WorkspaceBoardMember } from "@/lib/workspace";
@@ -103,12 +104,13 @@ export function BoardCard({
         </div>
       </Link>
 
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={handleToggleStar}
         disabled={isPending}
         aria-label={starDisplay ? "Unstar board" : "Star board"}
-        className={`absolute right-2 top-2 rounded p-0.5 transition-all ${
+        className={`absolute right-2 top-2 h-7 w-7 rounded p-0.5 transition-all hover:bg-white/15 dark:hover:bg-white/10 ${
           starDisplay
             ? "text-yellow-400 hover:text-yellow-300"
             : "text-white/40 hover:text-yellow-300/70"
@@ -119,7 +121,7 @@ export function BoardCard({
           className="size-[18px] drop-shadow-sm"
           fill={starDisplay ? "currentColor" : "none"}
         />
-      </button>
+      </Button>
     </div>
   );
 }

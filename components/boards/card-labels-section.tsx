@@ -95,15 +95,17 @@ export function CardLabelsSection({
           >
             {label.name}
             {canEdit ? (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
                 aria-label={`Remove ${label.name}`}
-                className="opacity-70 hover:opacity-100 disabled:opacity-50"
+                className="h-4 w-4 p-0 rounded-full hover:bg-transparent opacity-70 hover:opacity-100"
                 disabled={isPending}
                 onClick={() => toggleAttached(label.id, true)}
               >
                 ×
-              </button>
+              </Button>
             ) : null}
           </span>
         ))
@@ -127,10 +129,11 @@ export function CardLabelsSection({
                 <ul className="space-y-1.5">
                   {boardLabels.map((label) => (
                     <li key={label.id}>
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
                         className={cn(
-                          "flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left text-sm disabled:opacity-50",
+                          "flex w-full h-auto justify-start gap-2 rounded-md border px-2 py-1.5 text-left text-sm font-normal disabled:opacity-50 hover:bg-muted",
                           attachedIds.has(label.id) ? "font-semibold" : "font-normal",
                         )}
                         disabled={isPending}
@@ -147,7 +150,7 @@ export function CardLabelsSection({
                         <span className="text-xs text-muted-foreground">
                           {attachedIds.has(label.id) ? "On" : "Off"}
                         </span>
-                      </button>
+                      </Button>
                     </li>
                   ))}
                 </ul>

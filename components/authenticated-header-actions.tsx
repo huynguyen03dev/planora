@@ -7,6 +7,7 @@ import { CreateWorkspaceModal } from "@/components/boards/create-workspace-modal
 import { NotificationBell } from "@/components/notifications/notification-bell"
 import { NotificationDropdown } from "@/components/notifications/notification-dropdown"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { UserButton } from "@/components/user-button"
 import { computeInboxBadgeCount } from "@/lib/notifications/inbox"
 import { initSocket } from "@/lib/realtime/client"
@@ -86,20 +87,20 @@ export function AuthenticatedHeaderActions({
   return (
     <div className="flex items-center gap-1">
       <ThemeToggle />
-      <div className="relative">
-        <NotificationBell
-          count={badgeCount}
-          onClick={() => setIsNotificationsOpen((prev) => !prev)}
-          isOpen={isNotificationsOpen}
-        />
-        <NotificationDropdown
-          isOpen={isNotificationsOpen}
-          onClose={() => setIsNotificationsOpen(false)}
-          onMarkOneRead={() => setUnreadCount((c) => Math.max(0, c - 1))}
-          onMarkAllRead={() => setUnreadCount(0)}
-          onInvitationCountChange={(count) => setInvitationCount(Math.max(0, count))}
-        />
-      </div>
+      <Popover open={isNotificationsOpen} onOpenChange={setIsNotificationsOpen}>
+        <PopoverTrigger asChild>
+          <NotificationBell count={badgeCount} isOpen={isNotificationsOpen} />
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-80 p-0 flex flex-col gap-0 border bg-popover shadow-lg">
+          <NotificationDropdown
+            isOpen={isNotificationsOpen}
+            onClose={() => setIsNotificationsOpen(false)}
+            onMarkOneRead={() => setUnreadCount((c) => Math.max(0, c - 1))}
+            onMarkAllRead={() => setUnreadCount(0)}
+            onInvitationCountChange={(count) => setInvitationCount(Math.max(0, count))}
+          />
+        </PopoverContent>
+      </Popover>
       <UserButton onCreateWorkspace={openCreateWorkspace} />
       <CreateWorkspaceModal open={searchParams.get("createWorkspace") === "1"} onClose={closeCreateWorkspace} />
     </div>
