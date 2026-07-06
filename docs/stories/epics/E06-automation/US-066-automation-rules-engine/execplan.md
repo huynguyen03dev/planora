@@ -229,6 +229,45 @@ Hard gates (→ high-risk):
    isolation).
    - Save-time static cycle warning: implement advisory check at rule save.
 
+   **DONE (verified): tsc clean, 821/821 tests pass (+46 vs Phase 7).**
+   - **Senior-review fix (HIGH):** create/update now validate action-STEP targets
+     (`move-card-to-list.targetListId`, `add/remove-label.labelId`) against the
+     rule's workspace via `actionTargetsInWorkspace()` — the Zod schema only
+     checks UUID shape, so without this a workspace admin could author a rule
+     that moves a card into ANOTHER workspace's list or attaches a foreign label
+     (a cross-workspace write at fire time; the recipient targets were already
+     runtime-guarded in resolver.ts, but list/label targets were not). Validated
+     at SAVE time because a list/label's board→workspace binding is immutable
+     (unlike membership). Rejects with `"Invalid action target"`; +6 isolation
+     tests (cross-ws list, cross-ws label, nonexistent target, update-swap,
+     same-ws positive control). Also: `revalidatePath("/workspace", "layout")`
+     (was a literal path that missed the nested automation route) and dropped a
+     dead `matchTrigger` call in dry-run (the query already filters triggerType).
+   - `app/(authenticated)/(dashboard)/workspace/[slug]/automation/actions.ts` (new)
+     — the 7 actions. Mutations (create/update/delete/toggle) gate on
+     `hasWorkspacePermission(ws, { organization: ["update"] })` — an
+     admin-EXCLUSIVE verb, so viewer AND editor are both denied. Reads
+     (list/log/dry-run) gate on `isWorkspaceMember(userId, ws)` so any member
+     (incl. viewer) can read. **Isolation:** update/delete/toggle derive the
+     workspace from the persisted rule (`rule.findUnique → workspaceId`), never
+     from client input; a board-scoped create/update re-checks
+     `board.workspaceId === ruleWorkspaceId`; the execution-log query scopes by
+     `rule: { workspaceId }` (logs carry no workspaceId of their own). Denials use
+     a not-found posture (never confirm existence to an unauthorized caller).
+     dry-run runs the PURE matcher (no tx, no executor, no writes).
+   - `lib/schemas/automation.ts` — added `deleteRuleSchema`,
+     `toggleRuleEnabledSchema`, `listRulesSchema`, `ruleExecutionLogSchema`,
+     `dryRunRulesSchema` (+ re-exported from `lib/schemas/index.ts`).
+   - `lib/automation/cycle-check.ts` (new) — pure save-time static cycle
+     advisory. `producedTriggerType`/`producedTriggerTypes` mirror the executor's
+     `producedEvents` mapping; `detectStaticCycleWarnings` flags self-cycles and
+     cross-rule chains against ENABLED workspace rules. Advisory ONLY — never
+     blocks the save (the runtime ChainTracker guarantees halting). 12 unit tests.
+   - `tests/server-actions/automation-rules.test.ts` (new) — 27 US-006-pattern
+     tests: A1 auth, A2 viewer+editor denied on every mutation, A3
+     cross-workspace + cross-board isolation, positive controls, viewer-ALLOWED
+     reads, non-member-denied reads, and the self-cycle advisory round-trip.
+
 9. **UI** — `/workspace/[slug]/automation` page: rule list, rule builder
    (shadcn Dialog), execution log panel. Consult `DESIGN.md` for tokens.
 

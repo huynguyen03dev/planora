@@ -145,3 +145,54 @@ export const updateRuleSchema = z.object({
 });
 
 export type UpdateRuleInput = z.infer<typeof updateRuleSchema>;
+
+// ─── Rule id-only / query inputs ───────────────────────────────────
+
+export const deleteRuleSchema = z.object({
+  id: z.string().uuid("Invalid rule ID"),
+});
+
+export type DeleteRuleInput = z.infer<typeof deleteRuleSchema>;
+
+export const toggleRuleEnabledSchema = z.object({
+  id: z.string().uuid("Invalid rule ID"),
+  enabled: z.boolean(),
+});
+
+export type ToggleRuleEnabledInput = z.infer<typeof toggleRuleEnabledSchema>;
+
+export const listRulesSchema = z.object({
+  workspaceId: z.string().uuid("Invalid workspace ID"),
+});
+
+export type ListRulesInput = z.infer<typeof listRulesSchema>;
+
+export const ruleExecutionLogSchema = z.object({
+  workspaceId: z.string().uuid("Invalid workspace ID"),
+  ruleId: z.string().uuid("Invalid rule ID").optional(),
+});
+
+export type RuleExecutionLogInput = z.infer<typeof ruleExecutionLogSchema>;
+
+// ─── Dry-run input ─────────────────────────────────────────────────
+// Mirrors the RuleEventPayload fields a user can plausibly supply to preview
+// which enabled rules would fire (no mutation). All event fields are optional;
+// the matcher decides based on what's present.
+
+export const dryRunEventSchema = z.object({
+  cardId: z.string().uuid("Invalid card ID").optional(),
+  boardId: z.string().uuid("Invalid board ID").optional(),
+  listId: z.string().uuid("Invalid list ID").optional(),
+  listIdFrom: z.string().uuid("Invalid list ID").optional(),
+  listIdTo: z.string().uuid("Invalid list ID").optional(),
+  labelId: z.string().uuid("Invalid label ID").optional(),
+  priority: priorityValues.optional(),
+});
+
+export const dryRunRulesSchema = z.object({
+  workspaceId: z.string().uuid("Invalid workspace ID"),
+  triggerType: triggerTypeSchema,
+  event: dryRunEventSchema,
+});
+
+export type DryRunRulesInput = z.infer<typeof dryRunRulesSchema>;
