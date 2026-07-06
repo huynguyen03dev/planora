@@ -14,7 +14,11 @@ vi.mock("@/lib/prisma", () => ({
   db: mockDb,
 }));
 
-import { reorderCardWithinListByNeighbors } from "./card";
+import {
+  reorderCardWithinListByNeighbors,
+  resolveCompletedAt,
+  setCardCompletion,
+} from "./card";
 
 const GAP = 16384;
 const L = "list-1";
@@ -112,5 +116,99 @@ describe("reorderCardWithinListByNeighbors stale-neighbour recovery (US-062 mn2)
     // Appended after the last live card excluding the mover → keep.position + GAP.
     expect(result.position).toBe(GAP + GAP);
     expect(tx.card.update).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("resolveCompletedAt (card-owned completion semantics — US-045)", () => {
+  const NOW = new Date("2026-07-03T12:00:00.000Z");
+  const EARLIER = new Date("2026-06-01T00:00:00.000Z");
+
+  it("complete from incomplete → a fresh timestamp", () => {
+    expect(resolveCompletedAt(true, null, NOW)).toEqual(NOW);
+  });
+
+  it("reopen → null", () => {
+    expect(resolveCompletedAt(false, EARLIER, NOW)).toBeNull();
+  });
+
+  it("re-complete an already-complete card → preserves the existing timestamp (streak-stable)", () => {
+    // A no-op re-complete must not slide the anchor forward (US-064 relies on it).
+    expect(resolveCompletedAt(true, EARLIER, NOW)).toEqual(EARLIER);
+  });
+
+  it("complete after a reopen → a fresh timestamp (reopen already cleared it)", () => {
+    // The reopen set completedAt to null, so the next complete starts a new streak.
+    expect(resolveCompletedAt(true, null, NOW)).toEqual(NOW);
+  });
+});
+
+describe("setCardCompletion (US-045)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("completes only a still-incomplete card (compare-and-set) and reports the transition", async () => {
+    const NOW = new Date("2026-07-03T12:00:00.000Z");
+    const row = { id: "card-1", completedAt: NOW };
+    const client = {
+      card: {
+        updateMany: vi.fn(async () => ({ count: 1 })),
+        findUniqueOrThrow: vi.fn(async () => row),
+      },
+    } as unknown as Parameters<typeof setCardCompletion>[0];
+
+    const result = await setCardCompletion(client, "card-1", true, null, NOW);
+
+    const call = (client.card.updateMany as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    // The WHERE gates on the pre-toggle state, so a concurrent completer matches
+    // zero rows instead of double-writing.
+    expect(call.where).toEqual({ id: "card-1", archivedAt: null, completedAt: null });
+    expect(call.data).toEqual({ completedAt: NOW });
+    expect(result.transitioned).toBe(true);
+    expect(result.card).toBe(row);
+  });
+
+  it("clears completedAt on reopen, scoped to a currently-complete card", async () => {
+    const client = {
+      card: {
+        updateMany: vi.fn(async () => ({ count: 1 })),
+        findUniqueOrThrow: vi.fn(async () => ({ id: "card-1", completedAt: null })),
+      },
+    } as unknown as Parameters<typeof setCardCompletion>[0];
+
+    const result = await setCardCompletion(
+      client,
+      "card-1",
+      false,
+      new Date("2026-06-01T00:00:00.000Z"),
+    );
+
+    const call = (client.card.updateMany as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.where).toEqual({ id: "card-1", archivedAt: null, completedAt: { not: null } });
+    expect(call.data).toEqual({ completedAt: null });
+    expect(result.transitioned).toBe(true);
+  });
+
+  it("re-completing an already-complete card is a no-op: no transition, timestamp preserved", async () => {
+    const EARLIER = new Date("2026-06-01T00:00:00.000Z");
+    const row = { id: "card-1", completedAt: EARLIER };
+    const client = {
+      card: {
+        // The compare-and-set matched no row (already complete).
+        updateMany: vi.fn(async () => ({ count: 0 })),
+        findUniqueOrThrow: vi.fn(async () => row),
+      },
+    } as unknown as Parameters<typeof setCardCompletion>[0];
+
+    const result = await setCardCompletion(
+      client,
+      "card-1",
+      true,
+      EARLIER,
+      new Date("2026-07-03T12:00:00.000Z"),
+    );
+
+    expect(result.transitioned).toBe(false);
+    expect(result.card.completedAt).toBe(EARLIER);
   });
 });

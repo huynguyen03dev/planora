@@ -18,7 +18,6 @@ type CardSnapshot = {
   listId: string;
   list: {
     boardId: string;
-    isDone: boolean;
   };
   estimateHours: number | null;
   dueDate: Date | null;
@@ -52,7 +51,6 @@ function toIsoOrNull(date: Date | null): string | null {
 function getSnapshotMetadata(card: CardSnapshot): Prisma.InputJsonObject {
   return {
     listId: card.listId,
-    listIsDone: card.list.isDone,
     estimateHours: card.estimateHours,
     dueDate: toIsoOrNull(card.dueDate),
     memberIds: card.members.map((member) => member.userId),
@@ -91,7 +89,6 @@ async function buildBackfillPlan(
       list: {
         select: {
           boardId: true,
-          isDone: true,
         },
       },
       estimateHours: true,

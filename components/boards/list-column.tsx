@@ -8,7 +8,6 @@ import { Draggable, Droppable } from "@hello-pangea/dnd";
 import {
   createCardAction,
   updateListAction,
-  updateListIsDoneAction,
   deleteListAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
@@ -27,14 +26,19 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { cardMatchesFilter, cardMatchesQuery } from "@/lib/board-filter";
+import {
+  cardMatchesAllDimensions,
+  cardMatchesQuery,
+  isFilterActive,
+  isSearchActive,
+  type CardFilter,
+} from "@/lib/board-filter";
 import { cn } from "@/lib/utils";
 
 type ListColumnProps = {
@@ -42,7 +46,6 @@ type ListColumnProps = {
     id: string;
     title: string;
     boardId: string;
-    isDone: boolean;
     cards: Array<{
       id: string;
       listId: string;
@@ -52,6 +55,7 @@ type ListColumnProps = {
       priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
       dueDate: Date | null;
       completedAt: Date | null;
+      updatedAt: Date;
       labels: Array<{ id: string; name: string; color: string }>;
       members: Array<{ id: string; name: string; image: string | null }>;
       memberCount: number;
@@ -83,16 +87,53 @@ function ListColumnComponent({
   canSortCards,
   onOpenCard,
 }: ListColumnProps) {
-  // Client-only label filter + title search. Cards are HIDDEN (not removed) when
-  // they don't match, so @hello-pangea/dnd's index space stays aligned with the
-  // store's `cards` array and drop positions are never corrupted (see
-  // lib/dnd/apply-drop). The two narrowing controls compose via AND.
-  const filterLabelIds = useBoardStore((s) => s.filterLabelIds);
+  // Client-only Trello-style filter + title search (US-065). Cards are HIDDEN
+  // (not removed) when they don't match, so @hello-pangea/dnd's index space stays
+  // aligned with the store's `cards` array and drop positions are never corrupted
+  // (see lib/dnd/apply-drop). Within a dimension options OR; across dimensions
+  // they AND. An active keyword SUSPENDS the dimensions and governs visibility on
+  // its own (matched on the title alone) — that rule is enforced here.
   const searchQuery = useBoardStore((s) => s.searchQuery);
-  const filter = { labelIds: filterLabelIds };
-  const narrowing = filterLabelIds.length > 0 || searchQuery.trim().length > 0;
-  const isCardVisible = (card: ListColumnProps["list"]["cards"][number]) =>
-    cardMatchesFilter(card, filter) && cardMatchesQuery(card, searchQuery);
+  const currentUserId = useBoardStore((s) => s.currentUserId);
+  const filterLabelIds = useBoardStore((s) => s.filterLabelIds);
+  const filterMemberIds = useBoardStore((s) => s.filterMemberIds);
+  const filterNoMembers = useBoardStore((s) => s.filterNoMembers);
+  const filterAssignedToMe = useBoardStore((s) => s.filterAssignedToMe);
+  const filterStatuses = useBoardStore((s) => s.filterStatuses);
+  const filterDueBuckets = useBoardStore((s) => s.filterDueBuckets);
+  const filterActivityWindows = useBoardStore((s) => s.filterActivityWindows);
+
+  const filter: CardFilter = {
+    labelIds: filterLabelIds,
+    memberIds: filterMemberIds,
+    noMembers: filterNoMembers,
+    assignedToMe: filterAssignedToMe,
+    statuses: filterStatuses,
+    dueBuckets: filterDueBuckets,
+    activityWindows: filterActivityWindows,
+  };
+  const searchActive = isSearchActive(searchQuery);
+  const narrowing = searchActive || isFilterActive(filter);
+  // A single `now` per render keeps the relative due/activity math consistent
+  // across every card in the list.
+  const now = new Date();
+  const isCardVisible = (card: ListColumnProps["list"]["cards"][number]) => {
+    if (searchActive) {
+      return cardMatchesQuery(card, searchQuery);
+    }
+    return cardMatchesAllDimensions(
+      {
+        labels: card.labels,
+        memberIds: card.members.map((member) => member.id),
+        completedAt: card.completedAt,
+        dueDate: card.dueDate,
+        updatedAt: card.updatedAt,
+      },
+      filter,
+      now,
+      currentUserId,
+    );
+  };
   const visibleCount = narrowing
     ? list.cards.filter(isCardVisible).length
     : list.cards.length;
@@ -104,7 +145,6 @@ function ListColumnComponent({
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isDeleting, startDeleteTransition] = useTransition();
-  const [isUpdatingDone, startDoneTransition] = useTransition();
 
   const titleEditor = useInlineTitleEditor({
     initialTitle: list.title,
@@ -142,19 +182,6 @@ function ListColumnComponent({
         return;
       }
       setDeleteDialogOpen(false);
-    });
-  }
-
-  function handleToggleDoneList(nextIsDone: boolean) {
-    const formData = new FormData();
-    formData.set("listId", list.id);
-    formData.set("isDone", String(nextIsDone));
-
-    startDoneTransition(async () => {
-      const result = await updateListIsDoneAction(formData);
-      if (!result.success) {
-        setError(result.error);
-      }
     });
   }
 
@@ -250,11 +277,6 @@ function ListColumnComponent({
               ) : (
                 <h3 className="flex-1 truncate text-sm font-semibold">{list.title}</h3>
               )}
-              {list.isDone ? (
-                <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                  Done
-                </span>
-              ) : null}
 
               {(canEdit || canDelete) && (
                 <div ref={actionsMenuRef}>
@@ -302,18 +324,7 @@ function ListColumnComponent({
                             Rename
                           </DropdownMenuItem>
                         )}
-                        {canEdit && (
-                          <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuCheckboxItem
-                              checked={list.isDone}
-                              disabled={isUpdatingDone}
-                              onCheckedChange={handleToggleDoneList}
-                            >
-                              Done list
-                            </DropdownMenuCheckboxItem>
-                          </>
-                        )}
+                        {canEdit && canDelete && <DropdownMenuSeparator />}
                         {canDelete && (
                           <DropdownMenuItem
                             onSelect={() => setDeleteDialogOpen(true)}

@@ -59,7 +59,10 @@ type CardSpec = {
   comments?: string[];
 };
 
-type ListSpec = { title: string; isDone?: boolean; cards: CardSpec[] };
+// `completed` is a seed convenience: it marks this list's cards complete
+// (writes card.completedAt). Completion is card-owned — there is no list "done"
+// flag (decision 0020).
+type ListSpec = { title: string; completed?: boolean; cards: CardSpec[] };
 
 const BOARD: ListSpec[] = [
   {
@@ -204,7 +207,7 @@ const BOARD: ListSpec[] = [
   },
   {
     title: "Done",
-    isDone: true,
+    completed: true,
     cards: [
       {
         title: "Set up CI lint + typecheck gate",
@@ -305,7 +308,6 @@ async function main() {
         boardId: board.id,
         title: listSpec.title,
         position: listPos * GAP,
-        isDone: listSpec.isDone ?? false,
       },
     });
 
@@ -321,7 +323,7 @@ async function main() {
           position: cardPos * GAP,
           priority: c.priority ?? null,
           dueDate: c.dueInDays === undefined ? null : daysFromNow(c.dueInDays),
-          completedAt: listSpec.isDone ? daysFromNow(-3) : null,
+          completedAt: listSpec.completed ? daysFromNow(-3) : null,
           createdById: owner.id,
         },
       });
@@ -382,7 +384,7 @@ async function main() {
         create: [
           { title: "Ideas", position: GAP },
           { title: "Doing", position: 2 * GAP },
-          { title: "Shipped", position: 3 * GAP, isDone: true },
+          { title: "Shipped", position: 3 * GAP },
         ],
       },
     },

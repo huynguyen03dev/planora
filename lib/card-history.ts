@@ -12,7 +12,6 @@ export const CardHistoryEventType = $Enums.CardHistoryEventType;
 // Metadata types for each event per PRD contract
 export type CardCreatedMetadata = {
   listId: string;
-  listIsDone: boolean;
   estimateHours: number | null;
   dueDate: string | null;
   memberIds: string[];
@@ -23,8 +22,6 @@ export type CardCreatedMetadata = {
 export type CardMovedMetadata = {
   fromListId: string;
   toListId: string;
-  fromListIsDone: boolean;
-  toListIsDone: boolean;
   memberIds: string[];
   estimateHours: number | null;
 };
@@ -76,7 +73,6 @@ export type CardDeletedMetadata = {
 
 export type BaselineCapturedMetadata = {
   listId: string;
-  listIsDone: boolean;
   estimateHours: number | null;
   dueDate: string | null;
   memberIds: string[];
@@ -115,12 +111,8 @@ export type BuildCardMoveLifecycleEventsInput = {
   actorId?: string | null;
   fromListId: string;
   toListId: string;
-  fromListIsDone: boolean;
-  toListIsDone: boolean;
   estimateHours: number | null;
-  dueDate: string | null;
   memberIds: string[];
-  completedAtBeforeMove: Date | null;
 };
 
 // Input type for listing card history events
@@ -311,10 +303,17 @@ export function buildCardMovedEvent(
   };
 }
 
+/**
+ * Build the history events for a card move. Since US-045 (decision 0020) a move
+ * changes only list membership + position — it never completes or reopens a
+ * card — so this produces a single `CARD_MOVED` event. Completion transitions
+ * come exclusively from the explicit completion toggle (`CARD_COMPLETED` /
+ * `CARD_REOPENED`), never from list membership.
+ */
 export function buildCardMoveLifecycleEvents(
   input: BuildCardMoveLifecycleEventsInput,
 ): BuildCardHistoryEventInput[] {
-  const events: BuildCardHistoryEventInput[] = [
+  return [
     buildCardMovedEvent(
       input.workspaceId,
       input.boardId,
@@ -322,48 +321,12 @@ export function buildCardMoveLifecycleEvents(
       {
         fromListId: input.fromListId,
         toListId: input.toListId,
-        fromListIsDone: input.fromListIsDone,
-        toListIsDone: input.toListIsDone,
         memberIds: input.memberIds,
         estimateHours: input.estimateHours,
       },
       input.actorId,
     ),
   ];
-
-  if (!input.fromListIsDone && input.toListIsDone) {
-    events.push(
-      buildCardCompletedEvent(
-        input.workspaceId,
-        input.boardId,
-        input.cardId,
-        {
-          listId: input.toListId,
-          estimateHours: input.estimateHours,
-          dueDate: input.dueDate,
-          memberIds: input.memberIds,
-          firstCompletion: input.completedAtBeforeMove === null,
-        },
-        input.actorId,
-      ),
-    );
-  } else if (input.fromListIsDone && !input.toListIsDone) {
-    events.push(
-      buildCardReopenedEvent(
-        input.workspaceId,
-        input.boardId,
-        input.cardId,
-        {
-          listId: input.toListId,
-          dueDate: input.dueDate,
-          memberIds: input.memberIds,
-        },
-        input.actorId,
-      ),
-    );
-  }
-
-  return events;
 }
 
 export function buildCardCompletedEvent(

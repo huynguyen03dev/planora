@@ -182,7 +182,6 @@ describe("reorderListByNeighbors stale-neighbour recovery (US-062 mn2)", () => {
           boardId: B,
           title: "Moved",
           position: data.position,
-          isDone: false,
           createdAt: new Date(0),
           updatedAt: new Date(0),
         })),

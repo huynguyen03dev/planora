@@ -52,6 +52,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CardAttachments } from "@/components/boards/card-attachments";
+import { CardCompletionToggle } from "@/components/boards/card-completion-toggle";
 import { CardChecklistsSection, type ChecklistData } from "@/components/boards/card-checklists-section";
 import { CardLabelsSection, type LabelChip } from "@/components/boards/card-labels-section";
 import type { CardDetailRecord } from "@/lib/card";
@@ -507,6 +508,14 @@ function CardDetailDialogBody({
 
       <div className="space-y-3 border-b px-8 py-4">
         <div className="flex items-start justify-between gap-3">
+          <CardCompletionToggle
+            cardId={card.id}
+            completedAt={card.completedAt}
+            canEdit={canEdit}
+            variant="hero"
+            onError={setError}
+            className="mt-1.5"
+          />
           {canEdit ? (
             <input
               id="card-detail-title"
@@ -993,7 +1002,7 @@ function CardDetailDialogBody({
                   setError("");
                   saveEstimate(next);
                 }}
-                disabled={!canEdit || isPending || Boolean(card.completedAt)}
+                disabled={!canEdit || isPending}
               >
                 <SelectTrigger id="card-estimate-hours" className="w-full max-w-40">
                   <SelectValue placeholder="No estimate" />
@@ -1006,11 +1015,6 @@ function CardDetailDialogBody({
                   ))}
                 </SelectContent>
               </Select>
-              {card.completedAt ? (
-                <span className="text-xs text-muted-foreground">
-                  Locked after first completion.
-                </span>
-              ) : null}
             </div>
           </div>
         </div>

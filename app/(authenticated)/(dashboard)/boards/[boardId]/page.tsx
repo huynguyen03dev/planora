@@ -143,7 +143,6 @@ export default async function BoardPage({
     id: list.id,
     title: list.title,
     boardId: list.boardId,
-    isDone: list.isDone,
     position: list.position,
     cards: list.cards.map((card) => ({
       id: card.id,
@@ -154,6 +153,7 @@ export default async function BoardPage({
       priority: card.priority,
       dueDate: card.dueDate,
       completedAt: card.completedAt,
+      updatedAt: card.updatedAt,
       labels: card.labels,
       members: card.members,
       memberCount: card.memberCount,

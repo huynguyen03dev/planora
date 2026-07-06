@@ -2,7 +2,9 @@
 
 ## Status
 
-planned
+implemented — merged to dev (07a49c5, PR #46). Brand hue in `app/globals.css`
+(both themes); manual visual QA. Status corrected from stale `planned` on
+2026-07-01 (bookkeeping, intake #42).
 
 ## Lane
 

@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { Prisma } from "@/app/generated/prisma/client";
+
 import db from "@/lib/prisma";
 import {
   CARD_POSITION_GAP,
@@ -403,26 +405,55 @@ export async function updateCardDueDate(
 }
 
 /**
- * Mark a card as completed (first completion only).
- * Sets completedAt if not already set.
+ * Resolve the next `completedAt` for a completion toggle (US-045). Pure: complete
+ * writes a fresh timestamp, reopen clears it. A re-complete of an already-complete
+ * card preserves the existing timestamp so the current-streak anchor (US-064) is
+ * stable; a complete after a reopen sets a new timestamp (the reopen already
+ * cleared it). `now` is injected so the transition is deterministic under test.
  */
-export async function completeCard(cardId: string): Promise<CardRecord> {
-  const card = await db.card.findUnique({
-    where: { id: cardId },
-    select: { completedAt: true },
-  });
+export function resolveCompletedAt(
+  complete: boolean,
+  existingCompletedAt: Date | null,
+  now: Date,
+): Date | null {
+  return complete ? (existingCompletedAt ?? now) : null;
+}
 
-  // Only set completedAt if not already set (first completion only)
-  const completedAt = card?.completedAt ?? new Date();
+/**
+ * Set a card's completion state (US-045). Completion is card-owned and freely
+ * toggleable; dragging never calls this — list membership no longer derives
+ * completion (decision 0020). Accepts a transaction client so the caller can
+ * write the completion and its `CARD_COMPLETED`/`CARD_REOPENED` history event
+ * atomically. Returns the updated card row.
+ */
+export async function setCardCompletion(
+  client: Prisma.TransactionClient | typeof db,
+  cardId: string,
+  complete: boolean,
+  existingCompletedAt: Date | null,
+  now: Date = new Date(),
+): Promise<{ card: CardRecord; transitioned: boolean }> {
+  const completedAt = resolveCompletedAt(complete, existingCompletedAt, now);
 
-  return db.card.update({
+  // Compare-and-set: flip only a card still in its pre-toggle state. Under two
+  // concurrent toggles the loser's WHERE matches zero rows, so exactly one caller
+  // sees `transitioned: true` — the CARD_COMPLETED / CARD_REOPENED history event
+  // is never double-written for one streak (decision 0021). A re-complete of an
+  // already-complete card likewise matches zero rows, preserving the original
+  // timestamp (the US-064 streak anchor) with no redundant write.
+  const { count } = await client.card.updateMany({
     where: {
       id: cardId,
       archivedAt: null,
+      completedAt: complete ? null : { not: null },
     },
     data: {
       completedAt,
     },
+  });
+
+  const card = await client.card.findUniqueOrThrow({
+    where: { id: cardId },
     select: {
       id: true,
       listId: true,
@@ -441,6 +472,8 @@ export async function completeCard(cardId: string): Promise<CardRecord> {
       updatedAt: true,
     },
   });
+
+  return { card, transitioned: count === 1 };
 }
 
 /**
@@ -449,7 +482,7 @@ export async function completeCard(cardId: string): Promise<CardRecord> {
  */
 export async function getCardWithListAndMembers(cardId: string): Promise<{
   card: CardRecord;
-  list: { id: string; boardId: string; isDone: boolean };
+  list: { id: string; boardId: string };
   board: { id: string; workspaceId: string };
   memberIds: string[];
 } | null> {
@@ -478,7 +511,6 @@ export async function getCardWithListAndMembers(cardId: string): Promise<{
         select: {
           id: true,
           boardId: true,
-          isDone: true,
           board: {
             select: {
               id: true,
@@ -505,7 +537,6 @@ export async function getCardWithListAndMembers(cardId: string): Promise<{
     list: {
       id: list.id,
       boardId: list.boardId,
-      isDone: list.isDone,
     },
     board: list.board,
     memberIds: members.map((m) => m.userId),

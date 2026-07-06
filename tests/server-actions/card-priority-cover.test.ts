@@ -94,7 +94,6 @@ vi.mock("@/lib/list", () => ({
   getListWithBoard: vi.fn(),
   createList: vi.fn(),
   updateListTitle: vi.fn(),
-  updateListIsDone: vi.fn(),
   reorderListByNeighbors: vi.fn(),
 }));
 vi.mock("@/lib/card", () => ({

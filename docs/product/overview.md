@@ -15,8 +15,8 @@ gated by their role.
 ```text
 Workspace
   └─ Board
-       └─ List            (ordered column; an "isDone" list completes cards)
-            └─ Card        (the work item)
+       └─ List            (ordered column; carries no completion flag)
+            └─ Card        (the work item; completion is card-owned via completedAt)
                  ├─ Members (assignees)
                  ├─ Labels
                  ├─ Checklists → items

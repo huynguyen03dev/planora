@@ -90,7 +90,6 @@ export function emitListCreated(boardId: string, payload: {
 export function emitListUpdated(boardId: string, payload: {
   listId: string;
   title?: string;
-  isDone?: boolean;
 }) {
   const io = getIO();
   if (!io) {
@@ -182,6 +181,29 @@ export function emitCardArchived(boardId: string, payload: {
     });
   } catch (error) {
     console.error("[realtime] Failed to emit card:archived:", error);
+  }
+}
+
+// In-place / live (not structural): a card's completion flag flipped. Safe to
+// apply mid-drag — it never reorders the list array. Mirrors card:labels-updated.
+// Carries completedAt (ISO string or null) so the receiver recomputes due-status.
+export function emitCardCompletionUpdated(boardId: string, payload: {
+  cardId: string;
+  completedAt: string | null;
+}) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.board(boardId)).emit("card:completion-updated", {
+      boardId,
+      ...payload,
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit card:completion-updated:", error);
   }
 }
 

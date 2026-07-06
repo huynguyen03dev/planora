@@ -39,8 +39,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { CardCompletionToggle } from "@/components/boards/card-completion-toggle";
 import { LabelMark } from "@/components/boards/label-mark";
 import { cn, getInitials } from "@/lib/utils";
+
+// How many assignee avatars the card face renders before collapsing the rest
+// into a "+N" chip. The store now carries the full assignee set (US-065 filter
+// needs it), so the cap is applied here at render rather than in the query.
+const MAX_CARD_FACE_AVATARS = 3;
 
 // Priority chip: soft tinted bg + tinted icon/text. Distinct from solid label
 // pills (different visual language) and accessible — icon + text, never
@@ -163,14 +169,20 @@ function ListCardItemComponent({
 
   // Board-wide "expand labels" preference (US-044). Read from the store, not local
   // state, so toggling it re-renders every card consistently and it never resets
-  // mid-drag (the memo'd card re-renders per drag tick).
+  // mid-drag (the memo'd card re-renders per drag tick). Trello-style, the toggle
+  // lives on the card face: clicking any card's labels flips the whole board
+  // between compact bars and named chips (there is no separate header control).
   const expandLabels = useBoardStore((s) => s.expandLabels);
+  const toggleExpandLabels = useBoardStore((s) => s.toggleExpandLabels);
 
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [isArchiving, startArchiveTransition] = useTransition();
 
   const due = card.dueDate ? describeDueDate(card.dueDate, card.completedAt) : null;
-  const memberOverflow = Math.max(0, card.memberCount - card.members.length);
+  // `card.members` is the full assignee set (US-065 needs it for filtering); the
+  // face shows at most MAX_CARD_FACE_AVATARS and collapses the rest into "+N".
+  const visibleMembers = card.members.slice(0, MAX_CARD_FACE_AVATARS);
+  const memberOverflow = Math.max(0, card.memberCount - visibleMembers.length);
   const hasMeta =
     Boolean(card.priority) ||
     Boolean(due) ||
@@ -221,7 +233,18 @@ function ListCardItemComponent({
               // tile. Without it, the explicit gap-0 / py-0 (+ CardContent p-2)
               // take effect, which is what makes the compact tile actually compact
               // (US-044).
-              className={cn("gap-0 overflow-hidden py-0 transition-transform", snapshot.isDragging && "scale-[1.02] shadow-md")}
+              className={cn(
+                "gap-0 overflow-hidden py-0 transition-transform",
+                snapshot.isDragging && "scale-[1.02] shadow-md",
+                // Completed cards stay in place, dimmed (Trello parity) — the
+                // filled completion check is the state indicator (US-045), so the
+                // dim is decorative, not the sole signal (WCAG 1.4.1). Kept at
+                // 0.75 (not 0.65) so small muted-foreground meta text stays close
+                // to its AA-secondary contrast; Platform verification measures the
+                // composited ratio. No auto-sort, no hiding: reordering would
+                // reintroduce the list-position/completion coupling removed in 0020.
+                card.completedAt && "opacity-75",
+              )}
             >
               {card.coverImage ? (
                 // Compact tiles (US-044): the cover shrinks from h-20 so an 80px
@@ -236,7 +259,21 @@ function ListCardItemComponent({
               ) : null}
               <CardContent className="space-y-1.5 p-2">
                 {card.labels.length > 0 ? (
-                  <div className="flex flex-wrap gap-1">
+                  // Trello parity: the labels themselves are the toggle. A plain
+                  // click flips the board-wide compact↔named preference. The card
+                  // is dragged from its dedicated grip handle (not here), so this
+                  // button only ever toggles.
+                  <button
+                    type="button"
+                    onClick={() => toggleExpandLabels()}
+                    aria-label={
+                      expandLabels
+                        ? "Collapse labels to color bars"
+                        : "Expand labels to show names"
+                    }
+                    aria-pressed={expandLabels}
+                    className="flex w-fit max-w-full flex-wrap gap-1 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                  >
                     {card.labels.map((label) => (
                       <LabelMark
                         key={label.id}
@@ -244,19 +281,29 @@ function ListCardItemComponent({
                         variant={expandLabels ? "chip" : "bar"}
                       />
                     ))}
-                  </div>
+                  </button>
                 ) : null}
 
                 <div className="flex items-start justify-between gap-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onOpenCard(card.id)}
-                    className="h-auto flex-1 justify-start whitespace-normal break-words p-0 text-left text-sm font-normal hover:bg-transparent"
-                  >
-                    {card.title}
-                  </Button>
+                  <div className="flex min-w-0 flex-1 items-start gap-1.5">
+                    <CardCompletionToggle
+                      cardId={card.id}
+                      completedAt={card.completedAt}
+                      canEdit={canEdit}
+                      variant="face"
+                      onError={setError}
+                      className="mt-0.5"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onOpenCard(card.id)}
+                      className="h-auto min-w-0 flex-1 justify-start whitespace-normal break-words p-0 text-left text-sm font-normal hover:bg-transparent"
+                    >
+                      {card.title}
+                    </Button>
+                  </div>
 
                   {(canEdit || canArchive || canDrag) && (
                     <div className="flex items-center gap-1">
@@ -397,7 +444,7 @@ function ListCardItemComponent({
 
                     {card.memberCount > 0 ? (
                       <AvatarGroup className="shrink-0">
-                        {card.members.map((member) => (
+                        {visibleMembers.map((member) => (
                           <Avatar key={member.id} size="sm">
                             {member.image ? (
                               <AvatarImage src={member.image} alt={member.name} />

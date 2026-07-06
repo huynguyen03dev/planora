@@ -35,10 +35,11 @@ Typed via `ServerToClientEvents` / `ClientToServerEvents` in
 | `card:updated` | board | card changes | live (in-place) |
 | `card:labels-updated` | board | cardId, labels[] | live (in-place); fanned out per affected card on label rename/recolor/delete (US-010) |
 | `card:members-updated` | board | cardId, members[] | live (in-place); emitted on assign/remove (US-011) |
+| `card:completion-updated` | board | cardId, completedAt (ISO \| null) | live (in-place); emitted on complete/reopen (US-045) — carries completedAt so receivers recompute due-status |
 | `card:archived` | board | cardId | **deferred** |
 | `list:moved` | board | listId, position | **deferred** (structural); cross-client reorder proven live on a non-dragging observer (US-012) |
 | `list:created` | board | list snapshot | **deferred** |
-| `list:updated` | board | title / isDone | live (in-place) |
+| `list:updated` | board | title | live (in-place) |
 | `list:deleted` | board | listId | **deferred** |
 | `comment:created` | board | comment + activity + author | live (in-place); cross-client propagation to an open detail sheet proven (US-012) |
 | `board:presence` | board | watchers[] ({id,name,image}) | live (in-place); who currently has the board open — ephemeral live presence (US-041) |
@@ -61,10 +62,12 @@ drop completes -> consumeResync()
 ```
 
 - **Deferred while dragging:** card/list moved, created, deleted, archived.
-- **Applied live (safe mid-drag):** comments, title edits, `isDone` toggles,
-  card label changes (`card:labels-updated` — replaces a card's label set in
-  place; emitted on attach/detach, and (US-010) fanned out per affected card on
-  label rename/recolor/delete so every chip refreshes live), card member changes
+- **Applied live (safe mid-drag):** comments, title edits, card completion flips
+  (`card:completion-updated` — patches `completedAt` on the card face + open
+  sheet; a flag flip never reorders the list array, US-045), card label changes
+  (`card:labels-updated` — replaces a card's label set in place; emitted on
+  attach/detach, and (US-010) fanned out per affected card on label
+  rename/recolor/delete so every chip refreshes live), card member changes
   (`card:members-updated` — replaces the open card's assignee set; emitted on
   assign/remove, US-011), notifications, analytics refresh.
 

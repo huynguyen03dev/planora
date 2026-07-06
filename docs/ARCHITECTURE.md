@@ -137,7 +137,8 @@ drop completes -> consumeResync() -> router.refresh() if a resync was pending
 ```
 
 - **Deferred (structural):** card/list moved, created, deleted, archived.
-- **Applied live (in-place):** comments, title edits, `isDone` toggles.
+- **Applied live (in-place):** comments, title edits, card completion flips
+  (`card:completion-updated`), label/member changes.
 
 When changing board mutations or socket events, preserve this rule — it is the
 fix behind commit `7706b6d` and is covered by `tests/board-store.test.ts`.

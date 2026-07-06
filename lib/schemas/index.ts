@@ -14,12 +14,10 @@ export {
   updateListSchema,
   deleteListSchema,
   reorderListSchema,
-  updateListIsDoneSchema,
   type CreateListInput,
   type UpdateListInput,
   type DeleteListInput,
   type ReorderListInput,
-  type UpdateListIsDoneInput,
 } from "./list";
 export {
   createCardSchema,
@@ -31,6 +29,8 @@ export {
   updateCardEstimateSchema,
   updateCardDueDateSchema,
   updateCardPrioritySchema,
+  toggleCardCompletionSchema,
+  type ToggleCardCompletionInput,
   type UpdateCardPriorityInput,
   updateCardCoverSchema,
   setCardCoverSchema,

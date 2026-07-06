@@ -71,9 +71,9 @@ const h = vi.hoisted(() => {
     // lib write seams
     createList: fn(),
     updateListTitle: fn(),
-    updateListIsDone: fn(),
     reorderListByNeighbors: fn(),
     updateCardDetails: fn(),
+    setCardCompletion: fn(),
     reorderCardWithinListByNeighbors: fn(),
     createComment: fn(),
     createAttachment: fn(),
@@ -108,6 +108,7 @@ const h = vi.hoisted(() => {
       emitCardCreated: fn(),
       emitCardUpdated: fn(),
       emitCardArchived: fn(),
+      emitCardCompletionUpdated: fn(),
       emitCardLabelsUpdated: fn(),
       emitCardMembersUpdated: fn(),
       emitCommentCreated: fn(),
@@ -123,7 +124,6 @@ vi.mock("@/lib/list", () => ({
   getListWithBoard: h.getListWithBoard,
   createList: h.createList,
   updateListTitle: h.updateListTitle,
-  updateListIsDone: h.updateListIsDone,
   reorderListByNeighbors: h.reorderListByNeighbors,
 }));
 vi.mock("@/lib/card", () => ({
@@ -131,6 +131,7 @@ vi.mock("@/lib/card", () => ({
   getArchivedCardWithListAndBoard: h.getArchivedCardWithListAndBoard,
   getCardWithListAndMembers: h.getCardWithListAndMembers,
   updateCardDetails: h.updateCardDetails,
+  setCardCompletion: h.setCardCompletion,
   reorderCardWithinListByNeighbors: h.reorderCardWithinListByNeighbors,
 }));
 vi.mock("@/lib/label", () => ({
@@ -164,7 +165,7 @@ h.checkRef.fn = (ws, perms) => {
 import {
   createListAction,
   updateListAction,
-  updateListIsDoneAction,
+  toggleCardCompletionAction,
   deleteListAction,
   createCardAction,
   archiveCardAction,
@@ -188,8 +189,8 @@ import {
 
 // Every mutation/emit seam. A denied path must touch NONE of these.
 const writeSeams = [
-  h.createList, h.updateListTitle, h.updateListIsDone, h.reorderListByNeighbors,
-  h.updateCardDetails, h.reorderCardWithinListByNeighbors, h.createComment,
+  h.createList, h.updateListTitle, h.reorderListByNeighbors,
+  h.updateCardDetails, h.setCardCompletion, h.reorderCardWithinListByNeighbors, h.createComment,
   h.createAttachment, h.createActivityEntry, h.createLabel, h.updateLabel,
   h.deleteLabel, h.addCardLabel, h.removeCardLabel,
   h.db.$transaction, h.db.card.update,
@@ -295,7 +296,7 @@ describe("createListAction", () => {
   it("allow: WS-A editor reaches the write seam", async () => {
     signInAs("u", WS_A, "editor");
     h.getBoardById.mockResolvedValue({ id: BOARD_A, workspaceId: WS_A, archivedAt: null });
-    h.createList.mockResolvedValue({ id: "l", boardId: BOARD_A, title: "List", isDone: false, position: 1 });
+    h.createList.mockResolvedValue({ id: "l", boardId: BOARD_A, title: "List", position: 1 });
     const r = await createListAction(form());
     expect(r).toEqual({ success: true, listId: "l" });
     expect(h.createList).toHaveBeenCalled();
@@ -330,31 +331,130 @@ describe("updateListAction", () => {
   });
 });
 
-describe("updateListIsDoneAction", () => {
-  const form = () => formData({ listId: LIST_ID, isDone: "true" });
-  it("A1 auth", async () => {
+describe("toggleCardCompletionAction (card-owned completion — US-045)", () => {
+  const form = (complete = "true") => formData({ cardId: CARD_ID, complete });
+
+  it("A1 auth: signed out → throws, no write", async () => {
     signOut();
-    await expect(updateListIsDoneAction(form())).rejects.toThrow();
+    await expect(toggleCardCompletionAction(form())).rejects.toThrow();
     expectNoWrites(...writeSeams);
   });
-  it("A2 viewer denied", async () => {
+
+  it("A2 permission: viewer denied", async () => {
     signInAs("u", WS_A, "viewer");
-    h.getListWithBoard.mockResolvedValue(listWithBoardFixture(WS_A));
-    expect(await updateListIsDoneAction(form())).toEqual({ success: false, error: "List not found" });
+    h.getCardWithListAndMembers.mockResolvedValue(cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID }));
+    expect(await toggleCardCompletionAction(form())).toEqual({ success: false, error: "Card not found" });
     expectNoWrites(...writeSeams);
   });
-  it("A3 WS-B editor denied on WS-A list", async () => {
+
+  it("A3 isolation: WS-B editor cannot complete a WS-A card", async () => {
     signInAs("u", WS_B, "editor");
-    h.getListWithBoard.mockResolvedValue(listWithBoardFixture(WS_A));
-    expect(await updateListIsDoneAction(form())).toEqual({ success: false, error: "List not found" });
+    h.getCardWithListAndMembers.mockResolvedValue(cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID }));
+    expect(await toggleCardCompletionAction(form())).toEqual({ success: false, error: "Card not found" });
+    expect(h.hasPermission).toHaveBeenCalledWith(
+      expect.objectContaining({ body: expect.objectContaining({ organizationId: WS_A }) }),
+    );
     expectNoWrites(...writeSeams);
   });
-  it("allow", async () => {
+
+  it("estimate gate: blocks completion when requireEstimateBeforeDone and no estimate", async () => {
     signInAs("u", WS_A, "editor");
-    h.getListWithBoard.mockResolvedValue(listWithBoardFixture(WS_A));
-    h.updateListIsDone.mockResolvedValue(undefined);
-    expect(await updateListIsDoneAction(form())).toEqual({ success: true });
-    expect(h.updateListIsDone).toHaveBeenCalled();
+    h.getCardWithListAndMembers.mockResolvedValue(cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID }));
+    h.db.workspace.findUnique.mockResolvedValue({ requireEstimateBeforeDone: true });
+    const r = await toggleCardCompletionAction(form("true"));
+    expect(r).toEqual({ success: false, error: "Set an estimate before marking this card complete" });
+    expectNoWrites(h.setCardCompletion, h.db.$transaction, ...Object.values(h.emit));
+  });
+
+  it("allow: editor completes → writes completion + CARD_COMPLETED, emits completion", async () => {
+    signInAs("u", WS_A, "editor");
+    h.getCardWithListAndMembers.mockResolvedValue(cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID }));
+    h.db.workspace.findUnique.mockResolvedValue({ requireEstimateBeforeDone: false });
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (tx: unknown) => unknown) => cb(tx));
+    const completedAt = new Date("2026-07-03T00:00:00.000Z");
+    h.setCardCompletion.mockResolvedValue({
+      card: {
+        id: CARD_ID, listId: LIST_ID, title: "Card", description: null, position: 1,
+        priority: null, dueDate: null, estimateHours: null, completedAt,
+        deletedAt: null, coverImage: null, archivedAt: null, createdById: "u",
+        createdAt: completedAt, updatedAt: completedAt,
+      },
+      transitioned: true,
+    });
+
+    const r = await toggleCardCompletionAction(form("true"));
+
+    expect(r.success).toBe(true);
+    expect(h.setCardCompletion).toHaveBeenCalledWith(tx, CARD_ID, true, null);
+    // A real transition records exactly one history event...
+    expect(tx.cardHistoryEvent.createMany).toHaveBeenCalledTimes(1);
+    // ...and broadcasts the completion flip (carrying completedAt, not a boolean).
+    expect(h.emit.emitCardCompletionUpdated).toHaveBeenCalledWith(
+      "board-1",
+      { cardId: CARD_ID, completedAt: completedAt.toISOString() },
+    );
+  });
+
+  it("no-op: re-completing an already-complete card succeeds, writes no event, still emits state", async () => {
+    signInAs("u", WS_A, "editor");
+    const already = new Date("2026-07-01T00:00:00.000Z");
+    const fx = cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID });
+    fx.card.completedAt = already;
+    h.getCardWithListAndMembers.mockResolvedValue(fx);
+    // requireEstimateBeforeDone must NOT block a no-op (it isn't a transition) —
+    // decision 0021's "at most one completion per streak" leans on this guard.
+    h.db.workspace.findUnique.mockResolvedValue({ requireEstimateBeforeDone: true });
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (tx: unknown) => unknown) => cb(tx));
+    h.setCardCompletion.mockResolvedValue({
+      card: {
+        id: CARD_ID, listId: LIST_ID, title: "Card", description: null, position: 1,
+        priority: null, dueDate: null, estimateHours: null, completedAt: already,
+        deletedAt: null, coverImage: null, archivedAt: null, createdById: "u",
+        createdAt: already, updatedAt: already,
+      },
+      transitioned: false,
+    });
+
+    const r = await toggleCardCompletionAction(form("true"));
+
+    expect(r.success).toBe(true);
+    // No transition → no history event, and the estimate gate never fired.
+    expect(tx.cardHistoryEvent.createMany).not.toHaveBeenCalled();
+    expect(h.emit.emitCardCompletionUpdated).toHaveBeenCalledWith(
+      "board-1",
+      { cardId: CARD_ID, completedAt: already.toISOString() },
+    );
+  });
+
+  it("allow: editor reopens a complete card → writes CARD_REOPENED, emits completedAt null", async () => {
+    signInAs("u", WS_A, "editor");
+    const already = new Date("2026-07-01T00:00:00.000Z");
+    const fx = cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID });
+    fx.card.completedAt = already;
+    h.getCardWithListAndMembers.mockResolvedValue(fx);
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (tx: unknown) => unknown) => cb(tx));
+    h.setCardCompletion.mockResolvedValue({
+      card: {
+        id: CARD_ID, listId: LIST_ID, title: "Card", description: null, position: 1,
+        priority: null, dueDate: null, estimateHours: null, completedAt: null,
+        deletedAt: null, coverImage: null, archivedAt: null, createdById: "u",
+        createdAt: already, updatedAt: already,
+      },
+      transitioned: true,
+    });
+
+    const r = await toggleCardCompletionAction(form("false"));
+
+    expect(r.success).toBe(true);
+    expect(h.setCardCompletion).toHaveBeenCalledWith(tx, CARD_ID, false, already);
+    expect(tx.cardHistoryEvent.createMany).toHaveBeenCalledTimes(1);
+    expect(h.emit.emitCardCompletionUpdated).toHaveBeenCalledWith(
+      "board-1",
+      { cardId: CARD_ID, completedAt: null },
+    );
   });
 });
 

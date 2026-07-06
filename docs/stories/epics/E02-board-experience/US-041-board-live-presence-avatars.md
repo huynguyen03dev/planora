@@ -2,7 +2,9 @@
 
 ## Status
 
-planned
+implemented — merged to dev (bd4281b, PR #45). Manual browser QA of live
+presence avatars; decision `0012-board-live-presence-in-memory.md`. Status
+corrected from stale `planned` on 2026-07-01 (bookkeeping, intake #42).
 
 ## Lane
 

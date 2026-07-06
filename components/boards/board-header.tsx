@@ -14,8 +14,6 @@ import {
   boardHeaderAvatarFallbackClass,
   boardHeaderAvatarRingClass,
 } from "@/components/boards/board-header-controls";
-import { BoardLabelToggle } from "@/components/boards/board-label-toggle";
-import { BoardSearch } from "@/components/boards/board-search";
 import { ArchivedCardsDialog } from "@/components/boards/archived-cards-dialog";
 import type { ArchivedCardData } from "@/components/boards/archived-cards-dialog";
 import { BoardMenu } from "@/components/boards/board-menu";
@@ -275,10 +273,6 @@ export function BoardHeader({
               fill={isStarred ? "currentColor" : "none"}
             />
           </Button>
-
-          <BoardSearch />
-
-          <BoardLabelToggle />
 
           <BoardFilter />
 

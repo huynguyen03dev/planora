@@ -11,7 +11,6 @@ function makeLists(): ListWithCards[] {
       id: "list-1",
       title: "To Do",
       boardId: "board-1",
-      isDone: false,
       position: 16384,
       cards: [],
     },
@@ -19,7 +18,6 @@ function makeLists(): ListWithCards[] {
       id: "list-2",
       title: "Doing",
       boardId: "board-1",
-      isDone: false,
       position: 32768,
       cards: [],
     },
@@ -27,7 +25,6 @@ function makeLists(): ListWithCards[] {
       id: "list-3",
       title: "Done",
       boardId: "board-1",
-      isDone: true,
       position: 49152,
       cards: [],
     },
@@ -178,7 +175,6 @@ describe("applyRemoteListCreated", () => {
         id: "list-new",
         title: "Review",
         boardId: "board-1",
-        isDone: false,
         position: 24576,
       },
     });
@@ -199,7 +195,6 @@ describe("applyRemoteListCreated", () => {
         id: "list-new",
         title: "Review",
         boardId: "board-1",
-        isDone: false,
         position: 24576,
       },
     } as const;
@@ -224,7 +219,6 @@ describe("applyRemoteListCreated", () => {
         id: "list-new",
         title: "Review",
         boardId: "board-2",
-        isDone: false,
         position: 24576,
       },
     });
@@ -251,40 +245,6 @@ describe("applyRemoteListUpdated", () => {
       .getState()
       .lists.find((list) => list.id === "list-1")!;
     expect(updated.title).toBe("Backlog");
-    expect(updated.isDone).toBe(false);
-  });
-
-  it("patches isDone only", () => {
-    useBoardStore.setState({ boardId: "board-1", lists: makeLists() });
-
-    useBoardStore.getState().applyRemoteListUpdated({
-      boardId: "board-1",
-      listId: "list-1",
-      isDone: true,
-    });
-
-    const updated = useBoardStore
-      .getState()
-      .lists.find((list) => list.id === "list-1")!;
-    expect(updated.isDone).toBe(true);
-    expect(updated.title).toBe("To Do");
-  });
-
-  it("patches both title and isDone when both are present", () => {
-    useBoardStore.setState({ boardId: "board-1", lists: makeLists() });
-
-    useBoardStore.getState().applyRemoteListUpdated({
-      boardId: "board-1",
-      listId: "list-1",
-      title: "Shipped",
-      isDone: true,
-    });
-
-    const updated = useBoardStore
-      .getState()
-      .lists.find((list) => list.id === "list-1")!;
-    expect(updated.title).toBe("Shipped");
-    expect(updated.isDone).toBe(true);
   });
 
   it("is a no-op when the payload boardId does not match", () => {
@@ -329,7 +289,7 @@ describe("applyRemoteListDeleted", () => {
   it("removes the list and its cards", () => {
     const lists = makeLists();
     lists[0].cards = [
-      { id: "card-1", listId: "list-1", title: "A", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
+      { id: "card-1", listId: "list-1", title: "A", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
     ];
     useBoardStore.setState({ boardId: "board-1", lists });
 
@@ -370,11 +330,11 @@ describe("applyRemoteListDeleted", () => {
 function makeListsWithCards(): ListWithCards[] {
   const lists = makeLists();
   lists[0].cards = [
-    { id: "card-a", listId: "list-1", title: "Alpha", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
-    { id: "card-c", listId: "list-1", title: "Charlie", position: 49152, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
+    { id: "card-a", listId: "list-1", title: "Alpha", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
+    { id: "card-c", listId: "list-1", title: "Charlie", position: 49152, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
   ];
   lists[1].cards = [
-    { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
+    { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
   ];
   return lists;
 }
@@ -451,10 +411,10 @@ describe("applyRemoteCardMoved", () => {
     // canonical float-gap position and MUST apply to correct it — otherwise a
     // later remote re-sort would misorder the board.
     const lists = makeListsWithCards();
-    lists[0].cards = [{ id: "card-c", listId: "list-1", title: "Charlie", position: 49152, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 }];
+    lists[0].cards = [{ id: "card-c", listId: "list-1", title: "Charlie", position: 49152, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 }];
     lists[1].cards = [
-      { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
-      { id: "card-a", listId: "list-2", title: "Alpha", position: 99999, coverImage: null, priority: null, dueDate: null, completedAt: null, labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
+      { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
+      { id: "card-a", listId: "list-2", title: "Alpha", position: 99999, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
     ];
     useBoardStore.setState({ boardId: "board-1", lists });
 
@@ -872,5 +832,69 @@ describe("applyRemoteCardMembersUpdated", () => {
     });
 
     expect(useBoardStore.getState().selectedCard!.assignees).toEqual([]);
+  });
+});
+
+describe("applyRemoteCardCompletionUpdated (US-045)", () => {
+  beforeEach(() => {
+    useBoardStore.getState().reset();
+  });
+
+  it("sets completedAt on the card face (rehydrating the ISO string to a Date)", () => {
+    useBoardStore.setState({ boardId: "board-1", lists: makeListsWithCards() });
+    const iso = "2026-07-03T00:00:00.000Z";
+
+    useBoardStore.getState().applyRemoteCardCompletionUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      completedAt: iso,
+    });
+
+    const card = cardsIn("list-1").find((c) => c.id === "card-a")!;
+    expect(card.completedAt).toEqual(new Date(iso));
+  });
+
+  it("clears completedAt on reopen (null payload)", () => {
+    const lists = makeListsWithCards();
+    lists[0].cards[0].completedAt = new Date("2026-07-01T00:00:00.000Z");
+    useBoardStore.setState({ boardId: "board-1", lists });
+
+    useBoardStore.getState().applyRemoteCardCompletionUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      completedAt: null,
+    });
+
+    expect(cardsIn("list-1").find((c) => c.id === "card-a")!.completedAt).toBeNull();
+  });
+
+  it("also patches the open detail sheet when it is the same card", () => {
+    useBoardStore.setState({
+      boardId: "board-1",
+      lists: makeListsWithCards(),
+      selectedCardId: "card-a",
+      selectedCard: selectedCardFor("card-a", "Alpha"),
+    });
+    const iso = "2026-07-03T00:00:00.000Z";
+
+    useBoardStore.getState().applyRemoteCardCompletionUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      completedAt: iso,
+    });
+
+    expect(useBoardStore.getState().selectedCard!.card.completedAt).toEqual(new Date(iso));
+  });
+
+  it("is a no-op when the payload boardId does not match", () => {
+    useBoardStore.setState({ boardId: "board-1", lists: makeListsWithCards() });
+
+    useBoardStore.getState().applyRemoteCardCompletionUpdated({
+      boardId: "board-2",
+      cardId: "card-a",
+      completedAt: "2026-07-03T00:00:00.000Z",
+    });
+
+    expect(cardsIn("list-1").find((c) => c.id === "card-a")!.completedAt).toBeNull();
   });
 });

@@ -126,6 +126,20 @@ export const updateCardEstimateSchema = z.object({
 
 export type UpdateCardEstimateInput = z.infer<typeof updateCardEstimateSchema>;
 
+// Card-owned completion toggle (US-045). `complete` is a form-string boolean:
+// "true" marks complete, "false" reopens. Completion is a property of the card,
+// never derived from list membership (decision 0020).
+export const toggleCardCompletionSchema = z.object({
+  cardId: z.string().uuid({ message: "Invalid card ID" }),
+  complete: z.preprocess((value) => {
+    if (value === "true") return true;
+    if (value === "false") return false;
+    return value;
+  }, z.boolean({ message: "Invalid completion state" })),
+});
+
+export type ToggleCardCompletionInput = z.infer<typeof toggleCardCompletionSchema>;
+
 export const updateCardDueDateSchema = z.object({
   cardId: z.string().uuid({ message: "Invalid card ID" }),
   dueDate: z.coerce.date().nullable().optional(),
