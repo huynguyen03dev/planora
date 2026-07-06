@@ -19,6 +19,7 @@ import {
   getArchivedCardWithListAndBoard,
   reorderCardWithinListByNeighbors,
   getCardWithListAndMembers,
+  setCardCompletion,
   type CardDetailRecord,
   updateCardCover,
   updateCardPriority,
@@ -50,7 +51,6 @@ import {
 import {
   createList,
   updateListTitle,
-  updateListIsDone,
   getListWithBoard,
   reorderListByNeighbors,
 } from "@/lib/list";
@@ -73,6 +73,7 @@ import {
   emitCardArchived,
   emitCardLabelsUpdated,
   emitCardMembersUpdated,
+  emitCardCompletionUpdated,
   emitCommentCreated,
 } from "@/lib/realtime/server";
 import { notifyCardAssigned, notifyCommentOnCard, notifyMentioned } from "@/lib/notification";
@@ -91,7 +92,7 @@ import {
   assignCardMemberSchema,
   removeCardMemberSchema,
   uploadAttachmentSchema,
-  updateListIsDoneSchema,
+  toggleCardCompletionSchema,
   updateCardEstimateSchema,
   updateCardDueDateSchema,
   updateCardPrioritySchema,
@@ -112,6 +113,7 @@ import {
   buildCardArchivedEvent,
   buildCardRestoredEvent,
   buildCardCompletedEvent,
+  buildCardReopenedEvent,
   buildCardCreatedEvent,
     buildCardDeletedEvent,
     buildCardMemberAssignedEvent,
@@ -190,8 +192,8 @@ type MoveCardResult =
   | { success: true }
   | { success: false; error: string };
 
-type UpdateListIsDoneResult =
-  | { success: true }
+type ToggleCardCompletionResult =
+  | { success: true; card: CardDetailRecord }
   | { success: false; error: string };
 
 type UpdateCardEstimateResult =
@@ -219,7 +221,7 @@ export async function createListAction(
 
   await verifySession();
 
-  const { boardId, title, isDone } = parsed.data;
+  const { boardId, title } = parsed.data;
 
   const board = await getBoardById(boardId);
   if (!board) {
@@ -235,14 +237,13 @@ export async function createListAction(
   }
 
   try {
-    const list = await createList({ boardId, title, isDone });
+    const list = await createList({ boardId, title });
     revalidatePath(`/boards/${boardId}`);
     emitListCreated(list.boardId, {
       list: {
         id: list.id,
         title: list.title,
         boardId: list.boardId,
-        isDone: list.isDone,
         position: list.position,
       },
     });
@@ -284,45 +285,6 @@ export async function updateListAction(
     await updateListTitle(listId, title);
     revalidatePath(`/boards/${result.list.boardId}`);
     emitListUpdated(result.list.boardId, { listId, title });
-    return { success: true };
-  } catch {
-    return { success: false, error: "Failed to update list. Please try again." };
-  }
-}
-
-export async function updateListIsDoneAction(
-  formData: FormData,
-): Promise<UpdateListIsDoneResult> {
-  const rawData = Object.fromEntries(formData);
-  const parsed = updateListIsDoneSchema.safeParse(rawData);
-
-  if (!parsed.success) {
-    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
-    return { success: false, error: firstError || "Validation failed" };
-  }
-
-  await verifySession();
-
-  const { listId, isDone } = parsed.data;
-
-  const result = await getListWithBoard(listId);
-  if (!result || result.board.archivedAt) {
-    return { success: false, error: "List not found" };
-  }
-
-  const canUpdateList = await hasWorkspacePermission(result.board.workspaceId, {
-    list: ["update"],
-  });
-
-  if (!canUpdateList) {
-    return { success: false, error: "List not found" };
-  }
-
-  try {
-    await updateListIsDone(listId, isDone);
-    revalidatePath(`/boards/${result.list.boardId}`);
-    emitListUpdated(result.list.boardId, { listId, isDone });
-    emitAnalyticsRefresh(result.board.workspaceId);
     return { success: true };
   } catch {
     return { success: false, error: "Failed to update list. Please try again." };
@@ -444,14 +406,14 @@ export async function createCardAction(
       const position = lastCard
         ? lastCard.position + CARD_POSITION_GAP
         : CARD_POSITION_GAP;
-      const completedAt = result.list.isDone ? new Date() : null;
+      // A newly created card is never complete: completion is card-owned and set
+      // only by the explicit toggle, never derived from the list (decision 0020).
       const createdCard = await tx.card.create({
         data: {
           listId,
           title,
           createdById: userId,
           position,
-          completedAt,
         },
         select: {
           id: true,
@@ -472,7 +434,6 @@ export async function createCardAction(
           createdCard.id,
           {
             listId: result.list.id,
-            listIsDone: result.list.isDone,
             estimateHours: createdCard.estimateHours,
             dueDate: toIsoOrNull(createdCard.dueDate),
             memberIds,
@@ -482,24 +443,6 @@ export async function createCardAction(
           userId,
         ),
       ];
-
-      if (result.list.isDone) {
-        events.push(
-          buildCardCompletedEvent(
-            result.board.workspaceId,
-            result.board.id,
-            createdCard.id,
-            {
-              listId: result.list.id,
-              estimateHours: createdCard.estimateHours,
-              dueDate: toIsoOrNull(createdCard.dueDate),
-              memberIds,
-              firstCompletion: true,
-            },
-            userId,
-          ),
-        );
-      }
 
       await recordCardHistoryEvents(tx, events);
       return createdCard;
@@ -790,9 +733,10 @@ export async function updateCardEstimateAction(
     return { success: false, error: "Card not found" };
   }
 
-  if (snapshot.card.completedAt) {
-    return { success: false, error: "Estimate cannot be changed after first completion" };
-  }
+  // No estimate lock (decision 0020): the estimate stays editable through
+  // complete/reopen cycles. Analytics is event-sourced, so estimate-at-completion
+  // is recoverable from the ESTIMATE_SET/ESTIMATE_CHANGED event log — the live
+  // field freeze guarded nothing analytics trusted.
 
   try {
     if (estimateHours !== snapshot.card.estimateHours) {
@@ -843,6 +787,135 @@ export async function updateCardEstimateAction(
     return { success: true };
   } catch {
     return { success: false, error: "Failed to update estimate. Please try again." };
+  }
+}
+
+export async function toggleCardCompletionAction(
+  formData: FormData,
+): Promise<ToggleCardCompletionResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = toggleCardCompletionSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  const { userId } = await verifySession();
+  const { cardId, complete } = parsed.data;
+
+  const snapshot = await getCardWithListAndMembers(cardId);
+  if (!snapshot) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(snapshot.board.workspaceId, {
+    card: ["update"],
+  });
+
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const previousCompletedAt = snapshot.card.completedAt;
+  // A no-op toggle (already in the requested state) still returns success but
+  // writes no history event and re-emits the current state.
+  const isTransition = complete !== (previousCompletedAt !== null);
+
+  // requireEstimateBeforeDone gate (kept — decision 0020): block only a genuine
+  // complete transition, surfaced inline (not a silent no-op).
+  if (complete && isTransition) {
+    const workspaceSettings = await db.workspace.findUnique({
+      where: { id: snapshot.board.workspaceId },
+      select: { requireEstimateBeforeDone: true },
+    });
+    if (
+      workspaceSettings?.requireEstimateBeforeDone &&
+      snapshot.card.estimateHours == null
+    ) {
+      return {
+        success: false,
+        error: "Set an estimate before marking this card complete",
+      };
+    }
+  }
+
+  try {
+    const card = await db.$transaction(async (tx) => {
+      const { card: updated, transitioned } = await setCardCompletion(
+        tx,
+        cardId,
+        complete,
+        previousCompletedAt,
+      );
+
+      // Record a lifecycle event only on an actual transition. `transitioned` is
+      // the authoritative in-transaction compare-and-set result (not the
+      // pre-transaction `isTransition`), so a concurrent double-toggle records at
+      // most one event per streak.
+      if (transitioned) {
+        const event = complete
+          ? buildCardCompletedEvent(
+              snapshot.board.workspaceId,
+              snapshot.board.id,
+              cardId,
+              {
+                listId: snapshot.list.id,
+                estimateHours: updated.estimateHours,
+                dueDate: toIsoOrNull(updated.dueDate),
+                memberIds: snapshot.memberIds,
+                // Streak-start marker; vestigial under the current-streak anchor
+                // (US-064 / decision 0021). True whenever completing from a
+                // non-completed state.
+                firstCompletion: previousCompletedAt === null,
+              },
+              userId,
+            )
+          : buildCardReopenedEvent(
+              snapshot.board.workspaceId,
+              snapshot.board.id,
+              cardId,
+              {
+                listId: snapshot.list.id,
+                dueDate: toIsoOrNull(updated.dueDate),
+                memberIds: snapshot.memberIds,
+              },
+              userId,
+            );
+        await recordCardHistoryEvents(tx, [event]);
+      }
+
+      return updated;
+    });
+
+    revalidatePath(`/boards/${snapshot.list.boardId}`);
+    // Dedicated in-place completion event — card:updated is title-only and can't
+    // carry a completion flip. Carry completedAt (not a bare boolean) so the
+    // receiver recomputes due-status. Safe mid-drag: a flag flip never reorders
+    // the list array (mirrors labels/members).
+    emitCardCompletionUpdated(snapshot.list.boardId, {
+      cardId,
+      completedAt: toIsoOrNull(card.completedAt),
+    });
+    emitAnalyticsRefresh(snapshot.board.workspaceId);
+
+    return {
+      success: true,
+      card: {
+        id: card.id,
+        listId: card.listId,
+        title: card.title,
+        description: card.description,
+        estimateHours: card.estimateHours,
+        dueDate: card.dueDate,
+        completedAt: card.completedAt,
+        priority: card.priority,
+        coverImage: card.coverImage,
+        updatedAt: card.updatedAt,
+      },
+    };
+  } catch {
+    return { success: false, error: "Failed to update completion. Please try again." };
   }
 }
 
@@ -1183,22 +1256,9 @@ export async function moveCardAction(
     return { success: false, error: "Card not found" };
   }
 
-  const workspaceSettings = await db.workspace.findUnique({
-    where: { id: cardResult.board.workspaceId },
-    select: { requireEstimateBeforeDone: true },
-  });
-  const movesIntoDone = !snapshot.list.isDone && targetListResult.list.isDone;
-  if (
-    movesIntoDone &&
-    workspaceSettings?.requireEstimateBeforeDone &&
-    snapshot.card.estimateHours == null
-  ) {
-    return {
-      success: false,
-      error: "Set an estimate before moving this card to a done list",
-    };
-  }
-
+  // A move changes only list membership + position — it never completes or
+  // reopens a card, and never gates on the estimate (decision 0020). Completion
+  // and its `requireEstimateBeforeDone` gate live solely in the completion toggle.
   try {
     let movedCard: { id: string; listId: string; position: number } | null = null;
 
@@ -1219,12 +1279,6 @@ export async function moveCardAction(
             // so a same-list re-drop never bisects against its own stale slot.
             excludeCardId: cardId,
           });
-          const movesOutOfDone = snapshot.list.isDone && !targetListResult.list.isDone;
-          const nextCompletedAt = movesIntoDone
-            ? (snapshot.card.completedAt ?? new Date())
-            : movesOutOfDone
-              ? null
-              : snapshot.card.completedAt;
           const updatedCard = await tx.card.update({
             where: {
               id: cardId,
@@ -1233,7 +1287,6 @@ export async function moveCardAction(
             data: {
               listId: targetListId,
               position: nextPosition,
-              completedAt: nextCompletedAt,
             },
             select: {
               id: true,
@@ -1252,12 +1305,8 @@ export async function moveCardAction(
               actorId: userId,
               fromListId: snapshot.list.id,
               toListId: targetListResult.list.id,
-              fromListIsDone: snapshot.list.isDone,
-              toListIsDone: targetListResult.list.isDone,
               estimateHours: updatedCard.estimateHours,
-              dueDate: toIsoOrNull(updatedCard.dueDate),
               memberIds,
-              completedAtBeforeMove: snapshot.card.completedAt,
             });
 
             await recordCardHistoryEvents(tx, events);

@@ -30,11 +30,11 @@ carry rich metadata. All mutations are Server Actions under
 
 - Ordered columns on a board, ordered by `position Float`, unique per
   `(boardId, position)`.
-- Actions: `createListAction`, `updateListAction` (rename),
-  `updateListIsDoneAction` (toggle completion column), `deleteListAction`,
+- Actions: `createListAction`, `updateListAction` (rename), `deleteListAction`,
   `reorderListAction`.
-- `isDone` marks the completion column: **moving a card into an isDone list
-  auto-sets the card's `completedAt`**; moving it out reopens it.
+- Lists carry **no** completion flag. Completion is a property of the card, not
+  of its column (decision 0020) — a list named "Done" is an ordinary list and may
+  hold a mix of complete and incomplete cards.
 
 ## Cards
 
@@ -42,13 +42,22 @@ carry rich metadata. All mutations are Server Actions under
   (`URGENT|HIGH|MEDIUM|LOW`), `dueDate`, `estimateHours`, `completedAt`,
   cover image, `archivedAt` (soft delete).
 - Actions: `createCardAction`, `updateCardDetailsAction` (title/description),
-  `updateCardEstimateAction`, `updateCardDueDateAction`, `archiveCardAction`,
+  `updateCardEstimateAction`, `updateCardDueDateAction`,
+  `toggleCardCompletionAction` (mark complete / reopen), `archiveCardAction`,
   `restoreCardAction`, `reorderCardAction`, `moveCardAction`.
-- **Estimate rule:** once a card has completed once, its estimate cannot be
-  changed (audited as `ESTIMATE_CHANGED` history). Workspaces may require an
-  estimate before a card can be marked done (`requireEstimateBeforeDone`).
-- **Move semantics:** `moveCardAction` relocates a card across lists and applies
-  the auto-completion/reopen logic based on the target list's `isDone`.
+- **Completion:** `Card.completedAt` is the single source of truth, written only
+  by `toggleCardCompletionAction` (a card-owned checkbox — Trello-style, decision
+  0020). Completing writes `completedAt`, reopening clears it; each transition
+  records a `CARD_COMPLETED` / `CARD_REOPENED` history event and broadcasts a
+  dedicated `card:completion-updated` realtime event. **Dragging never changes
+  completion.**
+- **Estimate rule:** the estimate stays editable through complete/reopen cycles
+  (no lock — the event log preserves estimate-at-completion for analytics,
+  decision 0020). Workspaces may still require an estimate before a card can be
+  marked complete (`requireEstimateBeforeDone`), enforced by the completion
+  toggle and surfaced inline.
+- **Move semantics:** `moveCardAction` relocates a card across lists + positions
+  only. It never touches `completedAt` and emits no completion/reopen history.
 - **Archive & restore:** `archiveCardAction` soft-archives (sets `archivedAt`,
   records a `CARD_ARCHIVED` history event, emits `card:archived` to remove it
   live). `restoreCardAction` is the inverse — it clears `archivedAt`, records a
@@ -113,29 +122,42 @@ normalizes positions on overflow. The neighbour math is pure and unit-tested in
 
 ## Filtering & search
 
-- Two board-header controls narrow the visible cards, client-side and per-viewer:
-  a **label filter** (US-013) and a **title search** (US-014). Both are live with
-  no reload, no server round-trip, and no Server Action; neither mutates data nor
-  is shared with other viewers.
-- **Label filter:** options are the labels actually in use on the board; selecting
-  one or more shows only cards carrying at least one of them (OR). The control is
-  hidden when the board has no labels.
-- **Search:** a header box narrows to cards whose **title** contains the typed
-  text (case-insensitive substring), live as you type; a clear (✕) button resets
-  it. Search is **title-only** in slice 1 — the board-view card payload carries
-  `title` and `labels` but not `description` (that lives in the detail sheet), so
-  searching the description is a follow-up that first enriches the card payload.
-- **Composition:** search and the label filter combine via **AND** — a card is
-  visible only if it matches the query *and* the active label filter.
+- A single board-header **Filter popover** narrows the visible cards, client-side
+  and per-viewer (US-065, consolidating the original label filter US-013 and title
+  search US-014). It is live with no reload, no server round-trip, and no Server
+  Action; it never mutates data nor is shared with other viewers. There is **no
+  standalone header search box** — the keyword search lives inside the popover.
+- **Keyword search** (top of the popover) filters cards by **title**
+  (case-insensitive substring), **debounced ~250ms** so the board is not
+  re-filtered on every keystroke (the input updates instantly). While a keyword is
+  present the other dimensions are **suspended and hidden** — the keyword alone
+  governs card visibility, and the popover collapses to just the search box, a
+  short "clear the search to use the filters" hint, and (when nothing matches) a
+  "No cards match your search" message, so there is no greyed, non-interactive
+  dimension list taking up space. Search is title-only (the board-view card
+  carries `title`/`labels` but not `description`).
+- **Filter dimensions:**
+  - **Members** — cards assigned to any selected member (OR); options are members
+    actually assigned on the board, **minus the current viewer** (covered by the
+    "Assigned to me" quick option) plus "No members" (unassigned).
+  - **Card status** — Complete (`completedAt` set) or Not complete (per US-045).
+  - **Due date** — Overdue / next day / next week / next month + "No due date" (OR),
+    computed by **calendar day**: a card due **today** is never "Overdue" (Overdue
+    = a strictly past day) — it falls into the forward windows, matching the
+    card-face badge.
+  - **Labels** — cards carrying any selected label (OR); hidden when the board has
+    no labels.
+  - **Activity** — cards updated in the last 1 / 2 / 4 weeks (card `updatedAt`, OR).
+- **Composition:** within a dimension options combine via **OR**; across dimensions
+  via **AND** — a card is visible only if it satisfies every active dimension
+  (except while a keyword is active, which suspends the dimensions).
+- **Empty state:** when a keyword matches no card titles, the popover shows "No
+  cards match your search. Try another keyword."
 - Non-matching cards are **hidden (CSS), not removed** from the rendered list, so
   `@hello-pangea/dnd`'s index space stays aligned with the store's `cards` array
   and drop positions are never corrupted (see `lib/dnd/apply-drop.ts`).
-- A list whose cards are all narrowed out (by filter and/or search) shows a
-  "No cards match" hint instead of the empty "No cards yet" placeholder.
-- Filtering by **assignee** and **due date** is a planned follow-up slice. The
-  board-view card payload now carries `dueDate` and a capped `assignees` list
-  (plus checklist progress and comment count) for the card face (US-030), so the
-  data those filters need already exists — only the filter UI/logic remains.
+- A list whose cards are all narrowed out shows a "No cards match" hint instead of
+  the empty "No cards yet" placeholder.
 
 ## Responsive / mobile (US-021)
 

@@ -122,9 +122,9 @@ async function main() {
       updatedAt: now,
       lists: {
         create: [
-          { id: randomUUID(), title: "Backlog", position: 0, isDone: false, createdAt: daysAgo(120), updatedAt: now },
-          { id: randomUUID(), title: "In Progress", position: 1, isDone: false, createdAt: daysAgo(120), updatedAt: now },
-          { id: randomUUID(), title: "Done", position: 2, isDone: true, createdAt: daysAgo(120), updatedAt: now },
+          { id: randomUUID(), title: "Backlog", position: 0, createdAt: daysAgo(120), updatedAt: now },
+          { id: randomUUID(), title: "In Progress", position: 1, createdAt: daysAgo(120), updatedAt: now },
+          { id: randomUUID(), title: "Done", position: 2, createdAt: daysAgo(120), updatedAt: now },
         ],
       },
     },
@@ -141,8 +141,8 @@ async function main() {
       updatedAt: now,
       lists: {
         create: [
-          { id: randomUUID(), title: "Backlog", position: 0, isDone: false, createdAt: daysAgo(120), updatedAt: now },
-          { id: randomUUID(), title: "Done", position: 1, isDone: true, createdAt: daysAgo(120), updatedAt: now },
+          { id: randomUUID(), title: "Backlog", position: 0, createdAt: daysAgo(120), updatedAt: now },
+          { id: randomUUID(), title: "Done", position: 1, createdAt: daysAgo(120), updatedAt: now },
         ],
       },
     },
@@ -251,7 +251,6 @@ async function main() {
       occurredAt: createdAt,
       metadata: {
         listId: lists.backlogId,
-        listIsDone: false,
         estimateHours: s.estimateHours,
         dueDate: isoOrNull(dueDate),
         memberIds,

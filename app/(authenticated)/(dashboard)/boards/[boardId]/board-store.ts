@@ -2,9 +2,11 @@
 
 import { create } from "zustand";
 
+import type { ActivityWindow, CardStatus, DueBucket } from "@/lib/board-filter";
 import type {
   BoardPresencePayload,
   CardArchivedPayload,
+  CardCompletionUpdatedPayload,
   CardCreatedPayload,
   CardLabelsUpdatedPayload,
   CardMembersUpdatedPayload,
@@ -24,11 +26,17 @@ export type CardLabel = {
   color: string;
 };
 
+/** Add `value` to the array if absent, remove it if present. Used by the view filters. */
+function toggleInArray<T>(values: T[], value: T): T[] {
+  return values.includes(value)
+    ? values.filter((v) => v !== value)
+    : [...values, value];
+}
+
 export type ListWithCards = {
   id: string;
   title: string;
   boardId: string;
-  isDone: boolean;
   position: number;
   cards: Array<{
     id: string;
@@ -39,6 +47,7 @@ export type ListWithCards = {
     priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
     dueDate: Date | null;
     completedAt: Date | null;
+    updatedAt: Date;
     labels: CardLabel[];
     members: Array<{ id: string; name: string; image: string | null }>;
     memberCount: number;
@@ -115,8 +124,22 @@ type BoardStore = {
   pendingResync: boolean;
   /** Users currently viewing this board (live presence). Deduped, server-driven. */
   watchers: Watcher[];
+  /** The current viewer's user id — resolves the "assigned to me" filter option (US-065). */
+  currentUserId: string | null;
   /** Client-only view filter: card label ids to keep visible (OR). Empty = show all. */
   filterLabelIds: string[];
+  /** Client-only view filter: assignee ids to keep visible (OR). Empty = no constraint. */
+  filterMemberIds: string[];
+  /** Client-only view filter: keep only cards with no assignees. */
+  filterNoMembers: boolean;
+  /** Client-only view filter: keep only cards assigned to the current viewer. */
+  filterAssignedToMe: boolean;
+  /** Client-only view filter: card completion statuses to keep (OR). Empty = no constraint. */
+  filterStatuses: CardStatus[];
+  /** Client-only view filter: due-date buckets to keep (OR). Empty = no constraint. */
+  filterDueBuckets: DueBucket[];
+  /** Client-only view filter: activity windows to keep (OR). Empty = no constraint. */
+  filterActivityWindows: ActivityWindow[];
   /** Client-only card search: title substring (case-insensitive). Empty = show all. */
   searchQuery: string;
   /** Board-level "expand labels" preference (US-044): false = compact color bars,
@@ -126,6 +149,7 @@ type BoardStore = {
   expandLabels: boolean;
 
   setBoardId: (boardId: string) => void;
+  setCurrentUserId: (userId: string | null) => void;
   setLists: (lists: ListWithCards[]) => void;
   setSelectedCardId: (cardId: string | null) => void;
   setSelectedCard: (card: SelectedCardData | null) => void;
@@ -136,6 +160,12 @@ type BoardStore = {
   markResyncPending: () => void;
   consumeResync: () => boolean;
   toggleLabelFilter: (labelId: string) => void;
+  toggleMemberFilter: (memberId: string) => void;
+  toggleNoMembers: () => void;
+  toggleAssignedToMe: () => void;
+  toggleStatusFilter: (status: CardStatus) => void;
+  toggleDueBucket: (bucket: DueBucket) => void;
+  toggleActivityWindow: (window: ActivityWindow) => void;
   clearFilters: () => void;
   setSearchQuery: (query: string) => void;
   toggleExpandLabels: () => void;
@@ -149,6 +179,7 @@ type BoardStore = {
   applyRemoteCardCreated: (payload: CardCreatedPayload) => void;
   applyRemoteCardUpdated: (payload: CardUpdatedPayload) => void;
   applyRemoteCardArchived: (payload: CardArchivedPayload) => void;
+  applyRemoteCardCompletionUpdated: (payload: CardCompletionUpdatedPayload) => void;
   applyRemoteCardLabelsUpdated: (payload: CardLabelsUpdatedPayload) => void;
   applyRemoteCardMembersUpdated: (payload: CardMembersUpdatedPayload) => void;
   applyRemoteCommentCreated: (payload: CommentCreatedPayload) => void;
@@ -164,11 +195,20 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
   isDragging: false,
   pendingResync: false,
   watchers: [],
+  currentUserId: null,
   filterLabelIds: [],
+  filterMemberIds: [],
+  filterNoMembers: false,
+  filterAssignedToMe: false,
+  filterStatuses: [],
+  filterDueBuckets: [],
+  filterActivityWindows: [],
   searchQuery: "",
   expandLabels: false,
 
   setBoardId: (boardId) => set({ boardId }),
+
+  setCurrentUserId: (userId) => set({ currentUserId: userId }),
 
   setLists: (lists) => set({ lists }),
 
@@ -203,18 +243,49 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     return pending;
   },
 
-  // View-only label filter (no server round-trip). Toggling a label adds/removes
-  // it from the keep-visible set; the board hides non-matching cards via CSS.
+  // View-only filters (no server round-trip). Each toggle adds/removes an option
+  // from its dimension's keep-visible set; ListColumn hides non-matching cards via
+  // CSS. Within a dimension the options OR; across dimensions they AND (US-065).
   toggleLabelFilter: (labelId) => set((state) => ({
-    filterLabelIds: state.filterLabelIds.includes(labelId)
-      ? state.filterLabelIds.filter((id) => id !== labelId)
-      : [...state.filterLabelIds, labelId],
+    filterLabelIds: toggleInArray(state.filterLabelIds, labelId),
   })),
 
-  clearFilters: () => set({ filterLabelIds: [] }),
+  toggleMemberFilter: (memberId) => set((state) => ({
+    filterMemberIds: toggleInArray(state.filterMemberIds, memberId),
+  })),
+
+  toggleNoMembers: () => set((state) => ({ filterNoMembers: !state.filterNoMembers })),
+
+  toggleAssignedToMe: () => set((state) => ({ filterAssignedToMe: !state.filterAssignedToMe })),
+
+  toggleStatusFilter: (status) => set((state) => ({
+    filterStatuses: toggleInArray(state.filterStatuses, status),
+  })),
+
+  toggleDueBucket: (bucket) => set((state) => ({
+    filterDueBuckets: toggleInArray(state.filterDueBuckets, bucket),
+  })),
+
+  toggleActivityWindow: (window) => set((state) => ({
+    filterActivityWindows: toggleInArray(state.filterActivityWindows, window),
+  })),
+
+  // "Clear filters" resets every dimension AND the keyword — one action wipes the
+  // whole popover back to "show all" (US-065).
+  clearFilters: () => set({
+    filterLabelIds: [],
+    filterMemberIds: [],
+    filterNoMembers: false,
+    filterAssignedToMe: false,
+    filterStatuses: [],
+    filterDueBuckets: [],
+    filterActivityWindows: [],
+    searchQuery: "",
+  }),
 
   // View-only card search (no server round-trip). ListColumn hides cards whose
-  // title does not contain the query, ANDed with the label filter.
+  // title does not contain the query; while a keyword is active it takes over card
+  // visibility and the other dimensions are suspended.
   setSearchQuery: (query) => set({ searchQuery: query }),
 
   // Board-wide compact↔expanded label toggle. One flag, every card reads it, so
@@ -230,7 +301,14 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     isDragging: false,
     pendingResync: false,
     watchers: [],
+    currentUserId: null,
     filterLabelIds: [],
+    filterMemberIds: [],
+    filterNoMembers: false,
+    filterAssignedToMe: false,
+    filterStatuses: [],
+    filterDueBuckets: [],
+    filterActivityWindows: [],
     searchQuery: "",
     expandLabels: false,
   }),
@@ -396,7 +474,6 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
         return {
           ...list,
           ...(payload.title !== undefined ? { title: payload.title } : {}),
-          ...(payload.isDone !== undefined ? { isDone: payload.isDone } : {}),
         };
       });
 
@@ -459,6 +536,10 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
               priority: null,
               dueDate: null,
               completedAt: null,
+              // A socket-created card was just made, so it is "active now" for the
+              // activity filter (US-065). The snapshot carries no timestamp; the
+              // next router.refresh reseeds the authoritative value.
+              updatedAt: new Date(),
               labels: [],
               members: [],
               memberCount: 0,
@@ -506,6 +587,60 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       const newSelectedCard =
         state.selectedCardId === payload.cardId && state.selectedCard
           ? { ...state.selectedCard, card: { ...state.selectedCard.card, title: payload.title } }
+          : state.selectedCard;
+
+      return { lists: newLists, selectedCard: newSelectedCard };
+    });
+  },
+
+  // In-place completion flip (US-045): patch the card's completedAt on the board
+  // face (drives dimmed styling + due-status) and, if open, the detail sheet.
+  // Never reorders the list array, so it's safe to apply mid-drag (like labels).
+  // completedAt arrives as an ISO string (or null); rehydrate to a Date to match
+  // the store's card shape.
+  applyRemoteCardCompletionUpdated: (payload) => {
+    const { boardId } = get();
+
+    if (boardId !== payload.boardId) {
+      return;
+    }
+
+    const nextCompletedAt = payload.completedAt ? new Date(payload.completedAt) : null;
+
+    set((state) => {
+      const owningList = state.lists.find((list) =>
+        list.cards.some((card) => card.id === payload.cardId),
+      );
+      const isSelected =
+        state.selectedCardId === payload.cardId && Boolean(state.selectedCard);
+
+      if (!owningList && !isSelected) {
+        return state;
+      }
+
+      const newLists = owningList
+        ? state.lists.map((list) => {
+            if (!list.cards.some((card) => card.id === payload.cardId)) {
+              return list;
+            }
+
+            return {
+              ...list,
+              cards: list.cards.map((card) =>
+                card.id === payload.cardId
+                  ? { ...card, completedAt: nextCompletedAt }
+                  : card,
+              ),
+            };
+          })
+        : state.lists;
+
+      const newSelectedCard =
+        isSelected && state.selectedCard
+          ? {
+              ...state.selectedCard,
+              card: { ...state.selectedCard.card, completedAt: nextCompletedAt },
+            }
           : state.selectedCard;
 
       return { lists: newLists, selectedCard: newSelectedCard };

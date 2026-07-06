@@ -246,7 +246,6 @@ model List {
   board     Board   @relation(fields: [boardId], references: [id], onDelete: Cascade)
   title     String
   position  Float
-  isDone    Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -28,7 +28,6 @@ export type ListRecord = {
   boardId: string;
   title: string;
   position: number;
-  isDone: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -45,11 +44,6 @@ export type CardFaceMember = {
   image: string | null;
 };
 
-// How many member avatars the card face renders before collapsing the rest into
-// a "+N" overflow chip. Keeps the board-load payload bounded (US-030 perf watch)
-// while still signalling "who's on this card" at a glance.
-export const MAX_CARD_FACE_AVATARS = 3;
-
 export type ListCardRecord = {
   id: string;
   listId: string;
@@ -59,10 +53,14 @@ export type ListCardRecord = {
   priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
   dueDate: Date | null;
   completedAt: Date | null;
+  /** Last-modified timestamp — drives the board filter's "activity" dimension (US-065). */
+  updatedAt: Date;
   labels: CardLabelRecord[];
-  /** Up to MAX_CARD_FACE_AVATARS assignees for the avatar stack. */
+  /** The full assignee set. The card face slices to a small avatar cap at render;
+   *  the board filter (US-065) needs the complete set to match and to build the
+   *  member option list. Assignee counts are small, so the payload stays bounded. */
   members: CardFaceMember[];
-  /** Total assignees (>= members.length); drives the "+N" overflow. */
+  /** Total assignees (== members.length now that members is uncapped); drives the "+N" overflow. */
   memberCount: number;
   checklistDone: number;
   checklistTotal: number;
@@ -84,7 +82,6 @@ export async function getListsByBoardId(
       boardId: true,
       title: true,
       position: true,
-      isDone: true,
       createdAt: true,
       updatedAt: true,
       cards: {
@@ -105,13 +102,16 @@ export async function getListsByBoardId(
           priority: true,
           dueDate: true,
           completedAt: true,
+          updatedAt: true,
           labels: {
             select: {
               label: { select: { id: true, name: true, color: true } },
             },
           },
+          // Uncapped: the board filter (US-065) matches on the full assignee set
+          // and derives its member options from it. The card face slices to a
+          // small avatar cap at render. Assignee counts per card are small.
           members: {
-            take: MAX_CARD_FACE_AVATARS,
             orderBy: { assignedAt: "asc" },
             select: {
               user: { select: { id: true, name: true, image: true } },
@@ -151,6 +151,7 @@ export async function getListsByBoardId(
         priority: card.priority,
         dueDate: card.dueDate,
         completedAt: card.completedAt,
+        updatedAt: card.updatedAt,
         labels: card.labels.map((cardLabel) => cardLabel.label),
         members: card.members.map((member) => member.user),
         memberCount: card._count.members,
@@ -165,7 +166,6 @@ export async function getListsByBoardId(
 export async function createList(data: {
   boardId: string;
   title: string;
-  isDone?: boolean;
 }): Promise<ListRecord> {
   for (let attempt = 0; attempt < MAX_CREATE_LIST_RETRIES; attempt += 1) {
     const lastList = await db.list.findFirst({
@@ -182,14 +182,12 @@ export async function createList(data: {
           boardId: data.boardId,
           title: data.title,
           position,
-          isDone: data.isDone ?? false,
         },
         select: {
           id: true,
           boardId: true,
           title: true,
           position: true,
-          isDone: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -215,23 +213,6 @@ export async function updateListTitle(listId: string, title: string): Promise<Li
       boardId: true,
       title: true,
       position: true,
-      isDone: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  });
-}
-
-export async function updateListIsDone(listId: string, isDone: boolean): Promise<ListRecord> {
-  return db.list.update({
-    where: { id: listId },
-    data: { isDone },
-    select: {
-      id: true,
-      boardId: true,
-      title: true,
-      position: true,
-      isDone: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -416,7 +397,6 @@ export async function reorderListByNeighbors(data: {
             boardId: true,
             title: true,
             position: true,
-            isDone: true,
             createdAt: true,
             updatedAt: true,
           },
@@ -469,7 +449,6 @@ export async function getListWithBoard(listId: string): Promise<{
       boardId: true,
       title: true,
       position: true,
-      isDone: true,
       createdAt: true,
       updatedAt: true,
       board: {

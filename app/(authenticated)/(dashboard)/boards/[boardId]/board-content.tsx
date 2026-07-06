@@ -24,7 +24,6 @@ type BoardContentProps = {
     id: string;
     title: string;
     boardId: string;
-    isDone: boolean;
     position: number;
     cards: Array<{
       id: string;
@@ -35,6 +34,7 @@ type BoardContentProps = {
       priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
       dueDate: Date | null;
       completedAt: Date | null;
+      updatedAt: Date;
       labels: Array<{ id: string; name: string; color: string }>;
       members: Array<{ id: string; name: string; image: string | null }>;
       memberCount: number;

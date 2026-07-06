@@ -19,7 +19,6 @@ export interface ListSnapshot {
   id: string;
   title: string;
   boardId: string;
-  isDone: boolean;
   position: number;
 }
 
@@ -30,7 +29,6 @@ export interface ListCreatedPayload extends BoardEventPayload {
 export interface ListUpdatedPayload extends BoardEventPayload {
   listId: string;
   title?: string;
-  isDone?: boolean;
 }
 
 export interface ListDeletedPayload extends BoardEventPayload {
@@ -55,6 +53,15 @@ export interface CardUpdatedPayload extends BoardEventPayload {
 
 export interface CardArchivedPayload extends BoardEventPayload {
   cardId: string;
+}
+
+// In-place / live (not structural): a card's completion flag flipped. Carries
+// completedAt (ISO string, or null when reopened) — not a bare boolean — so the
+// receiver recomputes due-status. Safe to apply mid-drag: it never reorders the
+// list array (mirrors card:labels-updated). US-045.
+export interface CardCompletionUpdatedPayload extends BoardEventPayload {
+  cardId: string;
+  completedAt: string | null;
 }
 
 export interface CardLabelSnapshot {
@@ -152,6 +159,7 @@ export type ServerToClientEvents = {
   "card:created": (payload: CardCreatedPayload) => void;
   "card:updated": (payload: CardUpdatedPayload) => void;
   "card:archived": (payload: CardArchivedPayload) => void;
+  "card:completion-updated": (payload: CardCompletionUpdatedPayload) => void;
   "card:labels-updated": (payload: CardLabelsUpdatedPayload) => void;
   "card:members-updated": (payload: CardMembersUpdatedPayload) => void;
   "comment:created": (payload: CommentCreatedPayload) => void;

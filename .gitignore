@@ -75,3 +75,6 @@ scripts/bin/harness-cli.exe
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Local UI-review screenshots (scratch, not tracked)
+.ui-review/

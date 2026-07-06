@@ -30,8 +30,15 @@ type AnalyticsRange = {
 type CompletedMetric = {
   leadTimes: number[];
   completedLateCount: number;
+  // Streak-anchored (currently-complete, anchor in range) → throughput / totalCompleted.
   completedCardIds: Set<string>;
-  reopenedCardIds: Set<string>;
+  // reopenRate is EVENT-BASED and decoupled from the streak "currently complete"
+  // filter (decision 0021): denominator = cards with any completion in range;
+  // numerator = cards reopened (after a completion) in range. Keeping these
+  // separate stops a completed-then-reopened-and-open card — which drops out of
+  // completedCardIds — from perversely lowering the reopen rate.
+  reopenDenominatorCardIds: Set<string>;
+  reopenNumeratorCardIds: Set<string>;
   rows: LeadTimeRow[];
 };
 
@@ -501,15 +508,40 @@ function buildBurndownSeries(
   return points;
 }
 
-function findFirstCompletionEvent(cardEvents: HistoryEvent[]): HistoryEvent | null {
-  return cardEvents.find((event) => {
-    if (event.eventType !== $Enums.CardHistoryEventType.CARD_COMPLETED) {
-      return false;
+/**
+ * The completion event that began the card's *current* completed streak — the
+ * first CARD_COMPLETED after its last CARD_REOPENED, or the first completion if
+ * it was never reopened (decision 0021 / US-064). Returns null when the card is
+ * currently reopened (its last completion-relevant event is a CARD_REOPENED) or
+ * never completed. This anchors throughput + cycle-time on when the work was
+ * *actually* finished, robust to accidental/premature ticks under the US-045
+ * casual toggle. The vestigial `firstCompletion` metadata flag is no longer read.
+ */
+function findCurrentStreakCompletionEvent(
+  cardEvents: HistoryEvent[],
+  asOf: Date,
+): HistoryEvent | null {
+  let anchor: HistoryEvent | null = null;
+  for (const event of cardEvents) {
+    // Evaluate the streak point-in-time: events after `asOf` do not exist yet
+    // for this period. Without this bound a reopen in a *later* period would
+    // wrongly null the anchor when we compute a previous period, dropping a
+    // card that was genuinely complete as-of that period's end (decision 0021).
+    // Skip (not break): rows are ordered by sequence, which need not be strictly
+    // monotonic in occurredAt for backfilled history.
+    if (event.occurredAt > asOf) {
+      continue;
     }
-
-    const metadata = getMetadata(event);
-    return metadataBoolean(metadata, "firstCompletion") !== false;
-  }) ?? null;
+    if (event.eventType === $Enums.CardHistoryEventType.CARD_COMPLETED) {
+      // Keep the streak START: the first completion since the last (re)open.
+      if (anchor === null) {
+        anchor = event;
+      }
+    } else if (event.eventType === $Enums.CardHistoryEventType.CARD_REOPENED) {
+      anchor = null;
+    }
+  }
+  return anchor;
 }
 
 function findCreatedEvent(cardEvents: HistoryEvent[]): HistoryEvent | null {
@@ -535,14 +567,57 @@ function computeCompletedMetrics(
 ): CompletedMetric {
   const leadTimes: number[] = [];
   const completedCardIds = new Set<string>();
-  const reopenedCardIds = new Set<string>();
+  const reopenDenominatorCardIds = new Set<string>();
+  const reopenNumeratorCardIds = new Set<string>();
   const rows: LeadTimeRow[] = [];
   let completedLateCount = 0;
 
   for (const cardId of context.cardIds) {
     const cardEvents = context.eventsByCardId.get(cardId) ?? [];
-    const completionEvent = findFirstCompletionEvent(cardEvents);
     const createdEvent = findCreatedEvent(cardEvents);
+
+    // reopenRate is event-based and independent of the streak anchor below
+    // (decision 0021). Denominator: this card reached completion in range.
+    const firstCompletionEver = cardEvents.find(
+      (event) => event.eventType === $Enums.CardHistoryEventType.CARD_COMPLETED,
+    );
+    const completedInRange = cardEvents.some(
+      (event) =>
+        event.eventType === $Enums.CardHistoryEventType.CARD_COMPLETED &&
+        event.occurredAt >= range.from &&
+        event.occurredAt <= range.to &&
+        eventMatchesMemberFilter(event, memberId),
+    );
+    if (completedInRange) {
+      reopenDenominatorCardIds.add(cardId);
+    }
+    // Numerator: reopened (after having been completed) in range — counted even
+    // if the card is still open now, so it never drops out of the rate.
+    const reopenedInRange = Boolean(
+      firstCompletionEver &&
+        cardEvents.some(
+          (event) =>
+            event.eventType === $Enums.CardHistoryEventType.CARD_REOPENED &&
+            event.occurredAt > firstCompletionEver.occurredAt &&
+            event.occurredAt >= range.from &&
+            event.occurredAt <= range.to &&
+            eventMatchesMemberFilter(event, memberId),
+        ),
+    );
+    if (reopenedInRange) {
+      reopenNumeratorCardIds.add(cardId);
+      // A card reopened in range was necessarily completed at some point, so it
+      // belongs in the "completed" population even if its completion predates
+      // the range. Adding it to the denominator keeps numerator ⊆ denominator
+      // so the rate is mathematically capped at 100% (decision 0021).
+      reopenDenominatorCardIds.add(cardId);
+    }
+
+    // Throughput + cycle-time anchor on the current completed streak: a card
+    // completed-then-reopened-and-open is NOT counted; a re-completed card
+    // anchors on the completion that began its current streak. Bounded to
+    // range.to so the previous period is evaluated as-of its own end.
+    const completionEvent = findCurrentStreakCompletionEvent(cardEvents, range.to);
 
     if (!completionEvent || !createdEvent) {
       continue;
@@ -564,18 +639,6 @@ function computeCompletedMetrics(
     const wasLate = Boolean(dueDate && dueDate.getTime() < completionEvent.occurredAt.getTime());
     if (wasLate) {
       completedLateCount += 1;
-    }
-
-    const hasReopenInRange = cardEvents.some(
-      (event) =>
-        event.eventType === $Enums.CardHistoryEventType.CARD_REOPENED &&
-        event.occurredAt > completionEvent.occurredAt &&
-        event.occurredAt >= range.from &&
-        event.occurredAt <= range.to &&
-        eventMatchesMemberFilter(event, memberId),
-    );
-    if (hasReopenInRange) {
-      reopenedCardIds.add(cardId);
     }
 
     if (includeRows) {
@@ -600,7 +663,8 @@ function computeCompletedMetrics(
     leadTimes,
     completedLateCount,
     completedCardIds,
-    reopenedCardIds,
+    reopenDenominatorCardIds,
+    reopenNumeratorCardIds,
     rows: rows.slice(0, MAX_LEAD_TIME_ROWS),
   };
 }
@@ -674,7 +738,9 @@ function computeFlowSeries(
       if (i >= 0 && i < range.days) created[i] += 1;
     }
 
-    const completionEvent = findFirstCompletionEvent(cardEvents);
+    // Streak anchor (US-064): a card completed d1 → reopened → completed d30
+    // plots only d30; a currently-reopened card is not plotted as completed.
+    const completionEvent = findCurrentStreakCompletionEvent(cardEvents, range.to);
     if (completionEvent && eventMatchesMemberFilter(completionEvent, memberId)) {
       const i = indexFor(completionEvent.occurredAt);
       if (i >= 0 && i < range.days) completed[i] += 1;
@@ -802,11 +868,13 @@ export async function getWorkspaceAnalytics(
   const previousCoverage = computeCoverage(context, previousEnd, filters.memberId);
   const remainingHoursCurrent = burndown.at(-1)?.remainingHours ?? 0;
   const remainingHoursPrevious = previousBurndown.at(-1)?.remainingHours ?? 0;
-  const reopenRateCurrent = currentCompleted.completedCardIds.size > 0
-    ? (currentCompleted.reopenedCardIds.size / currentCompleted.completedCardIds.size) * 100
+  // reopenRate uses the event-based denominator (any completion in range),
+  // decoupled from the streak-anchored throughput set (decision 0021).
+  const reopenRateCurrent = currentCompleted.reopenDenominatorCardIds.size > 0
+    ? (currentCompleted.reopenNumeratorCardIds.size / currentCompleted.reopenDenominatorCardIds.size) * 100
     : 0;
-  const reopenRatePrevious = previousCompleted.completedCardIds.size > 0
-    ? (previousCompleted.reopenedCardIds.size / previousCompleted.completedCardIds.size) * 100
+  const reopenRatePrevious = previousCompleted.reopenDenominatorCardIds.size > 0
+    ? (previousCompleted.reopenNumeratorCardIds.size / previousCompleted.reopenDenominatorCardIds.size) * 100
     : 0;
 
   return {

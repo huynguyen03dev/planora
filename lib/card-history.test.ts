@@ -27,7 +27,6 @@ describe("card-history", () => {
         eventType: CardHistoryEventType.CARD_CREATED,
         metadata: {
           listId: "list-1",
-          listIsDone: false,
           estimateHours: 4,
           dueDate: null,
           memberIds: ["user-1"],
@@ -75,7 +74,6 @@ describe("card-history", () => {
           eventType: CardHistoryEventType.CARD_CREATED,
           metadata: {
             listId: "list-1",
-            listIsDone: false,
             estimateHours: 4,
             dueDate: null,
             memberIds: ["user-1"],
@@ -126,7 +124,6 @@ describe("card-history", () => {
         "card-1",
         {
           listId: "list-1",
-          listIsDone: false,
           estimateHours: 8,
           dueDate: null,
           memberIds: [],
@@ -149,8 +146,6 @@ describe("card-history", () => {
         {
           fromListId: "list-1",
           toListId: "list-2",
-          fromListIsDone: false,
-          toListIsDone: true,
           memberIds: ["user-1"],
           estimateHours: 4,
         },
@@ -159,8 +154,8 @@ describe("card-history", () => {
 
       expect(result.eventType).toBe(CardHistoryEventType.CARD_MOVED);
       const meta = result.metadata as CardMovedMetadata;
-      expect(meta.toListIsDone).toBe(true);
-      expect(meta.fromListIsDone).toBe(false);
+      expect(meta.fromListId).toBe("list-1");
+      expect(meta.toListId).toBe("list-2");
     });
 
     it("should build CARD_COMPLETED event with firstCompletion flag", () => {
@@ -202,7 +197,11 @@ describe("card-history", () => {
       expect(meta.nextEstimateHours).toBe(4);
     });
 
-    it("should build only CARD_MOVED for active-to-active moves", () => {
+    // US-045 / decision 0020: a move changes only list membership + position. It
+    // never completes or reopens a card, so buildCardMoveLifecycleEvents always
+    // yields exactly one CARD_MOVED event — regardless of which lists are
+    // involved. Completion transitions come solely from the completion toggle.
+    it("builds only CARD_MOVED, carrying from/to list + estimate", () => {
       const result = buildCardMoveLifecycleEvents({
         workspaceId: "ws-1",
         boardId: "board-1",
@@ -210,123 +209,48 @@ describe("card-history", () => {
         actorId: "user-1",
         fromListId: "todo",
         toListId: "doing",
-        fromListIsDone: false,
-        toListIsDone: false,
         estimateHours: 4,
-        dueDate: null,
         memberIds: ["user-1"],
-        completedAtBeforeMove: null,
       });
 
       expect(result.map((event) => event.eventType)).toEqual([
         CardHistoryEventType.CARD_MOVED,
       ]);
+      expect(result[0].metadata).toEqual({
+        fromListId: "todo",
+        toListId: "doing",
+        estimateHours: 4,
+        memberIds: ["user-1"],
+      });
     });
 
-    it("should build CARD_MOVED and first CARD_COMPLETED for active-to-done moves", () => {
-      const result = buildCardMoveLifecycleEvents({
+    it("never emits CARD_COMPLETED or CARD_REOPENED from a move (into or out of any list)", () => {
+      const intoFormerDone = buildCardMoveLifecycleEvents({
         workspaceId: "ws-1",
         boardId: "board-1",
         cardId: "card-1",
         actorId: "user-1",
         fromListId: "doing",
         toListId: "done",
-        fromListIsDone: false,
-        toListIsDone: true,
         estimateHours: 8,
-        dueDate: "2026-01-03T00:00:00.000Z",
         memberIds: ["user-1"],
-        completedAtBeforeMove: null,
       });
-
-      expect(result.map((event) => event.eventType)).toEqual([
-        CardHistoryEventType.CARD_MOVED,
-        CardHistoryEventType.CARD_COMPLETED,
-      ]);
-      expect(result[1].metadata).toEqual({
-        listId: "done",
-        estimateHours: 8,
-        dueDate: "2026-01-03T00:00:00.000Z",
-        memberIds: ["user-1"],
-        firstCompletion: true,
-      });
-    });
-
-    it("should build CARD_MOVED with non-first completion when a completed card moves back into done", () => {
-      const result = buildCardMoveLifecycleEvents({
-        workspaceId: "ws-1",
-        boardId: "board-1",
-        cardId: "card-1",
-        actorId: "user-1",
-        fromListId: "doing",
-        toListId: "done",
-        fromListIsDone: false,
-        toListIsDone: true,
-        estimateHours: 8,
-        dueDate: null,
-        memberIds: ["user-1"],
-        completedAtBeforeMove: new Date("2026-01-01T00:00:00.000Z"),
-      });
-
-      expect(result.map((event) => event.eventType)).toEqual([
-        CardHistoryEventType.CARD_MOVED,
-        CardHistoryEventType.CARD_COMPLETED,
-      ]);
-      expect(result[1].metadata).toEqual({
-        listId: "done",
-        estimateHours: 8,
-        dueDate: null,
-        memberIds: ["user-1"],
-        firstCompletion: false,
-      });
-    });
-
-    it("should build only CARD_MOVED for done-to-done moves", () => {
-      const result = buildCardMoveLifecycleEvents({
-        workspaceId: "ws-1",
-        boardId: "board-1",
-        cardId: "card-1",
-        actorId: "user-1",
-        fromListId: "review-done",
-        toListId: "done",
-        fromListIsDone: true,
-        toListIsDone: true,
-        estimateHours: 4,
-        dueDate: null,
-        memberIds: ["user-1"],
-        completedAtBeforeMove: new Date("2026-01-01T00:00:00.000Z"),
-      });
-
-      expect(result.map((event) => event.eventType)).toEqual([
-        CardHistoryEventType.CARD_MOVED,
-      ]);
-    });
-
-    it("should build CARD_MOVED and CARD_REOPENED for done-to-active moves", () => {
-      const result = buildCardMoveLifecycleEvents({
+      const outOfFormerDone = buildCardMoveLifecycleEvents({
         workspaceId: "ws-1",
         boardId: "board-1",
         cardId: "card-1",
         actorId: "user-1",
         fromListId: "done",
         toListId: "doing",
-        fromListIsDone: true,
-        toListIsDone: false,
-        estimateHours: 4,
-        dueDate: "2026-01-03T00:00:00.000Z",
+        estimateHours: 8,
         memberIds: ["user-1"],
-        completedAtBeforeMove: new Date("2026-01-01T00:00:00.000Z"),
       });
 
-      expect(result.map((event) => event.eventType)).toEqual([
-        CardHistoryEventType.CARD_MOVED,
-        CardHistoryEventType.CARD_REOPENED,
-      ]);
-      expect(result[1].metadata).toEqual({
-        listId: "doing",
-        dueDate: "2026-01-03T00:00:00.000Z",
-        memberIds: ["user-1"],
-      });
+      for (const result of [intoFormerDone, outOfFormerDone]) {
+        expect(result.map((event) => event.eventType)).toEqual([
+          CardHistoryEventType.CARD_MOVED,
+        ]);
+      }
     });
   });
 

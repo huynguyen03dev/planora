@@ -7,6 +7,7 @@ import { initSocket, joinBoard, leaveBoard } from "@/lib/realtime/client";
 import type {
   BoardPresencePayload,
   CardArchivedPayload,
+  CardCompletionUpdatedPayload,
   CardCreatedPayload,
   CardLabelsUpdatedPayload,
   CardMembersUpdatedPayload,
@@ -50,6 +51,7 @@ export function BoardStoreProvider({
   const searchParams = useSearchParams();
   const connectedRef = useRef(false);
   const setBoardId = useBoardStore((s) => s.setBoardId);
+  const setCurrentUserId = useBoardStore((s) => s.setCurrentUserId);
   const setLists = useBoardStore((s) => s.setLists);
   const setSelectedCardId = useBoardStore((s) => s.setSelectedCardId);
   const setSelectedCard = useBoardStore((s) => s.setSelectedCard);
@@ -63,6 +65,7 @@ export function BoardStoreProvider({
   const applyRemoteCardCreated = useBoardStore((s) => s.applyRemoteCardCreated);
   const applyRemoteCardUpdated = useBoardStore((s) => s.applyRemoteCardUpdated);
   const applyRemoteCardArchived = useBoardStore((s) => s.applyRemoteCardArchived);
+  const applyRemoteCardCompletionUpdated = useBoardStore((s) => s.applyRemoteCardCompletionUpdated);
   const applyRemoteCardLabelsUpdated = useBoardStore((s) => s.applyRemoteCardLabelsUpdated);
   const applyRemoteCardMembersUpdated = useBoardStore((s) => s.applyRemoteCardMembersUpdated);
   const applyRemoteCommentCreated = useBoardStore((s) => s.applyRemoteCommentCreated);
@@ -81,15 +84,18 @@ export function BoardStoreProvider({
 
   useEffect(() => {
     setBoardId(boardId);
+    setCurrentUserId(viewerId);
     setLists(normalizedLists);
     setSelectedCardId(selectedCardId);
     setSelectedCard(selectedCard);
   }, [
     boardId,
+    viewerId,
     normalizedLists,
     selectedCardId,
     selectedCard,
     setBoardId,
+    setCurrentUserId,
     setLists,
     setSelectedCardId,
     setSelectedCard,
@@ -122,8 +128,8 @@ export function BoardStoreProvider({
     // @hello-pangea/dnd mid-drag — corrupting the drop position or breaking the
     // drag outright. Defer those events and flag a resync; BoardContent pulls
     // canonical state via router.refresh() when the drag ends. In-place patches
-    // (list/card title, isDone, comments) don't change list structure, so they
-    // stay live.
+    // (list/card title, card completion, labels, comments) don't change list
+    // structure, so they stay live.
     function applyOrDefer<T>(apply: (payload: T) => void, payload: T) {
       const store = useBoardStore.getState();
       if (store.isDragging) {
@@ -186,6 +192,12 @@ export function BoardStoreProvider({
       }
     }
 
+    function handleCardCompletionUpdated(payload: CardCompletionUpdatedPayload) {
+      // In-place patch (completion flag + due-status); safe mid-drag, applied
+      // live like card:labels-updated — it never reorders the list array.
+      applyRemoteCardCompletionUpdated(payload);
+    }
+
     function handleCardLabelsUpdated(payload: CardLabelsUpdatedPayload) {
       // In-place patch (label chips); safe mid-drag, applied live like card:updated.
       applyRemoteCardLabelsUpdated(payload);
@@ -217,6 +229,7 @@ export function BoardStoreProvider({
     socket.on("card:created", handleCardCreated);
     socket.on("card:updated", handleCardUpdated);
     socket.on("card:archived", handleCardArchived);
+    socket.on("card:completion-updated", handleCardCompletionUpdated);
     socket.on("card:labels-updated", handleCardLabelsUpdated);
     socket.on("card:members-updated", handleCardMembersUpdated);
     socket.on("comment:created", handleCommentCreated);
@@ -234,6 +247,7 @@ export function BoardStoreProvider({
       socket.off("card:created", handleCardCreated);
       socket.off("card:updated", handleCardUpdated);
       socket.off("card:archived", handleCardArchived);
+      socket.off("card:completion-updated", handleCardCompletionUpdated);
       socket.off("card:labels-updated", handleCardLabelsUpdated);
       socket.off("card:members-updated", handleCardMembersUpdated);
       socket.off("comment:created", handleCommentCreated);
@@ -249,6 +263,7 @@ export function BoardStoreProvider({
     applyRemoteCardCreated,
     applyRemoteCardUpdated,
     applyRemoteCardArchived,
+    applyRemoteCardCompletionUpdated,
     applyRemoteCardLabelsUpdated,
     applyRemoteCardMembersUpdated,
     applyRemoteCommentCreated,
