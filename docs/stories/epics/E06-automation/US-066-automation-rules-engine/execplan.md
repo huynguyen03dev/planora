@@ -271,6 +271,55 @@ Hard gates (→ high-risk):
 9. **UI** — `/workspace/[slug]/automation` page: rule list, rule builder
    (shadcn Dialog), execution log panel. Consult `DESIGN.md` for tokens.
 
+   **DONE (verified): tsc clean, production build clean (route registered),
+   821/821 tests still pass (no regression), eslint clean.**
+   - `app/(authenticated)/(dashboard)/workspace/[slug]/automation/page.tsx` (new)
+     — server component: `verifySession` → resolve slug → membership gate
+     (`notFound`) → `canManage = hasWorkspacePermission(ws, { organization:
+     ["update"] })` (admin-exclusive; reads open to any member, affordances
+     hidden for non-admins, actions re-enforce regardless). Fetches
+     workspace-scoped boards (+their lists/labels), members, rules (position
+     asc), and the latest 100 execution-log rows (`rule.workspaceId` relation
+     scope); derives `lastRunByRule` (newest-first ⇒ first hit wins).
+   - `components/workspace/automation/` (new): `automation-management.tsx`
+     (shell + toast + id→name lookup maps), `rule-builder-dialog.tsx` (shadcn
+     Dialog: name/description/board-scope/enabled `Switch`, trigger `Select` +
+     conditional config fields per trigger, ordered action-step editor with
+     up/down reorder + add/remove, client-side guard on id-bearing steps, clean
+     payload assembly, save-time advisory `warnings` surfaced via toast),
+     `rule-row.tsx` (enable `Switch` toggle, edit, delete via `AlertDialog`),
+     `execution-log-panel.tsx` (status badges + `Refresh`), plus pure
+     `rule-descriptors.ts` (trigger/action human labels + summarizers) and
+     `types.ts` (client prop shapes).
+   - `switch.tsx` added via `npx shadcn add switch` (no toggle primitive
+     existed). Sidebar (`workspace-shell-sidebar.tsx`) gains an **Automation**
+     nav link (`AiMagicIcon`).
+   - DESIGN.md conformance: surface ladder + hairline borders (`rounded-lg
+     border bg-card`), neutral text ramp (`text-muted-foreground`), brand blue
+     reserved for the primary CTA / focus ring / `Switch` on-state, destructive
+     reserved for the delete confirm — no hard-coded hex/px. Mirrors the members
+     management surface (`max-w-3xl`, `divide-y` rows, fixed toast).
+   - **Senior-review fixes folded in (no HIGH defects found; RBAC/isolation/
+     payload correctness verified):**
+     - M1 (MEDIUM) — board-scoped rules could reference off-board lists/labels
+       (un-fireable trigger filter, or a surprise cross-board move). The builder
+       now filters every list/label picker to the scoped board (`scopedOptions`)
+       and `handleBoardChange` reconciles now-off-board config filters (→ "any")
+       and action targets (→ first on-board default). Workspace-wide rules still
+       see all lists/labels.
+     - M2 (MEDIUM) — the action-step reorder/remove controls were raw 16px
+       `<button>`s with no focus ring; swapped to `Button variant="ghost"
+       size="icon"` (visible focus ring, 36px pointer target — matches the row
+       delete affordance).
+     - M3 (MEDIUM) — per-rule "Last run" was sliced from a global 100-row window
+       (a rule could falsely read "Never run"). Replaced with a dedicated
+       `distinct: ["ruleId"]` newest-first query in `page.tsx` — one accurate
+       row per rule.
+     - L1 — "Add action" now disables at the 20-action schema cap. L2 — the
+       enable/disable `Switch` uses `useOptimistic` for immediate feedback with
+       auto-reconcile. L3 — save-time cycle-loop warnings now surface as a
+       persistent, manually-dismissed "warning" toast (was a 5s info toast).
+
 10. **Docs + matrix update** — author `docs/product/automation.md`; update
     `boards-and-cards.md`, `realtime-sync.md`, `notifications.md`,
     `analytics.md` with attribution notes; update `TEST_MATRIX.md`.
