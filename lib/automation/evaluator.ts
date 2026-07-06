@@ -50,6 +50,13 @@ export interface EvaluateRulesParams {
   chain?: ChainTracker;
   /** Actor attributed to rule-driven writes; defaults to the automation system user. */
   actorId?: string;
+  /**
+   * When set, enables scheduled claim-first mode (Tier 1 dedup). A success
+   * row is written BEFORE executing actions; on P2002 the rule is skipped.
+   * NOT propagated into recursive child calls (cascades from a scheduled rule
+   * produce card-triggered events, not scheduled ones).
+   */
+  dedupKey?: string;
 }
 
 export interface EvaluateRulesResult {
@@ -71,7 +78,7 @@ export interface EvaluateRulesResult {
 export async function evaluateRules(
   params: EvaluateRulesParams,
 ): Promise<EvaluateRulesResult> {
-  const { client, workspaceId, triggerType, event } = params;
+  const { client, workspaceId, triggerType, event, dedupKey } = params;
   const actorId = params.actorId ?? AUTOMATION_ACTOR_USER_ID;
   const chain = params.chain ?? ChainTracker.root();
   const cardId = event.cardId ?? null;
@@ -102,6 +109,18 @@ export async function evaluateRules(
     const triggerConfig = parsedConfig.success ? parsedConfig.data : {};
     if (!evaluateConditions(triggerType, triggerConfig, event)) {
       continue;
+    }
+
+    // --- scheduled-window gate (due-date-approaching only) ---
+    // A rule with no beforeMinutes, or an event without dueDate/now, is not window-gated.
+    if (triggerType === "due-date-approaching") {
+      const before = triggerConfig.beforeMinutes;
+      if (before !== undefined && event.dueDate && event.now) {
+        const dueMs = Date.parse(event.dueDate);
+        const nowMs = Date.parse(event.now);
+        const windowStart = dueMs - before * 60_000;
+        if (!(nowMs >= windowStart && nowMs < dueMs)) continue; // out of window → skip, no log
+      }
     }
 
     // --- loop guards ---
@@ -146,6 +165,30 @@ export async function evaluateRules(
       chain.markFired(rule.id, cardId);
     }
 
+    // --- claim-first mode (Tier 1 dedup for scheduled rules) ---
+    // Write the success row BEFORE executing so concurrent ticks can't double-apply.
+    // The claim row is inserted INSIDE the tx, so if a later action throws, the tx
+    // (claim included) rolls back and the next tick retries.
+    if (dedupKey) {
+      try {
+        await client.ruleExecutionLog.create({
+          data: {
+            ruleId: rule.id,
+            chainId: chain.chainId,
+            chainDepth: chain.depth,
+            cardId,
+            dedupKey,
+            actionType: "sequence",
+            triggerType,
+            status: "success",
+          },
+        });
+      } catch (e) {
+        if ((e as { code?: string })?.code === "P2002") continue; // already applied — skip rule
+        throw e;
+      }
+    }
+
     // --- execute (a failing step throws → aborts the whole tx) ---
     try {
       const result = await executeRuleActions({
@@ -160,13 +203,18 @@ export async function evaluateRules(
         actorId,
       });
       effects.push(...result.effects);
-      await logExecution(client, {
-        rule,
-        chain,
-        cardId,
-        triggerType,
-        status: "success",
-      });
+
+      // In scheduled claim-first mode the success row was already written above.
+      // Only write a post-execute success row when NOT in claim-first mode.
+      if (!dedupKey) {
+        await logExecution(client, {
+          rule,
+          chain,
+          cardId,
+          triggerType,
+          status: "success",
+        });
+      }
 
       // Cascade: each produced event may match other rules. Recurse one level
       // deeper (shared chainId + dedup set; the depth cap halts runaways).

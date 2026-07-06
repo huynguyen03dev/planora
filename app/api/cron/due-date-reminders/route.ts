@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import db from "@/lib/prisma";
 import { getActiveMilestones, resolveRecipients, buildCardSelectionWhere, type Milestone } from "@/lib/due-date-reminders";
 import { notifyDueDate } from "@/lib/notification";
+import { maxApproachWindowMinutes, evaluateScheduledCard } from "@/lib/automation/scheduled";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -165,10 +166,63 @@ export async function POST(request: Request) {
     }
   }
 
+  // ── Scheduled pass: evaluate due-date-approaching rules ──────────────
+  let scheduledApplied = 0;
+  let scheduledNotified = 0;
+  let scheduledSkipped = 0;
+  let scheduledErrors = 0;
+
+  const windowMin = await maxApproachWindowMinutes();
+  if (windowMin !== null) {
+    // Scan cards with dueDate in [now, now + windowMin*60_000) that are
+    // incomplete/non-archived/non-deleted.
+    const windowEnd = new Date(now.getTime() + windowMin * 60_000);
+    const scheduledCards = await db.card.findMany({
+      where: {
+        dueDate: { gte: now, lt: windowEnd },
+        completedAt: null,
+        archivedAt: null,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        dueDate: true,
+        priority: true,
+        list: {
+          select: {
+            id: true,
+            boardId: true,
+            board: { select: { workspaceId: true } },
+          },
+        },
+      },
+    });
+
+    for (const card of scheduledCards) {
+      const result = await evaluateScheduledCard({
+        card: {
+          id: card.id,
+          workspaceId: card.list.board.workspaceId,
+          boardId: card.list.boardId,
+          listId: card.list.id,
+          priority: card.priority as "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null,
+          dueDate: card.dueDate!, // guaranteed non-null by where clause
+        },
+        now,
+      });
+      scheduledApplied += result.applied;
+      scheduledNotified += result.notified;
+      scheduledSkipped += result.skipped;
+      scheduledErrors += result.errors;
+    }
+  }
+
   const elapsedMs = Math.round(performance.now() - start);
 
   console.log(
-    `[due-date-scheduler] processed=${cards.length} notified=${notified} skipped=${skipped} errors=${errors} elapsedMs=${elapsedMs}`,
+    `[due-date-scheduler] processed=${cards.length} notified=${notified} skipped=${skipped} errors=${errors}` +
+    ` scheduledApplied=${scheduledApplied} scheduledNotified=${scheduledNotified} scheduledSkipped=${scheduledSkipped} scheduledErrors=${scheduledErrors}` +
+    ` elapsedMs=${elapsedMs}`,
   );
 
   return NextResponse.json({
@@ -176,6 +230,10 @@ export async function POST(request: Request) {
     notified,
     skipped,
     errors,
+    scheduledApplied,
+    scheduledNotified,
+    scheduledSkipped,
+    scheduledErrors,
     elapsedMs,
   });
 }

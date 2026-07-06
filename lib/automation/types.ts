@@ -45,6 +45,10 @@ export interface RuleEventPayload {
   memberId?: string;
   completed?: boolean;
   priority?: Priority;
+  // Scheduled-path-only fields (set by the cron evaluator for due-date-approaching rules).
+  // Card-triggered paths never set them, keeping Phase 6 behavior byte-identical.
+  dueDate?: string;   // ISO string — the card's dueDate at trigger time
+  now?: string;        // ISO string — the current time at trigger time
   // Internal (not user-supplied) — chain loop-prevention metadata
   _chainId?: string;
   _chainDepth?: number;

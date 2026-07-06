@@ -38,7 +38,8 @@ export function matchTrigger(
  *  - A filter whose mapped payload field is `undefined` does NOT match
  *    (return false) — you can only match a value that is present.
  *  - `beforeMinutes` is intentionally IGNORED here; it is a due-date-
- *    approaching window parameter handled in the Phase 7 cron.
+ *    approaching window parameter handled by the scheduled-window gate in
+ *    evaluateRules (see evaluator.ts).
  *
  * Field→payload mapping:
  *  - boardId  → eventPayload.boardId  (all trigger types)
@@ -90,7 +91,8 @@ export function evaluateConditions(
     if (eventPayload.labelId !== triggerConfig.labelId) return false;
   }
 
-  // beforeMinutes is intentionally NOT evaluated here (Phase 7 cron concern).
+  // beforeMinutes is intentionally NOT evaluated here — the scheduled-window
+  // gate in evaluateRules handles it for due-date-approaching rules.
 
   return true;
 }

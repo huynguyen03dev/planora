@@ -297,9 +297,11 @@ export async function executeRuleActions(
             triggerType: step.completed ? "card-completed" : "card-reopened",
             payload: { cardId, boardId, listId: card.listId, completed: step.completed },
           });
-        }
 
-        effects.push({ kind: "completion-updated", boardId, cardId, completed: step.completed });
+          // Emit only on a genuine transition — a no-op set-completion (card
+          // already in the requested state) must not broadcast a redundant event.
+          effects.push({ kind: "completion-updated", boardId, cardId, completed: step.completed });
+        }
         break;
       }
 

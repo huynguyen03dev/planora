@@ -572,7 +572,7 @@ describe("executeRuleActions", () => {
       });
     });
 
-    it("transitioned=false → still emits completion-updated but no producedEvent/history", async () => {
+    it("transitioned=false (no-op) → emits nothing, no producedEvent/history", async () => {
       const client = makeClient();
       const cardFindUniqueOrThrow = client.card.findUniqueOrThrow as ReturnType<typeof vi.fn>;
       const cardMemberFindMany = client.cardMember.findMany as ReturnType<typeof vi.fn>;
@@ -596,12 +596,9 @@ describe("executeRuleActions", () => {
         actorId: ACTOR,
       });
 
-      expect(result.effects).toContainEqual({
-        kind: "completion-updated",
-        boardId: "board-1",
-        cardId: "card-1",
-        completed: true,
-      });
+      // A no-op set-completion (card already in the requested state) must not
+      // broadcast a redundant completion event.
+      expect(result.effects).toEqual([]);
       expect(result.producedEvents).toEqual([]);
       expect(recordCardHistoryEvents).not.toHaveBeenCalled();
     });

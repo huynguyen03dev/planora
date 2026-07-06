@@ -196,6 +196,32 @@ Hard gates (→ high-risk):
    the action; card outside the window does not; a `notify-member` step dedups
    against the reminder milestone (member not double-notified).
 
+   **DONE (verified): tsc clean, 775/775 tests pass (+12 vs Phase 6).**
+   - `evaluator.ts` — added optional `dedupKey` (scheduled claim-first Tier-1
+     dedup: the success `RuleExecutionLog` row is written *before* execute and
+     commits atomically with the actions; P2002 → skip; NOT propagated into
+     cascade recursion) and a `due-date-approaching`-only window gate (skip when
+     `event.now` is outside `[dueDate − beforeMinutes, dueDate)`). The pure
+     matcher is unchanged. +4 tests (window match/miss, dedupKey P2002 skip,
+     claim-row-is-the-only-success-row).
+   - `scheduled.ts` (new) — `maxApproachWindowMinutes()` (sizes the scan window;
+     `null` ⇒ skip the whole pass), `evaluateScheduledCard()` (per-card tx →
+     `evaluateRules` for Tier-1; post-commit splits effects, fires non-notify via
+     `fireDeferredEffects`, and applies Tier-2 R3 dedup — claim-first
+     `CardReminder(cardId, userId, "DUE_SOON")`, P2002 → skip, rollback-on-notify-
+     failure). Never throws (one bad card ≠ aborted tick). +7 tests.
+   - `route.ts` — scheduled pass runs *after* the built-in loop (built-in stays
+     the canonical `DUE_SOON` notifier on overlap; the rule notify then
+     P2002-skips), resolves `workspaceId` via `list.board`, scans
+     `[now, now+windowMin)`, extends the response with `scheduled*` counters. The
+     built-in loop + existing response fields are behavior-identical (existing
+     cron test green with a default-`null` window mock).
+   - **v1 boundary:** `beforeMinutes` windows are honest for any size (scan is
+     sized from the max enabled window) but a rule's actions apply once per
+     `(rule, card, DUE_SOON)`; overdue rules are out of scope (approaching = before
+     due). A per-card `RuleExecutionError` rolls back that card's tx and skips its
+     remaining rules for the tick (consistent with the card-triggered semantics).
+
 8. **Rule CRUD + RBAC** — implement `createRuleAction`, `updateRuleAction`,
    `deleteRuleAction`, `toggleRuleEnabledAction`, `listRulesAction`,
    `getRuleExecutionLogAction`, `dryRunRulesAction`. Integration tests per the

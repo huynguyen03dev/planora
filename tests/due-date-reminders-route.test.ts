@@ -18,9 +18,15 @@ const mockDb = vi.hoisted(() => ({
 }));
 
 const mockNotifyDueDate = vi.hoisted(() => vi.fn());
+const mockMaxApproachWindowMinutes = vi.hoisted(() => vi.fn().mockResolvedValue(null));
+const mockEvaluateScheduledCard = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/prisma", () => ({ default: mockDb, db: mockDb }));
 vi.mock("@/lib/notification", () => ({ notifyDueDate: mockNotifyDueDate }));
+vi.mock("@/lib/automation/scheduled", () => ({
+  maxApproachWindowMinutes: mockMaxApproachWindowMinutes,
+  evaluateScheduledCard: mockEvaluateScheduledCard,
+}));
 vi.mock("@/lib/email", () => ({ sendEmail: vi.fn() }));
 vi.mock("@/lib/realtime/server", () => ({ emitNotificationNew: vi.fn() }));
 vi.mock("@/emails/due-date-email", () => ({ DueDateEmail: vi.fn(() => null) }));

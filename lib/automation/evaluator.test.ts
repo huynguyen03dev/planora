@@ -191,3 +191,107 @@ describe("evaluateRules — error semantics", () => {
     expect.assertions(4);
   });
 });
+
+describe("evaluateRules — scheduled window gate (due-date-approaching)", () => {
+  const dueDateApproachingRule = rule({
+    triggerConfig: { beforeMinutes: 120 },
+  });
+
+  it("window MATCH: event.dueDate = now+60min with beforeMinutes=120 → executes", async () => {
+    const now = new Date("2026-01-15T10:00:00Z");
+    const dueDate = new Date("2026-01-15T11:00:00Z"); // now + 60min
+    const { client, logCreate } = makeClient([dueDateApproachingRule]);
+
+    await evaluateRules({
+      client,
+      workspaceId: "ws",
+      triggerType: "due-date-approaching",
+      event: {
+        ...baseEvent,
+        dueDate: dueDate.toISOString(),
+        now: now.toISOString(),
+      },
+    });
+
+    expect(mockExecute).toHaveBeenCalledTimes(1);
+    expect(logCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "success" }) }),
+    );
+  });
+
+  it("window MISS: event.dueDate = now+180min with beforeMinutes=120 → NOT executed, no log", async () => {
+    const now = new Date("2026-01-15T10:00:00Z");
+    const dueDate = new Date("2026-01-15T13:00:00Z"); // now + 180min — outside window
+    const { client, logCreate } = makeClient([dueDateApproachingRule]);
+
+    await evaluateRules({
+      client,
+      workspaceId: "ws",
+      triggerType: "due-date-approaching",
+      event: {
+        ...baseEvent,
+        dueDate: dueDate.toISOString(),
+        now: now.toISOString(),
+      },
+    });
+
+    expect(mockExecute).not.toHaveBeenCalled();
+    expect(logCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("evaluateRules — dedupKey claim-first mode", () => {
+  it("dedupKey P2002 claim: ruleExecutionLog.create rejects → rule skipped, executor NOT called, no throw", async () => {
+    const p2002Error = new Error("Unique constraint");
+    (p2002Error as unknown as Record<string, unknown>).code = "P2002";
+
+    const create = vi.fn(async (args: { data: Record<string, unknown> }) => {
+      if (args.data.dedupKey) throw p2002Error;
+      return { id: "log" };
+    });
+    const client = {
+      rule: { findMany: vi.fn(async () => [rule()]) },
+      ruleExecutionLog: { create },
+    };
+
+    const result = await evaluateRules({
+      client: client as never,
+      workspaceId: "ws",
+      triggerType: "card-created",
+      event: baseEvent,
+      dedupKey: "card-1:DUE_SOON",
+    });
+
+    expect(mockExecute).not.toHaveBeenCalled();
+    expect(result.effects).toEqual([]);
+  });
+
+  it("dedupKey present + success → the success row is the claim row (create called once with dedupKey), NOT a second post-execute success row", async () => {
+    mockExecute.mockResolvedValue({
+      effects: [{ kind: "card-updated", boardId: "b1", cardId: "c0" }],
+      producedEvents: [],
+    });
+    const { client, logCreate } = makeClient([rule()]);
+
+    await evaluateRules({
+      client,
+      workspaceId: "ws",
+      triggerType: "card-created",
+      event: baseEvent,
+      dedupKey: "card-1:DUE_SOON",
+    });
+
+    expect(mockExecute).toHaveBeenCalledTimes(1);
+    // The claim row (with dedupKey) is written before execute.
+    // The post-execute success log must NOT be written (only one create call total).
+    expect(logCreate).toHaveBeenCalledTimes(1);
+    expect(logCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "success",
+          dedupKey: "card-1:DUE_SOON",
+        }),
+      }),
+    );
+  });
+});
