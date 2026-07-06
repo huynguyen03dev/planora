@@ -1,0 +1,147 @@
+// lib/schemas/automation.ts
+import { z } from "zod";
+
+// ─── Trigger types ────────────────────────────────────────────────
+
+export const TRIGGER_TYPES = [
+  "card-created",
+  "card-moved-to-list",
+  "card-completed",
+  "card-reopened",
+  "label-added-to-card",
+  "member-assigned",
+  "due-date-approaching",
+] as const;
+
+export const triggerTypeSchema = z.enum(TRIGGER_TYPES);
+
+export type TriggerType = z.infer<typeof triggerTypeSchema>;
+
+// ─── Trigger config (all optional; empty object = match everything) ──
+
+const priorityValues = z.enum(["URGENT", "HIGH", "MEDIUM", "LOW"]);
+
+export const triggerConfigSchema = z.object({
+  boardId: z.string().uuid("Invalid board ID").optional(),
+  listId: z.string().uuid("Invalid list ID").optional(),
+  fromListId: z.string().uuid("Invalid list ID").optional(),
+  labelId: z.string().uuid("Invalid label ID").optional(),
+  priority: priorityValues.optional(),
+  beforeMinutes: z.number().int().positive("beforeMinutes must be a positive integer").optional(),
+});
+
+export type TriggerConfig = z.infer<typeof triggerConfigSchema>;
+
+// ─── Dynamic target tokens (decision 0022 R2) ─────────────────────
+
+const recipientTokenSchema = z.union([
+  z.literal("card-assignees"),
+  z.literal("card-creator"),
+  z.string().uuid("Invalid user ID"),
+]);
+
+const removeScopeSchema = z.union([
+  z.literal("all"),
+  z.string().uuid("Invalid user ID"),
+]);
+
+// ─── Action steps (discriminated union on `type`) ──────────────────
+
+const moveCardToListStepSchema = z.object({
+  type: z.literal("move-card-to-list"),
+  targetListId: z.string().uuid("Invalid list ID"),
+});
+
+const setPriorityStepSchema = z.object({
+  type: z.literal("set-priority"),
+  priority: priorityValues,
+});
+
+const addLabelStepSchema = z.object({
+  type: z.literal("add-label"),
+  labelId: z.string().uuid("Invalid label ID"),
+});
+
+const removeLabelStepSchema = z.object({
+  type: z.literal("remove-label"),
+  labelId: z.string().uuid("Invalid label ID"),
+});
+
+const assignMemberStepSchema = z.object({
+  type: z.literal("assign-member"),
+  recipient: recipientTokenSchema,
+});
+
+const removeMemberStepSchema = z.object({
+  type: z.literal("remove-member"),
+  scope: removeScopeSchema,
+});
+
+const setCompletionStepSchema = z.object({
+  type: z.literal("set-completion"),
+  completed: z.boolean(),
+});
+
+const notifyMemberStepSchema = z.object({
+  type: z.literal("notify-member"),
+  recipient: recipientTokenSchema,
+  message: z.string().max(2000, "Message must be 2000 characters or less").optional(),
+});
+
+export const actionStepSchema = z.discriminatedUnion("type", [
+  moveCardToListStepSchema,
+  setPriorityStepSchema,
+  addLabelStepSchema,
+  removeLabelStepSchema,
+  assignMemberStepSchema,
+  removeMemberStepSchema,
+  setCompletionStepSchema,
+  notifyMemberStepSchema,
+]);
+
+export type ActionStep = z.infer<typeof actionStepSchema>;
+
+// ─── Actions array (R1: ordered non-empty sequence) ────────────────
+
+export const actionsSchema = z
+  .array(actionStepSchema)
+  .min(1, "A rule must have at least one action")
+  .max(20, "A rule cannot have more than 20 actions");
+
+export type Actions = z.infer<typeof actionsSchema>;
+
+// ─── Create / Update Rule inputs ───────────────────────────────────
+
+const MAX_RULE_NAME_LENGTH = 200;
+const MAX_RULE_DESCRIPTION_LENGTH = 2000;
+
+const baseRuleFields = {
+  name: z
+    .string({ message: "Name is required" })
+    .trim()
+    .min(1, "Name is required")
+    .max(MAX_RULE_NAME_LENGTH, `Name must be ${MAX_RULE_NAME_LENGTH} characters or less`),
+  description: z
+    .string()
+    .max(MAX_RULE_DESCRIPTION_LENGTH, `Description must be ${MAX_RULE_DESCRIPTION_LENGTH} characters or less`)
+    .optional(),
+  enabled: z.boolean().optional(),
+  boardId: z.string().uuid("Invalid board ID").optional(),
+  triggerType: triggerTypeSchema,
+  triggerConfig: triggerConfigSchema,
+  actions: actionsSchema,
+};
+
+export const createRuleSchema = z.object({
+  ...baseRuleFields,
+  workspaceId: z.string().uuid("Invalid workspace ID"),
+});
+
+export type CreateRuleInput = z.infer<typeof createRuleSchema>;
+
+export const updateRuleSchema = z.object({
+  id: z.string().uuid("Invalid rule ID"),
+  ...baseRuleFields,
+});
+
+export type UpdateRuleInput = z.infer<typeof updateRuleSchema>;

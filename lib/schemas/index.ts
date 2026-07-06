@@ -118,3 +118,19 @@ export {
   type AddCardLabelInput,
   type RemoveCardLabelInput,
 } from "./label";
+
+export {
+  TRIGGER_TYPES,
+  triggerTypeSchema,
+  triggerConfigSchema,
+  actionStepSchema,
+  actionsSchema,
+  createRuleSchema,
+  updateRuleSchema,
+  type TriggerType,
+  type TriggerConfig,
+  type ActionStep,
+  type Actions,
+  type CreateRuleInput,
+  type UpdateRuleInput,
+} from "./automation";

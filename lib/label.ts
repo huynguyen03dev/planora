@@ -1,3 +1,5 @@
+import type { Prisma } from "@/app/generated/prisma/client";
+
 import db from "./prisma";
 
 export type LabelRecord = {
@@ -109,8 +111,9 @@ export async function deleteLabel(labelId: string): Promise<void> {
 export async function addCardLabel(
   cardId: string,
   labelId: string,
+  client: Prisma.TransactionClient | typeof db = db,
 ): Promise<{ changed: boolean }> {
-  const existing = await db.cardLabel.findUnique({
+  const existing = await client.cardLabel.findUnique({
     where: { cardId_labelId: { cardId, labelId } },
     select: { cardId: true },
   });
@@ -119,7 +122,7 @@ export async function addCardLabel(
     return { changed: false };
   }
 
-  await db.cardLabel.create({ data: { cardId, labelId } });
+  await client.cardLabel.create({ data: { cardId, labelId } });
   return { changed: true };
 }
 
@@ -127,8 +130,9 @@ export async function addCardLabel(
 export async function removeCardLabel(
   cardId: string,
   labelId: string,
+  client: Prisma.TransactionClient | typeof db = db,
 ): Promise<{ changed: boolean }> {
-  const result = await db.cardLabel.deleteMany({
+  const result = await client.cardLabel.deleteMany({
     where: { cardId, labelId },
   });
 
