@@ -163,6 +163,32 @@ Hard gates (→ high-risk):
      rollback.
    - Rule-action error aborts the transaction; the error `RuleExecutionLog`
      row persists (written post-rollback).
+   **DONE (verified): tsc clean, 763/763 tests pass (+15 vs Phase 5).**
+   - `evaluator.ts` — `evaluateRules()` fetches enabled rules (workspace +
+     trigger + board scope), condition-matches via the pure matcher, runs the
+     loop guards (dedup `(ruleId,cardId)` → `skipped`; depth cap 5 → `halted`),
+     calls the executor, and recurses on `producedEvents` with `chain.child()`.
+     success/skipped/halted rows log in-tx; a failing action throws
+     `RuleExecutionError` (NOT logged in-tx). 8 tests (matching, dedup, depth-cap
+     halt, error-without-inline-log, error identity).
+   - `effects.ts` — `fireDeferredEffects()` maps each descriptor to the existing
+     `emitCard*` events (re-reading committed card state for the richer
+     snapshots) + `notifyAutomation`; `logRuleExecutionError()` writes the
+     terminal error row via `db` POST-rollback. Best-effort per effect. 7 tests.
+   - Hooks: `evaluateRules()` wired into `createCardAction` (card-created),
+     `toggleCardCompletionAction` (card-completed/reopened, transition-gated),
+     `moveCardAction` (card-moved-to-list, list-change-gated; effects ride the
+     committed retry attempt's return so exactly one application fires),
+     `assignCardMemberAction` (member-assigned), `addCardLabelAction`
+     (label-added-to-card; wrapped in a new tx for effect atomicity). Each fires
+     deferred effects post-commit and, on `RuleExecutionError`, rolls back +
+     logs + returns `"Automation rule \"<name>\" failed; no changes were
+     applied."`. The US-062 tg2 positive-control tests were updated for the
+     richer tx bodies (a no-rules `rule.findMany` mock).
+   - **Note (v1 limitation):** the `notify-member` effect reuses the `ASSIGNED`
+     notification type (no dedicated automation type yet); delivery is real, the
+     label is approximate. A dedicated `AUTOMATION` `NotificationType` is a
+     follow-up if desired.
 
 7. **Scheduled trigger** — extend `/api/cron/due-date-reminders` to evaluate
    `due-date-approaching` rules (supplementing, not replacing, the built-in

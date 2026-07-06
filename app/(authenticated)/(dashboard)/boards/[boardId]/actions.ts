@@ -77,6 +77,9 @@ import {
   emitCommentCreated,
 } from "@/lib/realtime/server";
 import { notifyCardAssigned, notifyCommentOnCard, notifyMentioned } from "@/lib/notification";
+import { evaluateRules, RuleExecutionError } from "@/lib/automation/evaluator";
+import { fireDeferredEffects, logRuleExecutionError } from "@/lib/automation/effects";
+import type { DeferredEffect } from "@/lib/automation/executor";
 import {
   createListSchema,
   updateListSchema,
@@ -445,21 +448,38 @@ export async function createCardAction(
       ];
 
       await recordCardHistoryEvents(tx, events);
-      return createdCard;
+
+      // Automation (US-066): evaluate rules inside the trigger tx, after the
+      // history write. Rule-driven mutations share this tx and roll back with it.
+      const { effects } = await evaluateRules({
+        client: tx,
+        workspaceId: result.board.workspaceId,
+        triggerType: "card-created",
+        event: { cardId: createdCard.id, boardId: result.board.id, listId },
+      });
+      return { card: createdCard, ruleEffects: effects };
     });
 
     revalidatePath(`/boards/${result.list.boardId}`);
     emitCardCreated(result.list.boardId, {
       card: {
-        id: card.id,
-        listId: card.listId,
-        title: card.title,
-        position: card.position,
+        id: card.card.id,
+        listId: card.card.listId,
+        title: card.card.title,
+        position: card.card.position,
       },
     });
     emitAnalyticsRefresh(result.board.workspaceId);
-    return { success: true, cardId: card.id };
-  } catch {
+    await fireDeferredEffects(card.ruleEffects);
+    return { success: true, cardId: card.card.id };
+  } catch (error) {
+    if (error instanceof RuleExecutionError) {
+      await logRuleExecutionError(error);
+      return {
+        success: false,
+        error: `Automation rule "${error.context.ruleName}" failed; no changes were applied.`,
+      };
+    }
     return { success: false, error: "Failed to create card. Please try again." };
   }
 }
@@ -840,6 +860,7 @@ export async function toggleCardCompletionAction(
     }
   }
 
+  let ruleEffects: DeferredEffect[] = [];
   try {
     const card = await db.$transaction(async (tx) => {
       const { card: updated, transitioned } = await setCardCompletion(
@@ -883,6 +904,21 @@ export async function toggleCardCompletionAction(
               userId,
             );
         await recordCardHistoryEvents(tx, [event]);
+
+        // Automation (US-066): a genuine completion/reopen transition fires the
+        // matching trigger inside this tx; rule effects roll back with it.
+        const { effects } = await evaluateRules({
+          client: tx,
+          workspaceId: snapshot.board.workspaceId,
+          triggerType: complete ? "card-completed" : "card-reopened",
+          event: {
+            cardId,
+            boardId: snapshot.board.id,
+            listId: snapshot.list.id,
+            completed: complete,
+          },
+        });
+        ruleEffects = effects;
       }
 
       return updated;
@@ -898,6 +934,7 @@ export async function toggleCardCompletionAction(
       completedAt: toIsoOrNull(card.completedAt),
     });
     emitAnalyticsRefresh(snapshot.board.workspaceId);
+    await fireDeferredEffects(ruleEffects);
 
     return {
       success: true,
@@ -914,7 +951,14 @@ export async function toggleCardCompletionAction(
         updatedAt: card.updatedAt,
       },
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof RuleExecutionError) {
+      await logRuleExecutionError(error);
+      return {
+        success: false,
+        error: `Automation rule "${error.context.ruleName}" failed; no changes were applied.`,
+      };
+    }
     return { success: false, error: "Failed to update completion. Please try again." };
   }
 }
@@ -1260,7 +1304,9 @@ export async function moveCardAction(
   // reopens a card, and never gates on the estimate (decision 0020). Completion
   // and its `requireEstimateBeforeDone` gate live solely in the completion toggle.
   try {
-    let movedCard: { id: string; listId: string; position: number } | null = null;
+    let movedCard:
+      | { id: string; listId: string; position: number; ruleEffects: DeferredEffect[] }
+      | null = null;
 
     // Hints are mutable across retries: a StaleNeighborError drops the offending
     // side so the next attempt re-anchors on the surviving neighbour / appends
@@ -1310,7 +1356,28 @@ export async function moveCardAction(
             });
 
             await recordCardHistoryEvents(tx, events);
-            return updatedCard;
+
+            // Automation (US-066): fire the move trigger only on an actual list
+            // change (a same-list reorder is not a "moved to list" event). Runs
+            // inside this attempt's tx; on a StaleNeighbor/P2002 retry the effects
+            // are rebuilt fresh and only the committing attempt's survive.
+            let ruleEffects: DeferredEffect[] = [];
+            if (snapshot.list.id !== targetListId) {
+              const res = await evaluateRules({
+                client: tx,
+                workspaceId: cardResult.board.workspaceId,
+                triggerType: "card-moved-to-list",
+                event: {
+                  cardId,
+                  boardId: cardResult.board.id,
+                  listIdFrom: snapshot.list.id,
+                  listIdTo: targetListId,
+                  listId: targetListId,
+                },
+              });
+              ruleEffects = res.effects;
+            }
+            return { ...updatedCard, ruleEffects };
         });
         break;
       } catch (error) {
@@ -1355,8 +1422,16 @@ export async function moveCardAction(
     });
 
     emitAnalyticsRefresh(cardResult.board.workspaceId);
+    await fireDeferredEffects(movedCard.ruleEffects);
     return { success: true };
-  } catch {
+  } catch (error) {
+    if (error instanceof RuleExecutionError) {
+      await logRuleExecutionError(error);
+      return {
+        success: false,
+        error: `Automation rule "${error.context.ruleName}" failed; no changes were applied.`,
+      };
+    }
     return { success: false, error: "Failed to move card. Please try again." };
   }
 }
@@ -1607,6 +1682,7 @@ export async function assignCardMemberAction(
             image: existing.user.image,
             email: existing.user.email,
           },
+          ruleEffects: [] as DeferredEffect[],
         };
       }
 
@@ -1656,6 +1732,20 @@ export async function assignCardMemberAction(
         ),
       ]);
 
+      // Automation (US-066): a new assignment fires the member-assigned trigger
+      // inside this tx; rule effects roll back with the assignment on failure.
+      const { effects } = await evaluateRules({
+        client: tx,
+        workspaceId: cardResult.board.workspaceId,
+        triggerType: "member-assigned",
+        event: {
+          cardId,
+          boardId: cardResult.board.id,
+          listId: cardResult.list.id,
+          memberId: userId,
+        },
+      });
+
       return {
         changed: true,
         member: {
@@ -1664,6 +1754,7 @@ export async function assignCardMemberAction(
           image: result.user.image,
           email: result.user.email,
         },
+        ruleEffects: effects,
       };
     }).catch(async (error) => {
       if (!isUniqueConstraintError(error)) {
@@ -1701,6 +1792,7 @@ export async function assignCardMemberAction(
           image: existing.user.image,
           email: existing.user.email,
         },
+        ruleEffects: [] as DeferredEffect[],
       };
     });
 
@@ -1737,12 +1829,20 @@ export async function assignCardMemberAction(
       const members = await getCardMembers(cardId);
       emitCardMembersUpdated(cardResult.board.id, { cardId, members });
     }
+    await fireDeferredEffects(assignment.ruleEffects);
     return {
       success: true,
       changed: assignment.changed,
       member: assignment.member,
     };
   } catch (error) {
+    if (error instanceof RuleExecutionError) {
+      await logRuleExecutionError(error);
+      return {
+        success: false,
+        error: `Automation rule "${error.context.ruleName}" failed; no changes were applied.`,
+      };
+    }
     console.error("Failed to assign member to card:", error);
     return { success: false, error: "Failed to assign member. Please try again." };
   }
@@ -2136,8 +2236,28 @@ export async function addCardLabelAction(
     return { success: false, error: "Label not found" };
   }
 
+  let ruleEffects: DeferredEffect[] = [];
   try {
-    const { changed } = await addCardLabel(cardId, labelId);
+    const { changed } = await db.$transaction(async (tx) => {
+      const result = await addCardLabel(cardId, labelId, tx);
+      // Automation (US-066): a newly attached label fires the trigger inside this
+      // tx; rule effects roll back with the attach on failure.
+      if (result.changed) {
+        const { effects } = await evaluateRules({
+          client: tx,
+          workspaceId: cardResult.board.workspaceId,
+          triggerType: "label-added-to-card",
+          event: {
+            cardId,
+            boardId: cardResult.board.id,
+            listId: cardResult.list.id,
+            labelId,
+          },
+        });
+        ruleEffects = effects;
+      }
+      return result;
+    });
     if (changed) {
       const labels = await getCardLabels(cardId);
       emitCardLabelsUpdated(cardResult.list.boardId, {
@@ -2146,8 +2266,16 @@ export async function addCardLabelAction(
       });
     }
     revalidatePath(`/boards/${cardResult.list.boardId}`);
+    await fireDeferredEffects(ruleEffects);
     return { success: true, changed };
   } catch (error) {
+    if (error instanceof RuleExecutionError) {
+      await logRuleExecutionError(error);
+      return {
+        success: false,
+        error: `Automation rule "${error.context.ruleName}" failed; no changes were applied.`,
+      };
+    }
     console.error("Failed to add label to card:", error);
     return { success: false, error: "Failed to add label. Please try again." };
   }
