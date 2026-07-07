@@ -5,12 +5,16 @@ state of the test suite, not aspiration. Do not mark a row `implemented` until
 tests or validation evidence exist.
 
 Unit/integration runner: **Vitest 2** (node env). Commands: `npm test` (run
-once), `npm run test:watch`. Includes `lib/**/*.test.ts` and `tests/**/*.test.ts`
-(excludes `e2e/**`). E2E runner: **Playwright** (`npm run test:e2e`, `e2e/**`),
-added in US-009 — a two-client realtime harness, chromium. **CI** runs the
-unit/integration gate (`ci.yml`, US-008, required-eligible) and the E2E suite
-(`e2e.yml`, US-009, separate non-blocking). There is still **no** React Testing
-Library; most React component internals remain unverified.
+once), `npm run test:watch`. Two Vitest projects (`vitest.workspace.ts`): `node`
+(`lib/**/*.test.ts` + `tests/**/*.test.ts`, node env) and `components`
+(`components/**/*.test.tsx` + `app/**/*.test.tsx`, happy-dom env, added US-068).
+E2E runner: **Playwright** (`npm run test:e2e`, `e2e/**`), added in US-009 — a
+two-client realtime harness, chromium. **CI** runs the unit/integration gate
+(`ci.yml`, US-008, required-eligible) and the E2E suite (`e2e.yml`, US-009,
+separate non-blocking). React Testing Library now exists (US-068) with a
+representative set of client-component tests; most React component internals are
+still unverified (thin coverage, not zero). Async Server Components stay covered
+by E2E, not RTL.
 
 ## Status Values
 
@@ -64,9 +68,9 @@ Library; most React component internals remain unverified.
 | Automation engine — matcher / conditions / resolver / loop-guard / cycle-check / executor / effects / evaluator (US-066, decision 0022) | yes | yes | no | implemented | `lib/automation/*.test.ts` — 101 cases. `matcher.test.ts` (19): trigger↔config field mapping incl. `card-moved-to-list` destination/source lists. `resolver.test.ts` (13): dynamic-token expansion (`card-assignees`/`card-creator`/`all`/uuid) under workspace-isolation. `loop-guard.test.ts` (18): `ChainTracker` root/child, depth cap, per-chain `(ruleId,cardId)` dedup. `cycle-check.test.ts` (12): action→trigger `producedEvents` mapping + static cycle-warning detection. `executor.test.ts` (20): each action step's tx effect. `effects.test.ts` (7): deferred descriptor → `emit*` mapping. `evaluator.test.ts` (12): matching+logging, loop prevention, error semantics (whole-tx rollback + post-rollback error log), scheduled window gate, `dedupKey` claim-first mode. |
 | Automation scheduled pass — `due-date-approaching` two-tier dedup (US-066) | yes | yes | no | implemented | `tests/automation-scheduled.test.ts` (8): `maxApproachWindowMinutes`; `evaluateScheduledCard` Tier-1 (`RuleExecutionLog` `@@unique([ruleId, dedupKey])`, key `<cardId>:DUE_SOON`) + Tier-2 (`notify-member` dedup vs the built-in reminder's `CardReminder` milestone). Driven by the existing due-date cron route. |
 | Automation rule management Server Actions — admin-only boundary + reads (US-066, decision 0022 §4) | yes | partial | no | implemented | `tests/server-actions/automation-rules.test.ts` (34). `create`/`update`/`delete`/`toggleEnabled` gated admin-only (`organization:update`); `listRules`/`getRuleExecutionLog` readable by any workspace member; auth/permission/isolation matrix + positive controls, Zod validation. UI (`components/workspace/automation/`) has no automated coverage (no RTL). **Known discrepancy:** `deleteRuleAction` hard-deletes and `RuleExecutionLog` cascades (`onDelete: Cascade`), so deleting a rule removes its logs — contradicts the delete-confirm copy "Past execution-log entries are kept" and the log panel's dead "Deleted rule" fallback (flagged for resolution). |
-| Automation management UI (rule list, builder dialog, execution-log panel) | no | no | no | planned | `components/workspace/automation/*` — no component tests (standing no-RTL gap). |
+| Automation management UI (rule list, builder dialog, execution-log panel) | yes | no | no | implemented | `components/workspace/automation/rule-builder-dialog.test.tsx` (US-068, 5 cases, happy-dom): dialog open/close, add/remove action steps, name-required guard (no action call), valid submit → `createRuleAction` payload + `notify("Rule created")` + `router.refresh` + close, server-error surfaced without close (actions + `next/navigation` mocked). Rule-row (`rule-row.test.tsx`, US-068 wave 2, 16 cases) covers enable-toggle + delete-via-AlertDialog + `canManage` gating + last-run states. Rule-list container + execution-log panel still uncovered. |
 | Activity audit log | no | no | no | planned | `lib/activity.ts` untested |
-| All React components (board UI, card sheet, dashboards) | no | no | no | planned | no component tests configured |
+| React client components — RTL foundation + representative set (US-068) | yes | no | partial | implemented | RTL stood up on Vitest as a `components` project (happy-dom, `vitest.workspace.ts`). **155 tests across 14 client-component suites.** Each mocks its Server Actions + `next/navigation`; behavioral (accessible queries + `user-event`), no snapshots. Boards: `board-filter` (5, store-driven popover), `card-detail-sheet` (6, title autosave-on-blur + guards + read-only), `card-completion-toggle` (10, toggle→action, refresh-on-success-only, `onError`), `card-checklists-section` (24, add/toggle/delete item + progress + gating), `card-labels-section` (13, attach/detach→action + read-only chips), `card-attachments` (12, render/empty/`canEdit` gating — upload file-input not simulated). Automation: `rule-builder-dialog` (5), `rule-row` (16, enable-toggle + delete-via-AlertDialog + `canManage` + last-run), `automation-content` (11, list/empty/log composition), `execution-log-panel` (16, rows/empty/status/deleted-rule fallback), `board-automation-dialog` (7, open + lazy content). Members: `member-row` (15, role-change + remove + last-admin/self gating), `invite-member-dialog` (4, open + email guard + submit→`inviteMemberAction` + error). Notifications: `notification-dropdown` (11, closed/loading/list/empty + mark-read). E2E covers async Server Components (RTL cannot render them). Remaining uncovered: board content, `list-card-item`/`list-column` (need a `DragDropContext` wrapper), dashboard charts, comment composer — thin in those areas, but the interactive editor/dialog/row surface is now broadly covered. |
 
 ## Coverage Snapshot
 
@@ -84,9 +88,12 @@ Library; most React component internals remain unverified.
   action execution, deferred-effect emission, the evaluator's error/rollback and
   dedup semantics, the scheduled two-tier dedup, and the admin-only Server Action
   boundary (143 cases across `lib/automation/*` + `tests/automation-scheduled` +
-  `tests/server-actions/automation-rules`). The management UI is the untested gap.
+  `tests/server-actions/automation-rules`). The rule builder now has RTL coverage
+  (US-068); the rule-list + log panels remain untested.
 - **Largest gaps (highest risk first):** Server Action business logic, real-time
-  emitters, notifications, and every React component.
+  emitters, notifications, and most React components (RTL now exists with a
+  representative set — US-068 — but the bulk of the component tree is still
+  uncovered).
 
 ## Evidence Rules
 
