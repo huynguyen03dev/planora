@@ -133,7 +133,8 @@ export async function dragCardToNextList(page: Page, cardId: string): Promise<vo
 
 /**
  * Keyboard-reorder a LIST one slot to the left. Lists are a horizontal droppable
- * whose drag handle ("Drag list") carries the same `data-rfd-drag-handle-draggable-id`
+ * whose drag handle (the list header — US-069) carries the same
+ * `data-rfd-drag-handle-draggable-id`
  * attribute (= list.id) the card helpers use, so liftCard/moveLifted/dropCard are
  * reused verbatim — the keyboard sensor is draggable-type agnostic. Emits the
  * STRUCTURAL `list:moved`.
@@ -175,9 +176,16 @@ export async function archiveCard(page: Page, cardId: string): Promise<void> {
 
 // ── Card detail / rename ──────────────────────────────────────────────────
 
-/** Open a card's detail sheet by clicking its title button. */
+/**
+ * Open a card's detail sheet by clicking its body. US-069 made the whole card
+ * the open surface (the title is no longer its own button); the card exposes
+ * `role="button"` with the accessible name "Open card <title>".
+ */
 export async function openCardDetail(page: Page, title: string): Promise<void> {
-  await page.getByRole("button", { name: title, exact: true }).first().click();
+  await page
+    .getByRole("button", { name: `Open card ${title}`, exact: true })
+    .first()
+    .click();
   await expect(page.locator("#card-detail-title")).toBeVisible();
 }
 

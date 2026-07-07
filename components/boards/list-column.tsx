@@ -1,6 +1,6 @@
 "use client";
 
-import { DragDropVerticalIcon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
+import { MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo, useState, useTransition } from "react";
 import { Draggable, Droppable } from "@hello-pangea/dnd";
@@ -250,7 +250,26 @@ function ListColumnComponent({
               snapshot.isDragging && "shadow-md ring-2 ring-primary/30",
             )}
           >
-            <div className="flex shrink-0 items-center justify-between gap-2">
+            {/* Whole-header drag (US-069): the header bar IS the list drag
+                handle — no separate grip. We keep the Draggable's
+                `disableInteractiveElementBlocking` (above) so a drag can
+                start anywhere on the header *including over the title button*,
+                while a plain click still enters inline rename (dnd's movement
+                threshold disambiguates). `dragHandleProps` is null while editing
+                or when the user can't sort, so spreading it is safe. */}
+            <div
+              {...provided.dragHandleProps}
+              // dnd stamps role="button" on the handle; without an explicit
+              // label it would borrow the title text as its accessible name and
+              // collide with the title button. Name it for what it does.
+              aria-label={
+                provided.dragHandleProps ? `Reorder list ${list.title}` : undefined
+              }
+              className={cn(
+                "flex shrink-0 items-center justify-between gap-2",
+                canSortList && !editing && "cursor-grab active:cursor-grabbing",
+              )}
+            >
               {canEdit && editing ? (
                 <Input
                   value={draftTitle}
@@ -281,25 +300,6 @@ function ListColumnComponent({
               {(canEdit || canDelete) && (
                 <div ref={actionsMenuRef}>
                   <div className="flex items-center gap-1">
-                    {canSortList ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Drag list"
-                        className="cursor-grab text-muted-foreground hover:bg-foreground/10 hover:text-foreground active:cursor-grabbing"
-                        onPointerDown={handleActionsMenuPointerDown}
-                        {...provided.dragHandleProps}
-                      >
-                        <HugeiconsIcon
-                          icon={DragDropVerticalIcon}
-                          size={16}
-                          strokeWidth={2}
-                          className="text-current transition-colors"
-                        />
-                      </Button>
-                    ) : null}
-
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button

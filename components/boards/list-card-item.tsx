@@ -4,7 +4,6 @@ import {
   Calendar03Icon,
   CheckmarkSquare01Icon,
   Comment01Icon,
-  DragDropVerticalIcon,
   Flag01Icon,
   MoreHorizontalIcon,
 } from "@hugeicons/core-free-icons";
@@ -206,21 +205,45 @@ function ListCardItemComponent({
 
   return (
     <>
-      <Draggable
-        draggableId={card.id}
-        index={index}
-        isDragDisabled={!canDrag}
-        disableInteractiveElementBlocking
-      >
+      <Draggable draggableId={card.id} index={index} isDragDisabled={!canDrag}>
         {(provided, snapshot) => (
           <div
             ref={provided.innerRef}
             {...provided.draggableProps}
+            // Whole-card drag (US-069): the card body IS the drag handle — no
+            // separate grip. `dragHandleProps` is null when isDragDisabled, so
+            // spreading it is safe for viewers. We intentionally do NOT set
+            // `disableInteractiveElementBlocking`: default blocking keeps drags
+            // from starting on the nested controls (completion toggle, actions
+            // menu, label toggle) so those stay clickable, while the rest of the
+            // body initiates a drag.
+            {...provided.dragHandleProps}
+            role="button"
+            tabIndex={0}
+            aria-label={`Open card ${card.title}`}
+            onClick={() => onOpenCard(card.id)}
+            onKeyDown={(event) => {
+              // Only the card div itself opens on Enter — a keypress on a nested
+              // control (target !== currentTarget) must not also open the card.
+              // dnd's keyboard sensor (Space to lift, arrows to move) is bound
+              // globally, not via this handler, so Enter-to-open is additive and
+              // does not collide with Space-lift.
+              if (event.target !== event.currentTarget) {
+                return;
+              }
+              if (event.key === "Enter") {
+                event.preventDefault();
+                onOpenCard(card.id);
+              }
+            }}
             // mb-2 (not a parent flex `gap`) is the inter-card spacing: it's
             // part of the card's own box, so @hello-pangea/dnd's placeholder
             // reserves it during a drag and the column height doesn't shift on
             // lift/drop. See the sibling note in list-column.tsx.
-            className="mb-2"
+            className={cn(
+              "mb-2",
+              canDrag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
+            )}
             style={{
               ...provided.draggableProps.style,
               ...(hidden ? { display: "none" } : null),
@@ -265,7 +288,10 @@ function ListCardItemComponent({
                   // button only ever toggles.
                   <button
                     type="button"
-                    onClick={() => toggleExpandLabels()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleExpandLabels();
+                    }}
                     aria-label={
                       expandLabels
                         ? "Collapse labels to color bars"
@@ -286,48 +312,35 @@ function ListCardItemComponent({
 
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex min-w-0 flex-1 items-start gap-1.5">
-                    <CardCompletionToggle
-                      cardId={card.id}
-                      completedAt={card.completedAt}
-                      canEdit={canEdit}
-                      variant="face"
-                      onError={setError}
-                      className="mt-0.5"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => onOpenCard(card.id)}
-                      className="h-auto min-w-0 flex-1 justify-start whitespace-normal break-words p-0 text-left text-sm font-normal hover:bg-transparent"
+                    {/* stopPropagation: toggling completion must not also open
+                        the card (the whole body is the open surface now). */}
+                    <span
+                      className="mt-0.5 flex"
+                      onClick={(event) => event.stopPropagation()}
                     >
+                      <CardCompletionToggle
+                        cardId={card.id}
+                        completedAt={card.completedAt}
+                        canEdit={canEdit}
+                        variant="face"
+                        onError={setError}
+                      />
+                    </span>
+                    {/* Title is plain text (US-069): the whole card is the
+                        click/keyboard open + drag surface, so the title is no
+                        longer its own button. */}
+                    <span className="min-w-0 flex-1 whitespace-normal break-words text-sm font-normal">
                       {card.title}
-                    </Button>
+                    </span>
                   </div>
 
-                  {(canEdit || canArchive || canDrag) && (
-                    <div className="flex items-center gap-1">
-                      {canDrag ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label="Drag card"
-                          className="cursor-grab text-muted-foreground hover:bg-foreground/10 hover:text-foreground active:cursor-grabbing"
-                          {...provided.dragHandleProps}
-                        >
-                          <HugeiconsIcon
-                            icon={DragDropVerticalIcon}
-                            size={16}
-                            strokeWidth={2}
-                            className="text-current transition-colors"
-                          />
-                        </Button>
-                      ) : null}
-
-                      {(canEdit || canArchive) && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
+                  {(canEdit || canArchive) && (
+                    <div
+                      className="flex items-center gap-1"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
                             <Button
                               type="button"
                               variant="ghost"
@@ -357,7 +370,6 @@ function ListCardItemComponent({
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>
-                      )}
                     </div>
                   )}
                 </div>

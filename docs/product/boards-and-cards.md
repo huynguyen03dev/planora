@@ -107,6 +107,14 @@ normalizes positions on overflow. The neighbour math is pure and unit-tested in
 
 - Implemented with `@hello-pangea/dnd`; both lists and cards are draggable,
   within and across lists.
+- The drag handle is the surface itself, Trello-style (US-069): a **card** drags
+  from anywhere on its body (its interactive controls — completion toggle,
+  actions menu, label toggle — stop propagation so they still click), and the
+  card body doubles as the open affordance (click / focus + Enter opens the
+  detail sheet; there is no title button). A **list** drags from its header bar,
+  while clicking the title still enters inline rename (the movement threshold
+  disambiguates). Both handles carry the keyboard drag entry point (focus +
+  Space to lift). There are no separate grip-icon buttons.
 - The drop produces an optimistic local update, then a `reorder*`/`moveCard`
   Server Action persists the new position and emits a socket event.
 - Remote structural events are **deferred during an active drag** and resynced
