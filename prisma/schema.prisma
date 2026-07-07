@@ -167,6 +167,7 @@ model Workspace {
   activities           Activity[]
   cardHistoryEvents    CardHistoryEvent[]
   rules                Rule[]
+  ruleExecutionLogs    RuleExecutionLog[]
 
   @@unique([slug])
   @@map("workspace")
@@ -474,7 +475,12 @@ model Rule {
 
 model RuleExecutionLog {
   id          String   @id @default(uuid())
-  ruleId      String
+  // Denormalized workspace + rule name so the audit row survives rule deletion
+  // (the CardHistoryEvent survival pattern). ruleId goes null on delete but the
+  // workspace scope and the human-readable name remain for the log panel.
+  workspaceId String
+  ruleId      String?
+  ruleName    String
   chainId     String?
   chainDepth  Int      @default(0)
   cardId      String?
@@ -486,9 +492,11 @@ model RuleExecutionLog {
   metadata    Json?
   executedAt  DateTime @default(now())
 
-  rule Rule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  rule      Rule?     @relation(fields: [ruleId], references: [id], onDelete: SetNull)
 
   @@unique([ruleId, dedupKey])
+  @@index([workspaceId, executedAt])
   @@index([ruleId, executedAt])
   @@index([cardId])
   @@index([chainId])

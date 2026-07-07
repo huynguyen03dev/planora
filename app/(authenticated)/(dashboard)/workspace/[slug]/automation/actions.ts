@@ -7,6 +7,7 @@ import db from "@/lib/prisma";
 import { verifySession } from "@/lib/dal";
 import { hasWorkspacePermission, isWorkspaceMember } from "@/lib/authorization";
 import { getBoardById } from "@/lib/board";
+import { loadAutomationView, type AutomationView } from "@/lib/automation/view";
 import {
   createRuleSchema,
   updateRuleSchema,
@@ -14,6 +15,7 @@ import {
   toggleRuleEnabledSchema,
   listRulesSchema,
   ruleExecutionLogSchema,
+  boardAutomationDataSchema,
   dryRunRulesSchema,
   type ActionStep,
 } from "@/lib/schemas/automation";
@@ -31,6 +33,7 @@ const RULE_POSITION_GAP = 1024;
 // to a caller who cannot manage it (mirrors the members actions).
 const WORKSPACE_NOT_FOUND = "Workspace not found";
 const RULE_NOT_FOUND = "Rule not found";
+const BOARD_NOT_FOUND = "Board not found";
 
 // ─── Result types ──────────────────────────────────────────────────
 
@@ -52,8 +55,10 @@ export type SerializedRule = {
 
 export type SerializedRuleLog = {
   id: string;
-  ruleId: string;
-  ruleName: string | null;
+  // null once the rule is deleted (log survives via SetNull); ruleName is
+  // denormalized so the entry still displays the rule's name.
+  ruleId: string | null;
+  ruleName: string;
   chainId: string | null;
   chainDepth: number;
   cardId: string | null;
@@ -88,6 +93,14 @@ type RuleLogResult =
 
 type DryRunResult =
   | { success: true; matches: Array<{ ruleId: string; name: string }> }
+  | { success: false; error: string };
+
+// US-067: the board-level automation modal's lazy read. `workspaceId` is the
+// board's derived workspace (the modal needs it for create-rule + log refresh);
+// `canManage` gates the mutation affordances client-side, and the mutation
+// actions re-enforce it anyway.
+type BoardAutomationDataResult =
+  | ({ success: true; workspaceId: string; canManage: boolean } & AutomationView)
   | { success: false; error: string };
 
 // ─── Helpers ───────────────────────────────────────────────────────
@@ -434,14 +447,15 @@ export async function getRuleExecutionLogAction(input: unknown): Promise<RuleLog
   }
 
   const logs = await db.ruleExecutionLog.findMany({
-    // Scope by the parent rule's workspace — logs carry no workspaceId of their
-    // own, so the workspace filter must ride the relation (isolation).
-    where: { rule: { workspaceId }, ...(ruleId ? { ruleId } : {}) },
+    // Logs carry a denormalized workspaceId, so they stay scoped (and visible)
+    // even after their rule is deleted — the rule link goes null, the log stays.
+    where: { workspaceId, ...(ruleId ? { ruleId } : {}) },
     orderBy: { executedAt: "desc" },
     take: 100,
     select: {
       id: true,
       ruleId: true,
+      ruleName: true,
       chainId: true,
       chainDepth: true,
       cardId: true,
@@ -450,7 +464,6 @@ export async function getRuleExecutionLogAction(input: unknown): Promise<RuleLog
       status: true,
       error: true,
       executedAt: true,
-      rule: { select: { name: true } },
     },
   });
 
@@ -459,7 +472,7 @@ export async function getRuleExecutionLogAction(input: unknown): Promise<RuleLog
     logs: logs.map((log) => ({
       id: log.id,
       ruleId: log.ruleId,
-      ruleName: log.rule?.name ?? null,
+      ruleName: log.ruleName,
       chainId: log.chainId,
       chainDepth: log.chainDepth,
       cardId: log.cardId,
@@ -470,6 +483,47 @@ export async function getRuleExecutionLogAction(input: unknown): Promise<RuleLog
       executedAt: log.executedAt.toISOString(),
     })),
   };
+}
+
+// ─── getBoardAutomationDataAction (any workspace member; no mutation) ──
+
+/**
+ * Lazily loads the automation surface for one board (US-067). Called when the
+ * board-level Automation modal opens, so a board that never touches automation
+ * adds zero queries to its page load. The workspace is derived from the board —
+ * never trusted from the client — and re-gated for membership; the returned
+ * `rules` are those that fire on this board (`boardId ∈ {board, null}`), with
+ * the execution log scoped to those rules. Denials use the not-found posture.
+ */
+export async function getBoardAutomationDataAction(
+  input: unknown,
+): Promise<BoardAutomationDataResult> {
+  const { userId } = await verifySession();
+
+  const parsed = boardAutomationDataSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: BOARD_NOT_FOUND };
+  }
+
+  const { boardId } = parsed.data;
+
+  const board = await getBoardById(boardId);
+  if (!board) {
+    return { success: false, error: BOARD_NOT_FOUND };
+  }
+
+  // Membership is the read gate (mirrors the workspace automation page); a
+  // non-member gets the same not-found posture as a missing board.
+  if (!(await isWorkspaceMember(userId, board.workspaceId))) {
+    return { success: false, error: BOARD_NOT_FOUND };
+  }
+
+  const [canManage, view] = await Promise.all([
+    canManageRules(board.workspaceId),
+    loadAutomationView(board.workspaceId, { boardId }),
+  ]);
+
+  return { success: true, workspaceId: board.workspaceId, canManage, ...view };
 }
 
 // ─── dryRunRulesAction (any workspace member; no mutation) ─────────

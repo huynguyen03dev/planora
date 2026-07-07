@@ -15,8 +15,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { roleGrants, expectNoWrites, type Role } from "./_harness";
 
-const WS_A = "11111111-1111-4111-8111-111111111111";
-const WS_B = "22222222-2222-4222-8222-222222222222";
+// Workspace ids are Better Auth organization ids: 32-char alphanumeric
+// nanoids, NOT UUIDs. Using realistic ids here guards the schema against the
+// real ID shape (UUID fixtures previously masked a uuid()-only validator bug).
+const WS_A = "A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6";
+const WS_B = "Z9Y8X7W6V5U4T3S2R1Q0P9O8N7M6L5K4";
 const RULE_A = "33333333-3333-4333-8333-333333333333";
 const BOARD_A = "44444444-4444-4444-8444-444444444444";
 const BOARD_B = "55555555-5555-4555-8555-555555555555";
@@ -44,6 +47,12 @@ const h = vi.hoisted(() => {
       }),
     ),
     getBoardById: vi.fn(),
+    loadAutomationView: vi.fn(async () => ({
+      options: { boards: [], lists: [], labels: [], members: [] },
+      rules: [],
+      logs: [],
+      lastRunByRule: {},
+    })),
     db: {
       rule: {
         findUnique: vi.fn(async () => null as unknown),
@@ -76,6 +85,7 @@ vi.mock("@/lib/dal", () => ({ verifySession: h.verifySession }));
 vi.mock("@/lib/auth", () => ({ auth: { api: { hasPermission: h.hasPermission } } }));
 vi.mock("@/lib/prisma", () => ({ default: h.db, db: h.db }));
 vi.mock("@/lib/board", () => ({ getBoardById: h.getBoardById }));
+vi.mock("@/lib/automation/view", () => ({ loadAutomationView: h.loadAutomationView }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/headers", () => ({ headers: vi.fn(async () => new Headers()) }));
 
@@ -91,6 +101,7 @@ import {
   toggleRuleEnabledAction,
   listRulesAction,
   getRuleExecutionLogAction,
+  getBoardAutomationDataAction,
   dryRunRulesAction,
 } from "@/app/(authenticated)/(dashboard)/workspace/[slug]/automation/actions";
 
@@ -459,13 +470,14 @@ describe("getRuleExecutionLogAction (any workspace member)", () => {
     expect(r).toEqual({ success: false, error: "Workspace not found" });
   });
 
-  it("member allowed; logs scoped to the workspace via the rule relation", async () => {
+  it("member allowed; logs scoped to the workspace by denormalized workspaceId", async () => {
     signInAs("u", WS_A, "viewer");
     const at = new Date("2026-07-06T01:00:00Z");
     h.db.ruleExecutionLog.findMany.mockResolvedValue([
       {
         id: "log-1",
         ruleId: RULE_A,
+        ruleName: "R",
         chainId: null,
         chainDepth: 0,
         cardId: null,
@@ -474,7 +486,6 @@ describe("getRuleExecutionLogAction (any workspace member)", () => {
         status: "success",
         error: null,
         executedAt: at,
-        rule: { name: "R" },
       },
     ]);
     const r = await getRuleExecutionLogAction({ workspaceId: WS_A });
@@ -483,8 +494,88 @@ describe("getRuleExecutionLogAction (any workspace member)", () => {
       expect(r.logs[0]).toMatchObject({ id: "log-1", ruleName: "R", executedAt: at.toISOString() });
     }
     expect(h.db.ruleExecutionLog.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ rule: { workspaceId: WS_A } }) }),
+      expect.objectContaining({ where: expect.objectContaining({ workspaceId: WS_A }) }),
     );
+  });
+
+  it("orphaned log (rule deleted → ruleId null) still returns with its denormalized ruleName", async () => {
+    signInAs("u", WS_A, "viewer");
+    const at = new Date("2026-07-06T01:00:00Z");
+    h.db.ruleExecutionLog.findMany.mockResolvedValue([
+      {
+        id: "log-orphan",
+        ruleId: null,
+        ruleName: "Deleted but remembered",
+        chainId: null,
+        chainDepth: 0,
+        cardId: null,
+        actionType: "sequence",
+        triggerType: "card-created",
+        status: "success",
+        error: null,
+        executedAt: at,
+      },
+    ]);
+    const r = await getRuleExecutionLogAction({ workspaceId: WS_A });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.logs[0]).toMatchObject({
+        id: "log-orphan",
+        ruleId: null,
+        ruleName: "Deleted but remembered",
+      });
+    }
+  });
+});
+
+/* ─── getBoardAutomationDataAction (any member; US-067) ─────────────── */
+
+describe("getBoardAutomationDataAction (board-level modal read)", () => {
+  it("A1 auth: signed out → throws, view never loaded", async () => {
+    signOut();
+    await expect(getBoardAutomationDataAction({ boardId: BOARD_A })).rejects.toThrow();
+    expect(h.loadAutomationView).not.toHaveBeenCalled();
+  });
+
+  it("validation: a malformed board id → Board not found, board never resolved", async () => {
+    signInAs("u", WS_A, "admin");
+    const r = await getBoardAutomationDataAction({ boardId: "not-a-uuid" });
+    expect(r).toEqual({ success: false, error: "Board not found" });
+    expect(h.getBoardById).not.toHaveBeenCalled();
+    expect(h.loadAutomationView).not.toHaveBeenCalled();
+  });
+
+  it("not found: unknown board → Board not found, membership never checked", async () => {
+    signInAs("u", WS_A, "admin");
+    h.getBoardById.mockResolvedValue(null);
+    const r = await getBoardAutomationDataAction({ boardId: BOARD_A });
+    expect(r).toEqual({ success: false, error: "Board not found" });
+    expect(h.loadAutomationView).not.toHaveBeenCalled();
+  });
+
+  it("A3 isolation: a non-member of the board's workspace is denied (not-found posture)", async () => {
+    signInBare("u"); // authed, but member of no workspace
+    h.getBoardById.mockResolvedValue({ id: BOARD_A, workspaceId: WS_A, archivedAt: null });
+    const r = await getBoardAutomationDataAction({ boardId: BOARD_A });
+    expect(r).toEqual({ success: false, error: "Board not found" });
+    expect(h.loadAutomationView).not.toHaveBeenCalled();
+  });
+
+  it("member (viewer): allowed to read, canManage=false, view scoped to the board", async () => {
+    signInAs("u", WS_A, "viewer");
+    h.getBoardById.mockResolvedValue({ id: BOARD_A, workspaceId: WS_A, archivedAt: null });
+    const r = await getBoardAutomationDataAction({ boardId: BOARD_A });
+    expect(r).toMatchObject({ success: true, workspaceId: WS_A, canManage: false });
+    // Workspace derived from the board (never trusted from the client), and the
+    // view is board-scoped so it returns board-applicable rules only.
+    expect(h.loadAutomationView).toHaveBeenCalledWith(WS_A, { boardId: BOARD_A });
+  });
+
+  it("admin: canManage=true (mutation affordances enabled)", async () => {
+    signInAs("u", WS_A, "admin");
+    h.getBoardById.mockResolvedValue({ id: BOARD_A, workspaceId: WS_A, archivedAt: null });
+    const r = await getBoardAutomationDataAction({ boardId: BOARD_A });
+    expect(r).toMatchObject({ success: true, canManage: true });
   });
 });
 

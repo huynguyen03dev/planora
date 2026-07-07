@@ -13,6 +13,10 @@
 # testing
 /coverage
 
+# QA artifacts (manual browser QA + Playwright screenshots)
+/.qa-shots/
+/e2e/.qa-artifacts/
+
 # next.js
 /.next/
 /out/

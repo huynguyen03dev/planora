@@ -46,28 +46,97 @@ npx vitest run lib/automation/matcher.test.ts
 # Loop guard unit tests:
 npx vitest run lib/automation/loop-guard.test.ts
 
-# Dry-run unit tests:
-npx vitest run lib/automation/dry-run.test.ts
+# Dynamic-target resolver (0022 R2):
+npx vitest run lib/automation/resolver.test.ts
+
+# Save-time static cycle-warning detection:
+npx vitest run lib/automation/cycle-check.test.ts
 
 # Executor integration tests (mocked Prisma; action execution, chain
 # termination, idempotency, transaction boundary):
 npx vitest run lib/automation/executor.test.ts
 
-# Evaluator + hook integration tests:
+# Deferred-effect descriptor → emitter mapping (post-commit):
+npx vitest run lib/automation/effects.test.ts
+
+# Evaluator: matching, logging, loop prevention, error semantics,
+# scheduled window gate, dedupKey claim-first mode (dry-run covered here + below):
 npx vitest run lib/automation/evaluator.test.ts
 
-# Rule CRUD + RBAC sabotage + workspace isolation:
+# Rule CRUD + RBAC sabotage + workspace isolation + dry-run:
 npx vitest run tests/server-actions/automation-rules.test.ts
 
-# Cron handler extension + scheduled trigger:
-npx vitest run lib/automation/cron.test.ts
+# Scheduled due-date-approaching pass + two-tier dedup (drives via the cron route):
+npx vitest run tests/automation-scheduled.test.ts
 
 # Full gate (all tests):
 npm test
 ```
 
+> Note: the test layout landed differently from the original plan — dry-run is
+> proven inside `evaluator.test.ts` + `automation-rules.test.ts` (no separate
+> `dry-run.test.ts`); the scheduled trigger is `tests/automation-scheduled.test.ts`
+> (not `lib/automation/cron.test.ts`); and `resolver`/`cycle-check`/`effects` are
+> their own files. Coverage came in far above the ~52-case plan (see below).
+
 ## Acceptance Evidence
 
-Add test results (pass counts from each test file) after verification, with
-screenshots of the automation page (rule list, rule builder dialog, execution
-log panel). Link decision 0022.
+Verified 2026-07-07 on branch `feat/us-066-automation-rules-engine` (Phase 11).
+
+### Gates (full suite)
+
+| Gate | Result |
+| --- | --- |
+| `tsc --noEmit` | **0 errors** |
+| `eslint` | **0 errors in real source** (2 unused-var *warnings* in `effects.test.ts` / `evaluator.test.ts`; the 53 errors eslint reported are all generated `.next/` artifacts inside an unrelated sibling worktree `.claude/worktrees/unify-invitations-into-bell/` — not US-066, not seen by CI's clean checkout) |
+| `npm test` | **821 / 821 passed** (40 files) |
+| `npm run build` | **success** — route manifest includes `ƒ /workspace/[slug]/automation` |
+
+### Automation coverage (143 automated cases)
+
+| File | Cases | Layer |
+| --- | --- | --- |
+| `lib/automation/matcher.test.ts` | 19 | unit — trigger↔config field mapping incl. move destination/source |
+| `lib/automation/resolver.test.ts` | 13 | unit — dynamic-token expansion under workspace isolation (0022 R2) |
+| `lib/automation/loop-guard.test.ts` | 18 | unit — `ChainTracker` root/child, depth cap 5, `(ruleId,cardId)` dedup |
+| `lib/automation/cycle-check.test.ts` | 12 | unit — action→trigger mapping + static cycle-warning detection |
+| `lib/automation/executor.test.ts` | 20 | integration — each action step's tx effect |
+| `lib/automation/effects.test.ts` | 7 | integration — deferred descriptor → `emit*` mapping (best-effort) |
+| `lib/automation/evaluator.test.ts` | 12 | integration — match/log, loop prevention, error rollback, scheduled gate, dedupKey claim-first |
+| `tests/automation-scheduled.test.ts` | 8 | integration — `due-date-approaching` two-tier dedup |
+| `tests/server-actions/automation-rules.test.ts` | 34 | integration — admin-only CRUD/toggle + member-read list/log + dry-run + isolation |
+| **Total** | **143** | (far above the ~52-case plan) |
+
+### Decision 0022 conformance
+
+All 16 design clauses (§1–7 + R1/R2/R3) audited **IMPLEMENTED, 0 diverged, 0
+missing**, each backed by file:line evidence. Independent spot-checks confirmed
+the load-bearing ones: `evaluateRules({ client: tx })` runs inside the trigger
+transaction (5 call sites in `boards/[boardId]/actions.ts`); the `status:"error"`
+`RuleExecutionLog` row is written via the **top-level `db`** (`effects.ts:101`),
+so it survives rollback; system-actor attribution via `AUTOMATION_ACTOR_USER_ID`
+(`evaluator.ts:82`); socket effects reuse existing `emit*` helpers (no new event
+types). See decision `docs/decisions/0022-automation-rules-engine.md`.
+
+### Outstanding for full acceptance
+
+- **Platform / manual browser QA — NOT yet done.** The validation plan calls for
+  UI QA + screenshots (create/toggle/edit/delete a rule, execution-log entries
+  after a trigger fires, `notify-member` producing an in-app notification,
+  dry-run, light/dark). The engine is proven; the React management UI
+  (`components/workspace/automation/`) has **no** automated coverage (standing
+  no-RTL gap) and no manual QA recorded. This is the one open acceptance item.
+- **~~Known discrepancy (tracked)~~ — RESOLVED 2026-07-07 (keep-logs).** The
+  delete-confirm copy already promised "Past execution-log entries are kept" and
+  the log panel already had a "Deleted rule" fallback, so retention was the
+  intended design and the cascade was the bug. Fixed by denormalizing
+  `workspaceId` + `ruleName` onto `RuleExecutionLog` (the `CardHistoryEvent`
+  survival pattern) and switching the rule FK from `onDelete: Cascade` to
+  `onDelete: SetNull` with a nullable `ruleId`
+  (migration `20260707021956_automation_logs_survive_rule_deletion`, backfilled
+  from the rule join so `migrate deploy` is safe on populated data). All three
+  log-write sites now persist the denormalized columns; the read query + page
+  loader scope by the log's own `workspaceId` (so orphaned logs stay visible).
+  Proof: `evaluator.test.ts` asserts the write-path denormalization;
+  `automation-rules.test.ts` adds an orphaned-log (`ruleId: null`) retrieval
+  test. Gates green (tsc 0, eslint 0 errors, 822/822).

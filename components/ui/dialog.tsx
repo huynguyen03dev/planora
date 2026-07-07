@@ -36,8 +36,12 @@ function DialogOverlay({
   return (
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
+      // customized: restore shadcn's enter/exit animation classes (they were
+      // stripped in this repo's copy, so every dialog snapped open with no
+      // transition). tw-animate-css (globals.css) supplies these utilities.
       className={cn(
         "fixed inset-0 z-50 bg-black/50",
+        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0",
         className,
       )}
       {...props}
@@ -55,8 +59,12 @@ function DialogContent({
       <DialogOverlay />
       <DialogPrimitive.Content
         data-slot="dialog-content"
+        // customized: restore shadcn's enter/exit fade+zoom (stripped in this
+        // repo's copy). duration-200 keeps it snappy; the fixed centering
+        // translate composes with the zoom keyframes.
         className={cn(
           "fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-6 shadow-lg",
+          "duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95",
           className,
         )}
         {...props}

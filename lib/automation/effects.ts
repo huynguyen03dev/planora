@@ -100,7 +100,9 @@ export async function logRuleExecutionError(error: RuleExecutionError): Promise<
   try {
     await db.ruleExecutionLog.create({
       data: {
+        workspaceId: context.workspaceId,
         ruleId: context.ruleId,
+        ruleName: context.ruleName,
         chainId: context.chainId,
         chainDepth: context.chainDepth,
         cardId: context.cardId,

@@ -176,6 +176,7 @@ describe("evaluateScheduledCard — Tier 1 + Tier 2 dedup", () => {
   it("evaluateRules throws RuleExecutionError → logRuleExecutionError called, errors increments", async () => {
     const { RuleExecutionError } = await import("@/lib/automation/evaluator");
     const ruleError = new RuleExecutionError("rule failed", {
+      workspaceId: "ws-1",
       ruleId: "r1",
       ruleName: "Rule 1",
       chainId: "chain-1",

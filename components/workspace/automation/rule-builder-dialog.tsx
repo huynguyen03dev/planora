@@ -21,7 +21,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -84,6 +83,12 @@ type RuleBuilderDialogProps = {
   trigger: ReactNode;
   initialRule?: EditableRule;
   notify: NotifyFn;
+  // Preset the new-rule board scope (board-level modal, US-067). Ignored when
+  // editing — an existing rule keeps its own scope.
+  defaultBoardId?: string;
+  // Called after a successful create/update in addition to router.refresh(),
+  // so a lazily-loaded host (the board modal) can re-fetch its own data.
+  onMutated?: () => void | Promise<void>;
 };
 
 function emptyConfig(): ConfigDraft {
@@ -131,12 +136,12 @@ function draftFromRule(rule: EditableRule): Draft {
   };
 }
 
-function freshDraft(options: AutomationOptions): Draft {
+function freshDraft(options: AutomationOptions, defaultBoardId?: string): Draft {
   return {
     name: "",
     description: "",
     enabled: true,
-    boardId: "",
+    boardId: defaultBoardId ?? "",
     triggerType: "card-created",
     config: emptyConfig(),
     actions: [defaultStep("set-priority", options)],
@@ -149,11 +154,13 @@ export function RuleBuilderDialog({
   trigger,
   initialRule,
   notify,
+  defaultBoardId,
+  onMutated,
 }: RuleBuilderDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Draft>(() =>
-    initialRule ? draftFromRule(initialRule) : freshDraft(options),
+    initialRule ? draftFromRule(initialRule) : freshDraft(options, defaultBoardId),
   );
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
@@ -176,7 +183,7 @@ export function RuleBuilderDialog({
   }, [options, draft.boardId]);
 
   function resetDraft() {
-    setDraft(initialRule ? draftFromRule(initialRule) : freshDraft(options));
+    setDraft(initialRule ? draftFromRule(initialRule) : freshDraft(options, defaultBoardId));
     setError("");
   }
 
@@ -338,6 +345,7 @@ export function RuleBuilderDialog({
       const warnings = result.warnings ?? [];
       setOpen(false);
       router.refresh();
+      onMutated?.();
       if (warnings.length > 0) {
         notify(warnings.join("  •  "), "warning");
       } else {
@@ -368,7 +376,11 @@ export function RuleBuilderDialog({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col gap-4">
-          <ScrollArea className="min-h-0 flex-1 pr-4">
+          {/* Native flex scroll container: a flex-1 min-h-0 item with
+              overflow-y-auto clips reliably, unlike radix ScrollArea's
+              percentage-height viewport, which failed to constrain here and let
+              the form tail overflow onto the footer (US-066 browser QA). */}
+          <div className="min-h-0 flex-1 overflow-y-auto pr-4">
             <div className="space-y-5">
               {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
@@ -578,7 +590,7 @@ export function RuleBuilderDialog({
                 />
               </div>
             </div>
-          </ScrollArea>
+          </div>
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={isPending}>

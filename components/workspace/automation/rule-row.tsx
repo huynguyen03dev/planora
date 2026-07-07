@@ -37,6 +37,9 @@ type RuleRowProps = {
   canManage: boolean;
   lastRun: { status: string; executedAt: string } | null;
   notify: NotifyFn;
+  // Called after a successful toggle/edit/delete in addition to router.refresh(),
+  // so a lazily-loaded host (the board modal) can re-fetch its own data.
+  onMutated?: () => void | Promise<void>;
 };
 
 const STATUS_TONE: Record<string, string> = {
@@ -54,6 +57,7 @@ export function RuleRow({
   canManage,
   lastRun,
   notify,
+  onMutated,
 }: RuleRowProps) {
   const router = useRouter();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -72,6 +76,7 @@ export function RuleRow({
         notify(result.error, "error");
       }
       router.refresh();
+      onMutated?.();
     });
   }
 
@@ -85,6 +90,7 @@ export function RuleRow({
       setConfirmOpen(false);
       notify("Rule deleted", "info");
       router.refresh();
+      onMutated?.();
     });
   }
 
@@ -139,6 +145,7 @@ export function RuleRow({
               options={options}
               initialRule={rule}
               notify={notify}
+              onMutated={onMutated}
               trigger={
                 <Button variant="ghost" size="icon" aria-label={`Edit ${rule.name}`}>
                   <HugeiconsIcon icon={PencilEdit01Icon} className="size-4" />

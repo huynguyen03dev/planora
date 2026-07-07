@@ -1,6 +1,18 @@
 // lib/schemas/automation.ts
 import { z } from "zod";
 
+import { workspaceIdSchema } from "./invitation";
+
+// Better Auth generates 32-char alphanumeric IDs (nanoid-style), not UUIDs, so
+// user ids are bounded by length rather than parsed as a UUID. The action
+// resolves the id to a workspace member within scope, which is the real
+// isolation check — this is defense-in-depth against malformed input.
+const userIdSchema = z
+  .string({ message: "Member is required" })
+  .trim()
+  .min(1, "Member is required")
+  .max(255);
+
 // ─── Trigger types ────────────────────────────────────────────────
 
 export const TRIGGER_TYPES = [
@@ -37,12 +49,12 @@ export type TriggerConfig = z.infer<typeof triggerConfigSchema>;
 const recipientTokenSchema = z.union([
   z.literal("card-assignees"),
   z.literal("card-creator"),
-  z.string().uuid("Invalid user ID"),
+  userIdSchema,
 ]);
 
 const removeScopeSchema = z.union([
   z.literal("all"),
-  z.string().uuid("Invalid user ID"),
+  userIdSchema,
 ]);
 
 // ─── Action steps (discriminated union on `type`) ──────────────────
@@ -134,7 +146,7 @@ const baseRuleFields = {
 
 export const createRuleSchema = z.object({
   ...baseRuleFields,
-  workspaceId: z.string().uuid("Invalid workspace ID"),
+  workspaceId: workspaceIdSchema,
 });
 
 export type CreateRuleInput = z.infer<typeof createRuleSchema>;
@@ -162,17 +174,25 @@ export const toggleRuleEnabledSchema = z.object({
 export type ToggleRuleEnabledInput = z.infer<typeof toggleRuleEnabledSchema>;
 
 export const listRulesSchema = z.object({
-  workspaceId: z.string().uuid("Invalid workspace ID"),
+  workspaceId: workspaceIdSchema,
 });
 
 export type ListRulesInput = z.infer<typeof listRulesSchema>;
 
 export const ruleExecutionLogSchema = z.object({
-  workspaceId: z.string().uuid("Invalid workspace ID"),
+  workspaceId: workspaceIdSchema,
   ruleId: z.string().uuid("Invalid rule ID").optional(),
 });
 
 export type RuleExecutionLogInput = z.infer<typeof ruleExecutionLogSchema>;
+
+// Board-scoped automation view (US-067): the board id is the only input; the
+// action derives the workspace from it and re-gates membership server-side.
+export const boardAutomationDataSchema = z.object({
+  boardId: z.string().uuid("Invalid board ID"),
+});
+
+export type BoardAutomationDataInput = z.infer<typeof boardAutomationDataSchema>;
 
 // ─── Dry-run input ─────────────────────────────────────────────────
 // Mirrors the RuleEventPayload fields a user can plausibly supply to preview
@@ -190,7 +210,7 @@ export const dryRunEventSchema = z.object({
 });
 
 export const dryRunRulesSchema = z.object({
-  workspaceId: z.string().uuid("Invalid workspace ID"),
+  workspaceId: workspaceIdSchema,
   triggerType: triggerTypeSchema,
   event: dryRunEventSchema,
 });

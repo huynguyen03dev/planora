@@ -79,7 +79,16 @@ describe("evaluateRules — matching + logging", () => {
     expect(mockExecute).toHaveBeenCalledTimes(1);
     expect(result.effects).toHaveLength(1);
     expect(logCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ status: "success", ruleId: "ruleA" }) }),
+      expect.objectContaining({
+        // workspaceId + ruleName are denormalized onto the log so it survives
+        // rule deletion (SetNull) with a usable workspace scope + display name.
+        data: expect.objectContaining({
+          status: "success",
+          ruleId: "ruleA",
+          ruleName: "Rule A",
+          workspaceId: "ws",
+        }),
+      }),
     );
   });
 

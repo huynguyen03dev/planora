@@ -23,6 +23,7 @@ type ExecutionStatus = "success" | "skipped" | "error" | "halted";
  */
 export class RuleExecutionError extends Error {
   readonly context: {
+    workspaceId: string;
     ruleId: string;
     ruleName: string;
     chainId: string;
@@ -126,6 +127,7 @@ export async function evaluateRules(
     // --- loop guards ---
     if (cardId && chain.hasFired(rule.id, cardId)) {
       await logExecution(client, {
+        workspaceId,
         rule,
         chain,
         cardId,
@@ -137,6 +139,7 @@ export async function evaluateRules(
     }
     if (chain.atDepthCap()) {
       await logExecution(client, {
+        workspaceId,
         rule,
         chain,
         cardId,
@@ -151,6 +154,7 @@ export async function evaluateRules(
     const parsedActions = actionsSchema.safeParse(rule.actions);
     if (!parsedActions.success) {
       await logExecution(client, {
+        workspaceId,
         rule,
         chain,
         cardId,
@@ -173,7 +177,9 @@ export async function evaluateRules(
       try {
         await client.ruleExecutionLog.create({
           data: {
+            workspaceId,
             ruleId: rule.id,
+            ruleName: rule.name,
             chainId: chain.chainId,
             chainDepth: chain.depth,
             cardId,
@@ -208,6 +214,7 @@ export async function evaluateRules(
       // Only write a post-execute success row when NOT in claim-first mode.
       if (!dedupKey) {
         await logExecution(client, {
+          workspaceId,
           rule,
           chain,
           cardId,
@@ -240,6 +247,7 @@ export async function evaluateRules(
         throw cause;
       }
       throw new RuleExecutionError(`automation rule "${rule.name}" failed`, {
+        workspaceId,
         ruleId: rule.id,
         ruleName: rule.name,
         chainId: chain.chainId,
@@ -257,7 +265,8 @@ export async function evaluateRules(
 async function logExecution(
   client: Client,
   args: {
-    rule: { id: string };
+    workspaceId: string;
+    rule: { id: string; name: string };
     chain: ChainTracker;
     cardId: string | null;
     triggerType: TriggerType;
@@ -267,7 +276,9 @@ async function logExecution(
 ): Promise<void> {
   await client.ruleExecutionLog.create({
     data: {
+      workspaceId: args.workspaceId,
       ruleId: args.rule.id,
+      ruleName: args.rule.name,
       chainId: args.chain.chainId,
       chainDepth: args.chain.depth,
       cardId: args.cardId,

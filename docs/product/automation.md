@@ -2,10 +2,16 @@
 
 Butler-style automation rules: when something happens on a card (**trigger**),
 run an ordered sequence of card actions (**actions**). Rules are managed per
-workspace at `/workspace/[slug]/automation`; evaluation lives in
-`lib/automation/`, gated by decision 0022. Rule-driven mutations go through the
-same Server Action → Prisma → history → realtime path as human edits, attributed
-to a seeded system user so analytics can tell them apart.
+workspace at `/workspace/[slug]/automation` (the cross-board manager) and
+per board via the **Automation** button in the board header, which opens a modal
+scoped to that board (rules that fire on it — `boardId ∈ {board, null}`). Both
+surfaces render the same `AutomationContent`, fed by `loadAutomationView`
+(`lib/automation/view.ts`); the board modal fetches lazily on open through
+`getBoardAutomationDataAction`, so a board that never touches automation adds no
+queries to its page load. Evaluation lives in `lib/automation/`, gated by
+decision 0022. Rule-driven mutations go through the same Server Action → Prisma
+→ history → realtime path as human edits, attributed to a seeded system user so
+analytics can tell them apart.
 
 ## Model
 
@@ -17,9 +23,12 @@ with their workspace, and a board-scoped rule cascades with its board.
 
 Every evaluation writes `RuleExecutionLog` rows (one per action step) with
 `status`, `chainId`, `chainDepth`, optional `error`, `dedupKey`, and
-`metadata` — the audit trail behind the execution-log panel. Log rows **cascade
-with their rule** (`onDelete: Cascade`), so deleting a rule also removes its
-execution history.
+`metadata` — the audit trail behind the execution-log panel. Log rows **survive
+their rule's deletion**: the rule FK is `onDelete: SetNull` (so `ruleId` goes
+null), and `workspaceId` + `ruleName` are denormalized onto the row (the
+`CardHistoryEvent` survival pattern) so the entry stays workspace-scoped and
+keeps showing the rule's name after deletion. Logs still cascade with their
+**workspace**.
 
 ## Triggers
 
@@ -155,15 +164,19 @@ settings (decision 0022 §4).
 Mutations and reads live in
 `app/(authenticated)/(dashboard)/workspace/[slug]/automation/actions.ts`:
 `createRuleAction`, `updateRuleAction`, `deleteRuleAction`,
-`toggleRuleEnabledAction`, `listRulesAction`, `getRuleExecutionLogAction`, and
+`toggleRuleEnabledAction`, `listRulesAction`, `getRuleExecutionLogAction`,
+`getBoardAutomationDataAction` (the board modal's lazy, board-scoped read), and
 `dryRunRulesAction` (evaluate an event against enabled rules with **no side
 effects** — no transaction, no log rows; decision 0022 §7).
 
-The management page (`components/workspace/automation/`) renders the rule list
-(name, board scope, When/Then summaries, last-run status, enable Switch), a
-Dialog **rule builder** (trigger + config + ordered action steps), and the
-execution-log panel. `dryRunRulesAction` has no UI surface yet — the "test a
-rule" preview is a tracked follow-up.
+The shared `AutomationContent` (`components/workspace/automation/`) renders the
+rule list (name, board scope, When/Then summaries, last-run status, enable
+Switch), a Dialog **rule builder** (trigger + config + ordered action steps),
+and the execution-log panel. The workspace page (`AutomationManagement`) wraps
+it in full-page chrome; the board header's **Automation** modal
+(`BoardAutomationDialog`) wraps it board-scoped, pre-scoping the builder to the
+current board and re-fetching on each mutation. `dryRunRulesAction` has no UI
+surface yet — the "test a rule" preview is a tracked follow-up.
 
 ## Proof
 
