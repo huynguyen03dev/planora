@@ -327,6 +327,46 @@ export async function notifyInvited(data: {
   void data;
 }
 
+/**
+ * In-app notification produced by an automation rule's `notify-member` action
+ * (US-066). The automation system user is the implicit actor. Best-effort: a
+ * failure here must never roll back or fail the triggering request (this runs
+ * post-commit). Reuses the ASSIGNED notification type for v1 — there is no
+ * dedicated automation notification type yet.
+ */
+export async function notifyAutomation(data: {
+  recipientUserId: string;
+  cardId: string;
+  message?: string;
+}): Promise<void> {
+  try {
+    const card = await db.card.findUnique({
+      where: { id: data.cardId },
+      select: {
+        title: true,
+        list: { select: { boardId: true, board: { select: { title: true } } } },
+      },
+    });
+    if (!card) return;
+
+    const boardId = card.list.boardId;
+    const boardTitle = card.list.board.title;
+    const trimmed = data.message?.trim();
+
+    await createNotification({
+      userId: data.recipientUserId,
+      type: "ASSIGNED",
+      title: `Automation: "${card.title}"`,
+      message: trimmed
+        ? trimmed
+        : `An automation rule flagged the card "${card.title}" on "${boardTitle}".`,
+      linkUrl: `/boards/${boardId}`,
+    });
+  } catch (error) {
+    console.error("[notification] Failed to send automation notification:", error);
+  }
+}
+
 export async function notifyDueDate(data: {
   userId: string;
   cardId: string;

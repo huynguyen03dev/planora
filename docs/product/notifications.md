@@ -128,6 +128,23 @@ in PM2 cluster / multi-replica mode with the in-process driver enabled.
 For multi-instance deployments, use external cron driving the idempotent
 HTTP route instead.
 
+## Automation notifications
+
+An automation rule's `notify-member` action (see `automation.md`) creates
+notifications through the **same** `createNotification` + `sendEmail` path, but
+**post-commit** (after the triggering transaction commits) and attributed to the
+seeded **"Planora Automation"** system user — recipients see "Planora Automation
+assigned you…". The `recipient` may be a fixed member or a dynamic token
+(`card-assignees` / `card-creator`) resolved at fire time.
+
+A `notify-member` step on a `due-date-approaching` rule **deduplicates against
+the built-in reminder** via the same `CardReminder` `@@unique([cardId, userId,
+milestone])` claim, so a member never receives both a due-date reminder and a
+rule notification for the same milestone (decision 0022 R3). The built-in
+reminder stays the canonical due-date notifier. `notify-member` currently reuses
+the `ASSIGNED` notification type; a dedicated `AUTOMATION` type is a tracked
+follow-up.
+
 ## Email
 
 `lib/email.ts` sends via **Resend** using React Email templates. Email is a

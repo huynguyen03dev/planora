@@ -92,6 +92,7 @@ model User {
   attachments   Attachment[]   @relation("UserAttachments")
   activities    Activity[]     @relation("UserActivities")
   notifications Notification[] @relation("UserNotifications")
+  createdRules  Rule[]         @relation("RuleCreator")
 
   @@unique([email])
   @@map("user")
@@ -165,6 +166,8 @@ model Workspace {
   boards               Board[]
   activities           Activity[]
   cardHistoryEvents    CardHistoryEvent[]
+  rules                Rule[]
+  ruleExecutionLogs    RuleExecutionLog[]
 
   @@unique([slug])
   @@map("workspace")
@@ -220,6 +223,7 @@ model Board {
   stars      BoardStar[]
   labels     Label[]
   activities Activity[] @relation("BoardActivity")
+  rules      Rule[]
 
   @@index([workspaceId])
   @@map("board")
@@ -439,6 +443,64 @@ model CardReminder {
   @@unique([cardId, userId, milestone])
   @@index([cardId])
   @@map("cardReminder")
+}
+
+// ─── Automation rules engine ─────────────────────────────────────
+
+model Rule {
+  id            String   @id @default(uuid())
+  workspaceId   String
+  boardId       String?
+  name          String
+  description   String?
+  enabled       Boolean  @default(true)
+  triggerType   String
+  triggerConfig Json
+  actions       Json     // ordered array: [{ type, ...params }]; targets fixed IDs or dynamic tokens
+  position      Float
+  createdBy     String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  board     Board?    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  creator   User      @relation("RuleCreator", fields: [createdBy], references: [id])
+
+  executionLogs RuleExecutionLog[]
+
+  @@index([workspaceId, triggerType])
+  @@index([workspaceId, enabled])
+  @@map("rule")
+}
+
+model RuleExecutionLog {
+  id          String   @id @default(uuid())
+  // Denormalized workspace + rule name so the audit row survives rule deletion
+  // (the CardHistoryEvent survival pattern). ruleId goes null on delete but the
+  // workspace scope and the human-readable name remain for the log panel.
+  workspaceId String
+  ruleId      String?
+  ruleName    String
+  chainId     String?
+  chainDepth  Int      @default(0)
+  cardId      String?
+  actionType  String
+  triggerType String
+  status      String
+  error       String?
+  dedupKey    String?
+  metadata    Json?
+  executedAt  DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  rule      Rule?     @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+
+  @@unique([ruleId, dedupKey])
+  @@index([workspaceId, executedAt])
+  @@index([ruleId, executedAt])
+  @@index([cardId])
+  @@index([chainId])
+  @@map("ruleExecutionLog")
 }
 
 // ─── Analytics History (append-only, survives card/list deletion) ───

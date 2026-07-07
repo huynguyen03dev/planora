@@ -10,6 +10,7 @@ import {
 } from "@/app/(authenticated)/(dashboard)/boards/actions";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
 import { BoardFilter } from "@/components/boards/board-filter";
+import { BoardAutomationDialog } from "@/components/workspace/automation/board-automation-dialog";
 import {
   boardHeaderAvatarFallbackClass,
   boardHeaderAvatarRingClass,
@@ -275,6 +276,8 @@ export function BoardHeader({
           </Button>
 
           <BoardFilter />
+
+          <BoardAutomationDialog boardId={board.id} boardTitle={board.title} />
 
           <ArchivedCardsDialog
             archivedCards={archivedCards}

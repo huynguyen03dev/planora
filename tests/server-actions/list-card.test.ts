@@ -242,6 +242,11 @@ function makeTx() {
     user: { findUnique: vi.fn(async () => ({ name: "Target" })) },
     activity: { create: vi.fn(async () => ({ id: "act" })) },
     cardHistoryEvent: { createMany: vi.fn(async () => ({ count: 0 })) },
+    // Automation (US-066): the trigger tx bodies now evaluate rules. With no
+    // enabled rules the evaluator is a no-op, so these positive controls still
+    // assert only the pre-automation transaction seams.
+    rule: { findMany: vi.fn(async () => [] as unknown[]) },
+    ruleExecutionLog: { create: vi.fn(async () => ({ id: "log" })) },
   };
 }
 
@@ -1091,6 +1096,8 @@ describe("addCardLabelAction (card:update)", () => {
     h.getLabelWithBoard.mockResolvedValue(labelWithBoardFixture(WS_A, { boardId: BOARD_A, labelId: LABEL_ID }));
     h.addCardLabel.mockResolvedValue({ changed: true });
     h.getCardLabels.mockResolvedValue([]);
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
     await addCardLabelAction(form());
     expect(h.addCardLabel).toHaveBeenCalled();
   });

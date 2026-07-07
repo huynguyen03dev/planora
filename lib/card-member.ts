@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { Prisma } from "@/app/generated/prisma/client";
+
 import db from "@/lib/prisma";
 
 function isUniqueConstraintError(error: unknown): error is { code: string } {
@@ -92,11 +94,14 @@ export async function getAssignableWorkspaceMembers(
   );
 }
 
-export async function assignMemberToCard(data: {
-  cardId: string;
-  userId: string;
-}): Promise<AssignMemberToCardResult> {
-  const existing = await db.cardMember.findUnique({
+export async function assignMemberToCard(
+  data: {
+    cardId: string;
+    userId: string;
+  },
+  client: Prisma.TransactionClient | typeof db = db,
+): Promise<AssignMemberToCardResult> {
+  const existing = await client.cardMember.findUnique({
     where: {
       cardId_userId: {
         cardId: data.cardId,
@@ -128,7 +133,7 @@ export async function assignMemberToCard(data: {
   }
 
   try {
-    const result = await db.cardMember.create({
+    const result = await client.cardMember.create({
       data: {
         cardId: data.cardId,
         userId: data.userId,
@@ -159,7 +164,7 @@ export async function assignMemberToCard(data: {
       throw error;
     }
 
-    const concurrentExisting = await db.cardMember.findUnique({
+    const concurrentExisting = await client.cardMember.findUnique({
       where: {
         cardId_userId: {
           cardId: data.cardId,
@@ -194,12 +199,15 @@ export async function assignMemberToCard(data: {
   }
 }
 
-export async function removeMemberFromCard(data: {
-  cardId: string;
-  userId: string;
-}): Promise<RemoveMemberFromCardResult> {
+export async function removeMemberFromCard(
+  data: {
+    cardId: string;
+    userId: string;
+  },
+  client: Prisma.TransactionClient | typeof db = db,
+): Promise<RemoveMemberFromCardResult> {
   // Safe delete - no-op if relation doesn't exist.
-  const result = await db.cardMember.deleteMany({
+  const result = await client.cardMember.deleteMany({
     where: {
       cardId: data.cardId,
       userId: data.userId,

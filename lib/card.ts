@@ -667,8 +667,9 @@ export async function updateCardCover(
 export async function updateCardPriority(
   cardId: string,
   priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null,
+  client: Prisma.TransactionClient | typeof db = db,
 ): Promise<CardDetailRecord> {
-  return db.card.update({
+  return client.card.update({
     where: { id: cardId, archivedAt: null },
     data: { priority },
     select: CARD_DETAIL_SELECT,

@@ -102,6 +102,7 @@ export type BuildCardHistoryEventInput = {
   eventType: CardHistoryEventType;
   occurredAt?: Date;
   metadata: CardHistoryEventMetadata;
+  ruleId?: string;
 };
 
 export type BuildCardMoveLifecycleEventsInput = {
@@ -145,7 +146,7 @@ export function buildCardHistoryEvent(
     actorId: input.actorId ?? null,
     eventType: input.eventType,
     occurredAt: input.occurredAt ?? new Date(),
-    metadata: input.metadata as Prisma.InputJsonValue,
+    metadata: { ...input.metadata, ...(input.ruleId ? { ruleId: input.ruleId } : {}) } as Prisma.InputJsonValue,
   };
 }
 

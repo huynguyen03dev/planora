@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  AiMagicIcon,
   Analytics01Icon,
   KanbanIcon,
   Settings01Icon,
@@ -44,6 +45,12 @@ export function WorkspaceShellSidebar({
       href: `${base}/members`,
       icon: UserMultipleIcon,
       active: pathname.startsWith(`${base}/members`),
+    },
+    {
+      label: "Automation",
+      href: `${base}/automation`,
+      icon: AiMagicIcon,
+      active: pathname.startsWith(`${base}/automation`),
     },
     {
       label: "Settings",
