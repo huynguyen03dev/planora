@@ -38,13 +38,17 @@ Config: `prisma.config.ts` (schema at `prisma/schema.prisma`, migrations at
 
 ### Tests
 
-**Vitest 2** (node env) is configured (`vitest.config.ts`). It includes
-`lib/**/*.test.ts` and `tests/**/*.test.ts` (610 tests as of US-062). **E2E is
-Playwright** (`npm run test:e2e`, `e2e/**`, added US-009 — a two-client realtime
-harness). **CI** runs the unit/integration gate (`ci.yml`) plus the E2E suite
-(`e2e.yml`). There is still **no** React Testing Library, so React component
-internals remain the largest gap. See `docs/TEST_MATRIX.md` for the
-contract-to-proof map.
+**Vitest 2** is configured as two projects (`vitest.workspace.ts`): a `node`
+project (`lib/**/*.test.ts` + `tests/**/*.test.ts`, node env) and a `components`
+project (`components/**/*.test.tsx` + `app/**/*.test.tsx`, happy-dom env, added
+US-068). **E2E is Playwright** (`npm run test:e2e`, `e2e/**`, added US-009 — a
+two-client realtime harness). **CI** runs the unit/integration gate (`ci.yml`)
+plus the E2E suite (`e2e.yml`). React Testing Library now exists (US-068) with a
+representative set of client-component tests (`board-filter`, `card-detail-sheet`
+autosave, `rule-builder-dialog`); most React component internals are still
+untested, so component coverage remains a live gap — just no longer a total one.
+Async Server Components stay covered by E2E, not RTL. See `docs/TEST_MATRIX.md`
+for the contract-to-proof map.
 
 ```bash
 npm test                                      # run all tests once
@@ -60,10 +64,12 @@ room-authorization functions (`lib/realtime/auth.test.ts`, US-062 tg1), position
 math (`lib/dnd/apply-drop.test.ts`, `lib/ordering.test.ts`, `lib/list.test.ts`,
 `lib/card.test.ts`), card history/analytics (`lib/card-history.test.ts`,
 `lib/analytics/engine.test.ts`), the board store (`tests/board-store.test.ts`),
-and CSV export (`tests/analytics-export.test.ts`). The real remaining gaps:
-React component internals (no RTL) and much per-action **business** logic — the
-`list-card` positive controls exercise the transaction bodies for a representative
-set (US-062 tg2) but most CRUD/lifecycle math is still only boundary-tested.
+and CSV export (`tests/analytics-export.test.ts`). RTL now covers a
+representative set of client components (US-068). The real remaining gaps: most
+React component internals (RTL exists but coverage is thin) and much per-action
+**business** logic — the `list-card` positive controls exercise the transaction
+bodies for a representative set (US-062 tg2) but most CRUD/lifecycle math is
+still only boundary-tested.
 
 ---
 
