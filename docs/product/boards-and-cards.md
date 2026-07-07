@@ -186,3 +186,16 @@ Every action: `verifySession()` → workspace permission check
 (`lib/schemas/`) → Prisma (transaction for multi-row position writes) → emit.
 `viewer` role cannot mutate structure; `editor` can CRUD content but not delete
 boards or manage members; `admin` has full control.
+
+## Automation attribution
+
+Several card actions — `createCardAction`, `moveCardAction`,
+`toggleCardCompletionAction`, `addCardLabelAction`, `assignCardMemberAction` —
+are **automation triggers**: they evaluate workspace rules **inside their own
+Prisma transaction** (after their write + history, before commit), so
+rule-driven card mutations (move, label, priority, member, completion) are atomic
+with the human edit that fired them. A failing rule action rolls back the whole
+transaction, including the user's edit. Rule-driven mutations are attributed to
+the seeded **"Planora Automation"** system user with `metadata: { ruleId }` on
+their history events, so they never inflate a real user's counts. See
+`automation.md` and decision 0022.

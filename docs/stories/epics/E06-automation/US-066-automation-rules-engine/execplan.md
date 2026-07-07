@@ -320,9 +320,24 @@ Hard gates (→ high-risk):
        auto-reconcile. L3 — save-time cycle-loop warnings now surface as a
        persistent, manually-dismissed "warning" toast (was a 5s info toast).
 
-10. **Docs + matrix update** — author `docs/product/automation.md`; update
-    `boards-and-cards.md`, `realtime-sync.md`, `notifications.md`,
-    `analytics.md` with attribution notes; update `TEST_MATRIX.md`.
+10. **Docs + matrix update** — **DONE.** Authored `docs/product/automation.md`
+    (model, 7 triggers + config filters, 8 ordered action steps + dynamic
+    targets, inline transaction boundary, four-layer loop prevention, scheduled
+    `due-date-approaching` pass, system-actor attribution, admin-only
+    permissions, Server Actions/UI, proof). Added automation-attribution notes to
+    `boards-and-cards.md` (trigger actions + rollback + system actor),
+    `realtime-sync.md` (reuses existing events, no new types), `analytics.md`
+    (system-actor `CardHistoryEvent` + `ruleId` metadata, never in member
+    filter), `notifications.md` (`notify-member` post-commit + reminder dedup);
+    added `automation.md` to `docs/product/README.md`. Added 4 rows +
+    a US-066 Coverage-Snapshot bullet to `TEST_MATRIX.md` (engine 101 / scheduled
+    8 / rule-management Server Actions 34 = 143 cases; UI untested). **Flagged
+    discrepancy** (recorded in the rule-management matrix row): `deleteRuleAction`
+    hard-deletes and `RuleExecutionLog` cascades, so deleting a rule removes its
+    logs — contradicts the delete-confirm copy "Past execution-log entries are
+    kept" and the log panel's dead "Deleted rule" fallback. Docs describe the
+    actual (cascade) behavior; the UI-copy vs schema conflict is left for the
+    human to resolve.
 
 11. **Verification** — run the full test matrix; story proof + acceptance
     evidence; decision 0022 verification.

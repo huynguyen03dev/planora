@@ -19,6 +19,14 @@ card/list/board deletion. These rows are **append-only** — never mutate or del
 them. Historical state (e.g. who was assigned at a point in time) is reconstructed
 by replaying events, which is why member filtering is accurate over time.
 
+**Automation attribution.** Rule-driven card mutations (see `automation.md`)
+append `CardHistoryEvent` rows exactly like human edits, but with the actor set
+to the seeded **"Planora Automation"** system user (`AUTOMATION_ACTOR_USER_ID`)
+and `metadata: { ruleId }`. The system user is never a workspace member, so it
+never appears in the team-member filter and never inflates a real user's action
+counts — analytics can distinguish automated from human work while keeping the
+non-null `actorId`/`userId` contract intact (decision 0022 §5).
+
 ## Metrics
 
 `getWorkspaceAnalytics()` computes, over the selected range:

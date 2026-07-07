@@ -178,3 +178,14 @@ unit proof only.
   updates without polling.
 - `emitAnalyticsRefresh(workspaceId)` signals dashboard clients to refetch;
   no data rides the event, the client re-runs the analytics query.
+
+## Automation attribution
+
+Rule-driven card mutations (see `automation.md`) broadcast through the **same
+socket events** as their human-driven equivalents — `card:moved`,
+`card:labels-updated`, `card:members-updated`, `card:completion-updated`, etc. —
+with the **same payload shape**. Automation adds **no new event types**: rule
+action handlers don't emit directly, they return deferred-effect descriptors that
+the triggering Server Action fires post-commit via the existing `emit*` helpers.
+So a rule that moves a card looks identical on the wire to a user moving it, and
+the drag-aware deferral rules above apply unchanged (decision 0022 §5).
