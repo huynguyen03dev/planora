@@ -113,10 +113,31 @@ describe("ListCardItem — whole-card drag/open (US-069)", () => {
     expect(onOpenCard).not.toHaveBeenCalled();
   });
 
-  it("clicking the actions menu does not open the card", async () => {
+  it("clicking the edit (pencil) quick-action opens the card", async () => {
     const { onOpenCard } = renderCard();
-    await user.click(screen.getByRole("button", { name: "Card actions" }));
+    await user.click(
+      screen.getByRole("button", { name: "Edit card Ship the thing" }),
+    );
+    expect(onOpenCard).toHaveBeenCalledTimes(1);
+    expect(onOpenCard).toHaveBeenCalledWith("card-1");
+  });
+
+  it("does not show the archive quick-action on an incomplete card", () => {
+    renderCard();
+    expect(
+      screen.queryByRole("button", { name: "Archive card" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("archive quick-action opens the confirm dialog, not the card (completed)", async () => {
+    const { onOpenCard } = renderCard({
+      card: { ...baseCard, completedAt: new Date("2026-01-01T00:00:00Z") },
+    });
+    await user.click(screen.getByRole("button", { name: "Archive card" }));
     expect(onOpenCard).not.toHaveBeenCalled();
+    expect(
+      await screen.findByRole("alertdialog", { name: "Archive this card?" }),
+    ).toBeInTheDocument();
   });
 
   it("lets a viewer (canDrag=false) still open the card", async () => {

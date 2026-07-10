@@ -4,6 +4,7 @@ import { useState, useTransition, useRef } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  Archive02Icon,
   Attachment01Icon,
   Calendar03Icon,
   Cancel01Icon,
@@ -17,6 +18,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { format } from "date-fns";
 
 import {
+  archiveCardAction,
   assignCardMemberAction,
   createCommentAction,
   removeCardMemberAction,
@@ -42,6 +44,16 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -134,6 +146,7 @@ type CardDetailSheetProps = {
   cardLabelIds: string[];
   checklists: ChecklistData[];
   canEdit: boolean;
+  canArchive: boolean;
   canComment: boolean;
 };
 
@@ -150,6 +163,7 @@ export function CardDetailSheet({
   cardLabelIds,
   checklists,
   canEdit,
+  canArchive,
   canComment,
 }: CardDetailSheetProps) {
   const router = useRouter();
@@ -246,6 +260,7 @@ export function CardDetailSheet({
           cardLabelIds={cardLabelIds}
           checklists={checklists}
           canEdit={canEdit}
+          canArchive={canArchive}
           canComment={canComment}
         />
       </DialogContent>
@@ -268,6 +283,7 @@ type CardDetailDialogBodyProps = {
   cardLabelIds: string[];
   checklists: ChecklistData[];
   canEdit: boolean;
+  canArchive: boolean;
   canComment: boolean;
 };
 
@@ -283,6 +299,7 @@ function CardDetailDialogBody({
   cardLabelIds,
   checklists,
   canEdit,
+  canArchive,
   canComment,
 }: CardDetailDialogBodyProps) {
   const router = useRouter();
@@ -297,6 +314,25 @@ function CardDetailDialogBody({
   const coverInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  const [isArchiving, startArchiveTransition] = useTransition();
+
+  function handleArchive() {
+    setError("");
+    const formData = new FormData();
+    formData.set("cardId", card.id);
+    startArchiveTransition(async () => {
+      const result = await archiveCardAction(formData);
+      if (!result.success) {
+        setError(result.error);
+        return;
+      }
+      setArchiveDialogOpen(false);
+      // archiveCardAction revalidates the board path: the archived card is now
+      // excluded by getCardDetailForBoard's archivedAt:null filter, so the
+      // page's selectedCard becomes null and this sheet closes on next render.
+    });
+  }
   const selectedDueDate = parseDateInputValue(draftDueDate);
 
   // The hero title/description bind to the live store value (passed in via
@@ -585,6 +621,19 @@ function CardDetailDialogBody({
               {error ? error : isPending ? "Saving…" : null}
             </span>
 
+            {canArchive ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Archive card"
+                title="Archive"
+                onClick={() => setArchiveDialogOpen(true)}
+              >
+                <HugeiconsIcon icon={Archive02Icon} size={18} strokeWidth={2} />
+              </Button>
+            ) : null}
+
             <DialogClose asChild>
               <Button
                 type="button"
@@ -595,6 +644,47 @@ function CardDetailDialogBody({
                 <HugeiconsIcon icon={Cancel01Icon} size={18} strokeWidth={2} />
               </Button>
             </DialogClose>
+
+            {/* Archive confirm (portal — in-tree position is irrelevant). Any
+                card is archivable from here regardless of completion state; the
+                board face only offers archive on completed cards (US-069). */}
+            {canArchive ? (
+              <AlertDialog
+                open={archiveDialogOpen}
+                onOpenChange={(nextOpen) => {
+                  if (isArchiving) {
+                    return;
+                  }
+                  setArchiveDialogOpen(nextOpen);
+                }}
+              >
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Archive this card?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      &quot;{card.title}&quot; will be hidden from this board. You
+                      can restore it later from the board&apos;s Archived cards
+                      view.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={isArchiving}>
+                      Cancel
+                    </AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={(event) => {
+                        event.preventDefault();
+                        handleArchive();
+                      }}
+                      disabled={isArchiving}
+                      className="bg-destructive hover:bg-destructive/90"
+                    >
+                      {isArchiving ? "Archiving..." : "Archive card"}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            ) : null}
           </div>
         </div>
 

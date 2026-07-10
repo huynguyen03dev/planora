@@ -161,17 +161,25 @@ export async function postComment(page: Page, text: string): Promise<void> {
 }
 
 /**
- * Archive a card via its actions menu (mouse only — no keyboard sensor, so it
- * never disturbs another page's in-flight keyboard drag). Scoped to the card by
- * id via the draggable wrapper. Emits a structural `card:archived`.
+ * Archive a card via its detail sheet (mouse only — no keyboard sensor, so it
+ * never disturbs another page's in-flight keyboard drag). The board face no
+ * longer carries an actions menu: quick-actions are hover-only, and
+ * archive-from-face is offered on completed cards only (US-069), so every card
+ * is archived from the detail header. Scoped to the card by id via the
+ * draggable wrapper. Emits a structural `card:archived`.
  */
 export async function archiveCard(page: Page, cardId: string): Promise<void> {
+  // The draggable wrapper IS the role="button" open surface (US-069 put both
+  // data-rfd-draggable-id and role=button on the same div), so click it
+  // directly — a descendant-scoped getByRole would match nothing.
+  await page.locator(`[data-rfd-draggable-id="${cardId}"]`).click();
+  // Header quick-action (aria-label) opens the confirm dialog.
+  await page.getByRole("button", { name: "Archive card" }).first().click();
+  // Confirm inside the alert dialog (scoped so it can't match the header button).
   await page
-    .locator(`[data-rfd-draggable-id="${cardId}"]`)
-    .getByRole("button", { name: "Card actions" })
+    .getByRole("alertdialog", { name: "Archive this card?" })
+    .getByRole("button", { name: "Archive card" })
     .click();
-  await page.getByRole("menuitem", { name: /archive/i }).click();
-  await page.getByRole("button", { name: /archive card/i }).click();
 }
 
 // ── Card detail / rename ──────────────────────────────────────────────────
