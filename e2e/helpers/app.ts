@@ -133,7 +133,8 @@ export async function dragCardToNextList(page: Page, cardId: string): Promise<vo
 
 /**
  * Keyboard-reorder a LIST one slot to the left. Lists are a horizontal droppable
- * whose drag handle ("Drag list") carries the same `data-rfd-drag-handle-draggable-id`
+ * whose drag handle (the list header — US-069) carries the same
+ * `data-rfd-drag-handle-draggable-id`
  * attribute (= list.id) the card helpers use, so liftCard/moveLifted/dropCard are
  * reused verbatim — the keyboard sensor is draggable-type agnostic. Emits the
  * STRUCTURAL `list:moved`.
@@ -160,24 +161,39 @@ export async function postComment(page: Page, text: string): Promise<void> {
 }
 
 /**
- * Archive a card via its actions menu (mouse only — no keyboard sensor, so it
- * never disturbs another page's in-flight keyboard drag). Scoped to the card by
- * id via the draggable wrapper. Emits a structural `card:archived`.
+ * Archive a card via its detail sheet (mouse only — no keyboard sensor, so it
+ * never disturbs another page's in-flight keyboard drag). The board face no
+ * longer carries an actions menu: quick-actions are hover-only, and
+ * archive-from-face is offered on completed cards only (US-069), so every card
+ * is archived from the detail header. Scoped to the card by id via the
+ * draggable wrapper. Emits a structural `card:archived`.
  */
 export async function archiveCard(page: Page, cardId: string): Promise<void> {
+  // The draggable wrapper IS the role="button" open surface (US-069 put both
+  // data-rfd-draggable-id and role=button on the same div), so click it
+  // directly — a descendant-scoped getByRole would match nothing.
+  await page.locator(`[data-rfd-draggable-id="${cardId}"]`).click();
+  // Header quick-action (aria-label) opens the confirm dialog.
+  await page.getByRole("button", { name: "Archive card" }).first().click();
+  // Confirm inside the alert dialog (scoped so it can't match the header button).
   await page
-    .locator(`[data-rfd-draggable-id="${cardId}"]`)
-    .getByRole("button", { name: "Card actions" })
+    .getByRole("alertdialog", { name: "Archive this card?" })
+    .getByRole("button", { name: "Archive card" })
     .click();
-  await page.getByRole("menuitem", { name: /archive/i }).click();
-  await page.getByRole("button", { name: /archive card/i }).click();
 }
 
 // ── Card detail / rename ──────────────────────────────────────────────────
 
-/** Open a card's detail sheet by clicking its title button. */
+/**
+ * Open a card's detail sheet by clicking its body. US-069 made the whole card
+ * the open surface (the title is no longer its own button); the card exposes
+ * `role="button"` with the accessible name "Open card <title>".
+ */
 export async function openCardDetail(page: Page, title: string): Promise<void> {
-  await page.getByRole("button", { name: title, exact: true }).first().click();
+  await page
+    .getByRole("button", { name: `Open card ${title}`, exact: true })
+    .first()
+    .click();
   await expect(page.locator("#card-detail-title")).toBeVisible();
 }
 

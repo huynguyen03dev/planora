@@ -278,6 +278,7 @@ export default async function BoardPage({
           cardLabelIds={cardLabels.map((label) => label.id)}
           checklists={checklists}
           canEdit={canEditCard}
+          canArchive={canArchiveCard}
           canComment={canComment}
         />
       </div>

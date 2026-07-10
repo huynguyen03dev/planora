@@ -17,6 +17,7 @@ const actions = vi.hoisted(() => ({
   assignCardMemberAction: vi.fn(),
   removeCardMemberAction: vi.fn(),
   createCommentAction: vi.fn(),
+  archiveCardAction: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -85,6 +86,7 @@ function renderSheet(props: Partial<Parameters<typeof CardDetailSheet>[0]> = {})
       cardLabelIds={[]}
       checklists={[]}
       canEdit
+      canArchive={false}
       canComment
       {...props}
     />,
@@ -149,5 +151,38 @@ describe("CardDetailSheet — title autosave", () => {
     // The title renders as a static heading (the dialog also titles itself with
     // the card name for a11y, so there may be more than one match).
     expect(screen.getAllByRole("heading", { name: "Original title" }).length).toBeGreaterThan(0);
+  });
+});
+
+describe("CardDetailSheet — archive from detail (US-069)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useBoardStore.getState().reset();
+  });
+
+  it("does not show the archive button when canArchive is false", () => {
+    renderSheet();
+    expect(
+      screen.queryByRole("button", { name: "Archive card" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("archive button opens the confirm dialog; confirm calls archiveCardAction", async () => {
+    actions.archiveCardAction.mockResolvedValue({ success: true });
+    renderSheet({ canArchive: true });
+
+    await user.click(screen.getByRole("button", { name: "Archive card" }));
+    expect(
+      await screen.findByRole("alertdialog", { name: "Archive this card?" }),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Archive card" }),
+    );
+    await waitFor(() =>
+      expect(actions.archiveCardAction).toHaveBeenCalledTimes(1),
+    );
+    const formData = actions.archiveCardAction.mock.calls[0][0] as FormData;
+    expect(formData.get("cardId")).toBe("card-1");
   });
 });

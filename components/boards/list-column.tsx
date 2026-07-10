@@ -1,6 +1,6 @@
 "use client";
 
-import { DragDropVerticalIcon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
+import { MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo, useState, useTransition } from "react";
 import { Draggable, Droppable } from "@hello-pangea/dnd";
@@ -246,60 +246,77 @@ function ListColumnComponent({
               // @hello-pangea/dnd's horizontal placeholder reserves it and the
               // row doesn't shift when a list is lifted/dropped. The gap-2 here
               // is unrelated: it's this column's internal vertical rhythm.
-              "mr-4 flex max-h-full min-h-0 w-[80vw] max-w-80 shrink-0 flex-col gap-2 rounded-lg bg-muted p-3 sm:w-80 sm:max-w-none",
+              "mr-4 flex max-h-full min-h-0 w-[80vw] max-w-80 shrink-0 flex-col gap-2 rounded-lg bg-muted p-3 transition-[box-shadow] duration-150 ease-out motion-reduce:transition-none sm:w-80 sm:max-w-none",
+              // transition-[box-shadow] only — NOT transform: @hello-pangea/dnd
+              // writes a continuous transform onto this div's style during a drag,
+              // so animating transform would lag/jitter the dragged column. The
+              // drag shadow + ring (both box-shadows) still fade in/out smoothly.
               snapshot.isDragging && "shadow-md ring-2 ring-primary/30",
             )}
           >
+            {/* Whole-header drag (US-069): the header bar IS the list drag
+                handle — no separate grip. The row is split so the drag handle
+                wraps the title area only; the actions menu button sits OUTSIDE
+                it. If the menu button were inside the handle, dnd's window-bound
+                keyboard sensor would resolve a Space press on the focused button
+                to the handle (lifting the list instead of opening the menu), and
+                a micro-drag on it would start a reorder instead of opening the
+                menu — neither is fixable with stopPropagation since the sensor
+                runs on window in the capture phase. Keeping it out of the handle
+                fixes both. The Draggable keeps `disableInteractiveElementBlocking`
+                (above) so a drag still starts over the title button while a plain
+                click enters inline rename (dnd's movement threshold
+                disambiguates). `dragHandleProps` is null while editing or when the
+                user can't sort, so spreading it is safe. */}
             <div className="flex shrink-0 items-center justify-between gap-2">
-              {canEdit && editing ? (
-                <Input
-                  value={draftTitle}
-                  onChange={(event) => {
-                    setDraftTitle(event.target.value);
-                    clearError();
-                  }}
-                  onBlur={handleBlur}
-                  onKeyDown={handleInputKeyDown}
-                  autoFocus
-                  disabled={isPending}
-                  className="h-8 text-sm font-semibold"
-                />
-              ) : canEdit ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={startEditing}
-                  className="h-auto flex-1 justify-start truncate p-0 text-left text-sm font-semibold hover:bg-transparent"
-                >
-                  {list.title}
-                </Button>
-              ) : (
-                <h3 className="flex-1 truncate text-sm font-semibold">{list.title}</h3>
-              )}
+              <div
+                {...provided.dragHandleProps}
+                // dnd stamps role="button" on the handle; without an explicit
+                // label it would borrow the title text as its accessible name and
+                // collide with the title button. Name it for what it does.
+                aria-label={
+                  provided.dragHandleProps ? `Reorder list ${list.title}` : undefined
+                }
+                className={cn(
+                  "flex min-w-0 flex-1 items-center",
+                  // No resting grab cursor on the header: like the card, a hovering
+                  // grab cursor over the whole header bar reads as misleading before a
+                  // drag starts. Grabbing appears only on mousedown (active:). The
+                  // title button and actions menu keep their own cursors.
+                  canSortList && !editing && "active:cursor-grabbing",
+                )}
+              >
+                {canEdit && editing ? (
+                  <Input
+                    value={draftTitle}
+                    onChange={(event) => {
+                      setDraftTitle(event.target.value);
+                      clearError();
+                    }}
+                    onBlur={handleBlur}
+                    onKeyDown={handleInputKeyDown}
+                    autoFocus
+                    disabled={isPending}
+                    className="h-8 w-full text-sm font-semibold"
+                  />
+                ) : canEdit ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={startEditing}
+                    className="h-auto flex-1 justify-start truncate p-0 text-left text-sm font-semibold hover:bg-transparent"
+                  >
+                    {list.title}
+                  </Button>
+                ) : (
+                  <h3 className="flex-1 truncate text-sm font-semibold">{list.title}</h3>
+                )}
+              </div>
 
               {(canEdit || canDelete) && (
                 <div ref={actionsMenuRef}>
                   <div className="flex items-center gap-1">
-                    {canSortList ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Drag list"
-                        className="cursor-grab text-muted-foreground hover:bg-foreground/10 hover:text-foreground active:cursor-grabbing"
-                        onPointerDown={handleActionsMenuPointerDown}
-                        {...provided.dragHandleProps}
-                      >
-                        <HugeiconsIcon
-                          icon={DragDropVerticalIcon}
-                          size={16}
-                          strokeWidth={2}
-                          className="text-current transition-colors"
-                        />
-                      </Button>
-                    ) : null}
-
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
