@@ -316,43 +316,41 @@ function ListColumnComponent({
 
               {(canEdit || canDelete) && (
                 <div ref={actionsMenuRef}>
-                  <div className="flex items-center gap-1">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label="List actions"
-                          onPointerDown={handleActionsMenuPointerDown}
-                          className="text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="List actions"
+                        onPointerDown={handleActionsMenuPointerDown}
+                        className="text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                      >
+                        <HugeiconsIcon
+                          icon={MoreHorizontalIcon}
+                          size={16}
+                          strokeWidth={2}
+                          className="text-current transition-colors"
+                        />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {canEdit && (
+                        <DropdownMenuItem onSelect={startEditing}>
+                          Rename
+                        </DropdownMenuItem>
+                      )}
+                      {canEdit && canDelete && <DropdownMenuSeparator />}
+                      {canDelete && (
+                        <DropdownMenuItem
+                          onSelect={() => setDeleteDialogOpen(true)}
+                          className="text-destructive focus:text-destructive"
                         >
-                          <HugeiconsIcon
-                            icon={MoreHorizontalIcon}
-                            size={16}
-                            strokeWidth={2}
-                            className="text-current transition-colors"
-                          />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {canEdit && (
-                          <DropdownMenuItem onSelect={startEditing}>
-                            Rename
-                          </DropdownMenuItem>
-                        )}
-                        {canEdit && canDelete && <DropdownMenuSeparator />}
-                        {canDelete && (
-                          <DropdownMenuItem
-                            onSelect={() => setDeleteDialogOpen(true)}
-                            className="text-destructive focus:text-destructive"
-                          >
-                            Delete
-                          </DropdownMenuItem>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
+                          Delete
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               )}
             </div>

@@ -9,21 +9,10 @@ import {
   PencilEdit01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { memo, useState, useTransition } from "react";
+import { memo, useState } from "react";
 import { Draggable } from "@hello-pangea/dnd";
 
-import { archiveCardAction } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import {
   Avatar,
   AvatarFallback,
@@ -33,6 +22,7 @@ import {
 } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ArchiveCardDialog } from "@/components/boards/archive-card-dialog";
 import { CardCompletionToggle } from "@/components/boards/card-completion-toggle";
 import { LabelMark } from "@/components/boards/label-mark";
 import { cn, getInitials } from "@/lib/utils";
@@ -170,7 +160,6 @@ function ListCardItemComponent({
   const toggleExpandLabels = useBoardStore((s) => s.toggleExpandLabels);
 
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
-  const [isArchiving, startArchiveTransition] = useTransition();
 
   const completed = card.completedAt !== null;
   const due = card.dueDate ? describeDueDate(card.dueDate, card.completedAt) : null;
@@ -187,20 +176,6 @@ function ListCardItemComponent({
   // Whether any hover quick-action (edit, or archive-on-completed) is offered.
   // Viewers with no edit/archive rights get a clean, action-free card face.
   const showQuickActions = canEdit || (canArchive && Boolean(card.completedAt));
-
-  function handleArchive() {
-    const formData = new FormData();
-    formData.set("cardId", card.id);
-
-    startArchiveTransition(async () => {
-      const result = await archiveCardAction(formData);
-      if (!result.success) {
-        setError(result.error);
-        return;
-      }
-      setArchiveDialogOpen(false);
-    });
-  }
 
   return (
     <>
@@ -545,38 +520,13 @@ function ListCardItemComponent({
         )}
       </Draggable>
 
-      <AlertDialog
+      <ArchiveCardDialog
+        cardId={card.id}
+        cardTitle={card.title}
         open={archiveDialogOpen}
-        onOpenChange={(open) => {
-          if (isArchiving) {
-            return;
-          }
-          setArchiveDialogOpen(open);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Archive this card?</AlertDialogTitle>
-            <AlertDialogDescription>
-              &quot;{card.title}&quot; will be hidden from this board. You can
-              restore it later from the board&apos;s Archived cards view.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isArchiving}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(event) => {
-                event.preventDefault();
-                handleArchive();
-              }}
-              disabled={isArchiving}
-              className="bg-destructive hover:bg-destructive/90"
-            >
-              {isArchiving ? "Archiving..." : "Archive card"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onOpenChange={setArchiveDialogOpen}
+        onError={setError}
+      />
     </>
   );
 }
