@@ -93,3 +93,37 @@ describe("ListColumn — whole-header drag (US-069)", () => {
     expect(screen.getByRole("button", { name: "Backlog" })).toBeInTheDocument();
   });
 });
+
+describe("ListColumn — add-card composer dismissal", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useBoardStore.getState().reset();
+  });
+
+  it("closes the add-card composer when a pointer-down lands outside it", async () => {
+    renderList();
+    await user.click(screen.getByRole("button", { name: "+ Add a card" }));
+    expect(
+      screen.getByPlaceholderText("Enter card title..."),
+    ).toBeInTheDocument();
+
+    // Click outside the composer form → it collapses back to the button.
+    await user.click(document.body);
+
+    expect(
+      screen.queryByPlaceholderText("Enter card title..."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "+ Add a card" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the composer open when the pointer-down lands inside it", async () => {
+    renderList();
+    await user.click(screen.getByRole("button", { name: "+ Add a card" }));
+    await user.click(screen.getByPlaceholderText("Enter card title..."));
+    expect(
+      screen.getByPlaceholderText("Enter card title..."),
+    ).toBeInTheDocument();
+  });
+});

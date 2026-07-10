@@ -12,6 +12,7 @@ import {
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
 import { ListCardItem } from "@/components/boards/list-card-item";
+import { useClickOutside } from "@/components/boards/use-click-outside";
 import { useInlineTitleEditor } from "@/components/boards/use-inline-title-editor";
 import {
   AlertDialog,
@@ -221,6 +222,11 @@ function ListColumnComponent({
     setAddCardExpanded(false);
   }
 
+  const addCardOutsideProps = useClickOutside(
+    addCardExpanded,
+    handleCancelCreateCard,
+  );
+
   return (
     <>
       <Draggable
@@ -421,7 +427,7 @@ function ListColumnComponent({
 
             {canCreateCard ? (
               addCardExpanded ? (
-                <form onSubmit={handleCreateCard} className="shrink-0 space-y-2">
+                <form {...addCardOutsideProps} onSubmit={handleCreateCard} className="shrink-0 space-y-2">
                   <Input
                     value={newCardTitle}
                     onChange={(event) => {

@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 
 import { createListAction } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
+import { useClickOutside } from "@/components/boards/use-click-outside";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -47,6 +48,8 @@ export function AddListButton({ boardId, canCreate }: AddListButtonProps) {
     setExpanded(false);
   }
 
+  const outsideProps = useClickOutside(expanded, handleCancel);
+
   if (!canCreate) {
     return null;
   }
@@ -65,7 +68,7 @@ export function AddListButton({ boardId, canCreate }: AddListButtonProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex w-[80vw] max-w-[20rem] shrink-0 flex-col gap-2 rounded-lg bg-muted p-3 sm:w-80 sm:max-w-none">
+    <form {...outsideProps} onSubmit={handleSubmit} className="flex w-[80vw] max-w-[20rem] shrink-0 flex-col gap-2 rounded-lg bg-muted p-3 sm:w-80 sm:max-w-none">
       <Input
         value={title}
         onChange={(event) => {
