@@ -3,16 +3,15 @@
 import { useTransition } from "react";
 
 import { archiveCardAction } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
+import { Button } from "@/components/ui/button";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 type ArchiveCardDialogProps = {
   cardId: string;
@@ -31,6 +30,10 @@ type ArchiveCardDialogProps = {
 // (via open/onOpenChange) and where errors surface (via onError). A successful
 // archive revalidates the board path, so the card drops off the board and the
 // detail sheet closes on the next render — the dialog just closes itself here.
+//
+// Uses Dialog (not AlertDialog) on purpose: this confirmation is dismissible by
+// clicking outside or pressing Escape. Radix AlertDialog hard-prevents
+// outside-click dismissal, which we explicitly don't want here.
 export function ArchiveCardDialog({
   cardId,
   cardTitle,
@@ -56,7 +59,7 @@ export function ArchiveCardDialog({
   }
 
   return (
-    <AlertDialog
+    <Dialog
       open={open}
       onOpenChange={(next) => {
         // Don't let a click-away/Escape dismiss the dialog mid-request.
@@ -66,28 +69,31 @@ export function ArchiveCardDialog({
         onOpenChange(next);
       }}
     >
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Archive this card?</AlertDialogTitle>
-          <AlertDialogDescription>
+      <DialogContent role="alertdialog">
+        <DialogHeader>
+          <DialogTitle>Archive this card?</DialogTitle>
+          <DialogDescription>
             &quot;{cardTitle}&quot; will be hidden from this board. You can restore
             it later from the board&apos;s Archived cards view.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={isArchiving}>Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={(event) => {
-              event.preventDefault();
-              handleArchive();
-            }}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={isArchiving}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleArchive}
             disabled={isArchiving}
             className="bg-destructive hover:bg-destructive/90"
           >
             {isArchiving ? "Archiving..." : "Archive card"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
