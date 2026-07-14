@@ -37,8 +37,11 @@ export function SignUpForm() {
     setLoading(true);
 
     try {
+      // Trim before submit so a whitespace-only name cannot bypass the
+      // `required` HTML attribute (browsers treat it as non-empty).
+      const trimmedName = name.trim();
       await signUp.email(
-        { name, email, password },
+        { name: trimmedName, email, password },
         {
           onSuccess() {
             // With requireEmailVerification enabled (decision 0023),
@@ -173,7 +176,7 @@ export function SignUpForm() {
               <p id="pw-help" className="text-sm text-muted-foreground">Minimum 8 characters</p>
             </div>
           </CardContent>
-      <CardFooter className="flex flex-col gap-4 pt-6">
+          <CardFooter className="flex flex-col gap-4 pt-6">
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Creating account..." : "Sign Up"}
             </Button>
