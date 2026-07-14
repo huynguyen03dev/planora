@@ -13,4 +13,8 @@ export const {
   organization,
   useListOrganizations,
   useActiveOrganization,
+  requestPasswordReset,
+  resetPassword,
+  sendVerificationEmail,
+  verifyEmail,
 } = authClient;

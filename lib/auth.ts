@@ -5,6 +5,8 @@ import { organization } from "better-auth/plugins";
 
 import { sendEmail } from "@/lib/email";
 import { InviteEmail } from "@/emails/invite-email";
+import { ResetPasswordEmail } from "@/emails/reset-password-email";
+import { VerifyEmailEmail } from "@/emails/verify-email-email";
 
 import db from "./prisma";
 import { ac, admin, editor, viewer } from "./permissions";
@@ -30,12 +32,42 @@ export const auth = betterAuth({
 
   emailAndPassword: {
     enabled: true,
-    // NOTE (US-062 mn12): `requireEmailVerification` is intentionally NOT enabled
-    // here yet. It is a pre-launch gate that must land together with a verified
-    // transactional-email transport (RESEND_API_KEY provisioned) and an E2E proof
-    // that an unverified account cannot accept an invitation — enabling it before
-    // reliable delivery would lock every new signup out. Tracked in US-062 /
-    // decision 0018.
+    // NOTE (US-071): `requireEmailVerification` was enabled per decision 0023
+    // (supersedes the 0018 deferral). Both email transport (RESEND_API_KEY
+    // provisioned locally) and the E2E proof (unverified invite acceptance
+    // blocked) are now addressable. The same transport dependency applies in
+    // each target environment — see decision 0023 for the risk note.
+    requireEmailVerification: true,
+
+    sendResetPassword: async ({ user, url, token }) => {
+      const resetLink = `${APP_URL}/reset-password?token=${token}`;
+
+      await sendEmail({
+        to: user.email,
+        subject: "Reset your Planora password",
+        react: ResetPasswordEmail({ resetLink }),
+      }).catch((error) => {
+        console.error("[auth] Failed to send reset password email:", error);
+      });
+    },
+  },
+
+  // Email verification config (US-071). `sendOnSignUp` defaults to following
+  // `requireEmailVerification` behavior when not set.
+  emailVerification: {
+    sendVerificationEmail: async ({ user, url, token }) => {
+      const verifyLink = `${APP_URL}/verify-email?token=${token}`;
+
+      await sendEmail({
+        to: user.email,
+        subject: "Verify your Planora email",
+        react: VerifyEmailEmail({ verifyLink }),
+      }).catch((error) => {
+        console.error("[auth] Failed to send verification email:", error);
+      });
+    },
+    autoSignInAfterVerification: true,
+    expiresIn: 3600, // 1 hour
   },
 
   // Explicit session lifetime (US-062 mn12): a 7-day absolute expiry, refreshed
