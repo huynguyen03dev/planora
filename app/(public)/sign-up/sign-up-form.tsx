@@ -36,10 +36,17 @@ export function SignUpForm() {
     setError("");
     setLoading(true);
 
+    // Trim before submit so a whitespace-only name cannot bypass the
+    // `required` HTML attribute (browsers treat it as non-empty). Better
+    // Auth does not enforce a non-empty name, so guard at the client.
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError("Name is required");
+      setLoading(false);
+      return;
+    }
+
     try {
-      // Trim before submit so a whitespace-only name cannot bypass the
-      // `required` HTML attribute (browsers treat it as non-empty).
-      const trimmedName = name.trim();
       await signUp.email(
         { name: trimmedName, email, password },
         {
