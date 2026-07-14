@@ -36,20 +36,25 @@ export function SignInForm() {
     setError("");
     setLoading(true);
 
-    await signIn.email(
-      {
-        email,
-        password,
-        callbackURL: redirectTo,
-      },
-      {
-        onError(ctx) {
-          setError(ctx.error.message);
-          setLoading(false);
+    try {
+      await signIn.email(
+        {
+          email,
+          password,
+          callbackURL: redirectTo,
         },
-      },
-    );
+        {
+          onError(ctx) {
+            setError(ctx.error.message);
+          },
+        },
+      );
+    } finally {
+      setLoading(false);
+    }
   }
+
+  const hasError = Boolean(error);
 
   return (
     <div className="flex flex-1 items-center justify-center px-4">
@@ -63,7 +68,7 @@ export function SignInForm() {
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
             {error && (
-              <p className="text-sm text-destructive">{error}</p>
+              <p id="form-error" role="alert" className="text-sm text-destructive">{error}</p>
             )}
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
@@ -74,6 +79,9 @@ export function SignInForm() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                autoComplete="email"
+                aria-invalid={hasError}
+                aria-describedby="form-error"
               />
             </div>
             <div className="space-y-2">
@@ -85,6 +93,9 @@ export function SignInForm() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                autoComplete="current-password"
+                aria-invalid={hasError}
+                aria-describedby="form-error"
               />
             </div>
           </CardContent>
