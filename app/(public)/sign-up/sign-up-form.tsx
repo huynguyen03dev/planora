@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { signUp } from "@/lib/auth-client";
+import { useSearchParams } from "next/navigation";
+import { signUp, sendVerificationEmail } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,13 +17,7 @@ import {
 } from "@/components/ui/card";
 
 export function SignUpForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect");
-  const redirectTo =
-    redirect && redirect.startsWith("/") && !redirect.startsWith("//")
-      ? redirect
-      : "/boards";
   const invitedEmail = searchParams.get("email") ?? "";
   // Preserve invite context when bouncing to the sign-in link.
   const signInHref = `/sign-in${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
@@ -33,6 +27,9 @@ export function SignUpForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [verifyPending, setVerifyPending] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendSent, setResendSent] = useState(false);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -44,7 +41,10 @@ export function SignUpForm() {
         { name, email, password },
         {
           onSuccess() {
-            router.push(redirectTo);
+            // With requireEmailVerification enabled (decision 0023),
+            // BA does NOT create a session. Show the verify-pending
+            // state instead of redirecting to /boards.
+            setVerifyPending(true);
           },
           onError(ctx) {
             setError(ctx.error.message);
@@ -56,7 +56,63 @@ export function SignUpForm() {
     }
   }
 
+  async function handleResend() {
+    setResendLoading(true);
+    setResendSent(false);
+
+    try {
+      await sendVerificationEmail({ email });
+      setResendSent(true);
+    } catch {
+      // Error is surfaced by BA internally; we stay silent to
+      // avoid leaking user-enumeration info.
+    } finally {
+      setResendLoading(false);
+    }
+  }
+
   const hasError = Boolean(error);
+
+  // Verify-pending state: shown after successful sign-up instead of
+  // redirecting to /boards, because requireEmailVerification is enabled.
+  if (verifyPending) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-4">
+        <Card className="w-full max-w-sm">
+          <CardHeader>
+            <CardTitle className="text-2xl">Check your email</CardTitle>
+            <CardDescription>
+              We&apos;ve sent a verification link to <strong>{email}</strong>.
+              Click the link to activate your account.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Didn&apos;t receive the email? Check your spam folder, or{" "}
+              <button
+                type="button"
+                className="cursor-pointer text-primary underline-offset-4 hover:underline disabled:opacity-50"
+                onClick={handleResend}
+                disabled={resendLoading}
+              >
+                {resendLoading
+                  ? "Sending..."
+                  : resendSent
+                    ? "Sent!"
+                    : "resend"}
+              </button>
+              .
+            </p>
+          </CardContent>
+          <CardFooter className="flex flex-col gap-4 pt-0">
+            <Button variant="secondary" className="w-full" asChild>
+              <Link href={signInHref}>Sign in instead</Link>
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-1 items-center justify-center px-4">

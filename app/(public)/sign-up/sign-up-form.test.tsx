@@ -4,8 +4,9 @@ import userEvent from "@testing-library/user-event";
 
 import { SignUpForm } from "./sign-up-form";
 
-const { mockSignUpEmail } = vi.hoisted(() => ({
+const { mockSignUpEmail, mockSendVerificationEmail } = vi.hoisted(() => ({
   mockSignUpEmail: vi.fn(),
+  mockSendVerificationEmail: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -15,6 +16,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/auth-client", () => ({
   signUp: { email: mockSignUpEmail },
+  sendVerificationEmail: mockSendVerificationEmail,
 }));
 
 const user = userEvent.setup({ pointerEventsCheck: 0 });
@@ -83,5 +85,33 @@ describe("SignUpForm", () => {
     render(<SignUpForm />);
     const button = screen.getByRole("button", { name: "Sign Up" });
     expect(button).not.toBeDisabled();
+  });
+
+  it("shows verify-pending state on success instead of redirecting", async () => {
+    mockSignUpEmail.mockImplementation((_data, { onSuccess }) => {
+      onSuccess?.();
+      return Promise.resolve();
+    });
+
+    render(<SignUpForm />);
+
+    await user.type(screen.getByLabelText("Name"), "Test User");
+    await user.type(screen.getByLabelText("Email"), "test@example.com");
+    await user.type(screen.getByLabelText("Password"), "password123");
+
+    await user.click(screen.getByRole("button", { name: "Sign Up" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Check your email")).toBeInTheDocument();
+    });
+
+    // Should NOT redirect to /boards
+    const { push } = vi.mocked(await import("next/navigation")).useRouter();
+    expect(push).not.toHaveBeenCalled();
+
+    // Resend control should call sendVerificationEmail
+    const resendButton = screen.getByText("resend");
+    await user.click(resendButton);
+    expect(mockSendVerificationEmail).toHaveBeenCalledWith({ email: "test@example.com" });
   });
 });
