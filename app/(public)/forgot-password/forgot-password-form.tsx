@@ -27,16 +27,18 @@ export function ForgotPasswordForm() {
     setLoading(true);
 
     try {
-      const { error: requestError } = await requestPasswordReset({ email });
+      const res = await requestPasswordReset({ email });
 
-      if (requestError) {
-        setError(requestError.message ?? "Something went wrong");
+      if (!res || res.error) {
+        setError(res?.error?.message ?? "Something went wrong");
         return;
       }
 
       // Neutral success — identical for known and unknown emails
       // (user-enumeration guard).
       setSent(true);
+    } catch {
+      setError("Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }

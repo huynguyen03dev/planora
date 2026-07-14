@@ -33,26 +33,34 @@ function VerifyEmailInner() {
     let cancelled = false;
 
     async function process() {
-      const { error: verifyError } = await verifyEmail({
-        query: { token: safeToken },
-      });
+      try {
+        const res = await verifyEmail({
+          query: { token: safeToken },
+        });
 
-      if (cancelled) return;
+        if (cancelled) return;
 
-      if (verifyError) {
+        // Guard against an undefined/thrown result so a transient API
+        // failure surfaces as an accessible error instead of crashing.
+        if (!res || res.error) {
+          setStatus("error");
+          setError(
+            res?.error?.message ?? "Invalid or expired verification link.",
+          );
+          return;
+        }
+
+        setStatus("success");
+
+        // Redirect to boards after brief delay to show success feedback
+        setTimeout(() => {
+          router.push("/boards");
+        }, 1500);
+      } catch {
+        if (cancelled) return;
         setStatus("error");
-        setError(
-          verifyError.message ?? "Invalid or expired verification link.",
-        );
-        return;
+        setError("Invalid or expired verification link.");
       }
-
-      setStatus("success");
-
-      // Redirect to boards after brief delay to show success feedback
-      setTimeout(() => {
-        router.push("/boards");
-      }, 1500);
     }
 
     process();

@@ -36,17 +36,19 @@ function ResetPasswordFormInner() {
         return;
       }
 
-      const { error: resetError } = await resetPassword({
+      const res = await resetPassword({
         newPassword: password,
         token,
       });
 
-      if (resetError) {
-        setError(resetError.message ?? "Something went wrong");
+      if (!res || res.error) {
+        setError(res?.error?.message ?? "Something went wrong");
         return;
       }
 
       router.push("/sign-in");
+    } catch {
+      setError("Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
