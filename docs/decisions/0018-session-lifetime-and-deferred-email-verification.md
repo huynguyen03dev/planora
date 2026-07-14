@@ -4,7 +4,8 @@ Date: 2026-07-02
 
 ## Status
 
-Accepted
+Accepted (session-lifetime portion). The **email-verification deferral** is
+superseded by [0023](./0023-enforce-email-verification.md) (2026-07-14).
 
 ## Context
 
