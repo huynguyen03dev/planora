@@ -39,19 +39,24 @@ export function SignUpForm() {
     setError("");
     setLoading(true);
 
-    await signUp.email(
-      { name, email, password },
-      {
-        onSuccess() {
-          router.push(redirectTo);
+    try {
+      await signUp.email(
+        { name, email, password },
+        {
+          onSuccess() {
+            router.push(redirectTo);
+          },
+          onError(ctx) {
+            setError(ctx.error.message);
+          },
         },
-        onError(ctx) {
-          setError(ctx.error.message);
-          setLoading(false);
-        },
-      },
-    );
+      );
+    } finally {
+      setLoading(false);
+    }
   }
+
+  const hasError = Boolean(error);
 
   return (
     <div className="flex flex-1 items-center justify-center px-4">
@@ -65,7 +70,7 @@ export function SignUpForm() {
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
             {error && (
-              <p className="text-sm text-destructive">{error}</p>
+              <p id="form-error" role="alert" className="text-sm text-destructive">{error}</p>
             )}
             <div className="space-y-2">
               <Label htmlFor="name">Name</Label>
@@ -76,6 +81,9 @@ export function SignUpForm() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
+                autoComplete="name"
+                aria-invalid={hasError}
+                aria-describedby={hasError ? "form-error" : undefined}
               />
             </div>
             <div className="space-y-2">
@@ -87,6 +95,9 @@ export function SignUpForm() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                autoComplete="email"
+                aria-invalid={hasError}
+                aria-describedby={hasError ? "form-error" : undefined}
               />
             </div>
             <div className="space-y-2">
@@ -99,7 +110,11 @@ export function SignUpForm() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={8}
+                autoComplete="new-password"
+                aria-invalid={hasError}
+                aria-describedby={hasError ? "form-error pw-help" : "pw-help"}
               />
+              <p id="pw-help" className="text-sm text-muted-foreground">Minimum 8 characters</p>
             </div>
           </CardContent>
       <CardFooter className="flex flex-col gap-4 pt-6">
