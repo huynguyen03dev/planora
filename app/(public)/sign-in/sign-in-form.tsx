@@ -81,7 +81,7 @@ export function SignInForm() {
                 required
                 autoComplete="email"
                 aria-invalid={hasError}
-                aria-describedby="form-error"
+                aria-describedby={hasError ? "form-error" : undefined}
               />
             </div>
             <div className="space-y-2">
@@ -95,7 +95,7 @@ export function SignInForm() {
                 required
                 autoComplete="current-password"
                 aria-invalid={hasError}
-                aria-describedby="form-error"
+                aria-describedby={hasError ? "form-error" : undefined}
               />
             </div>
           </CardContent>

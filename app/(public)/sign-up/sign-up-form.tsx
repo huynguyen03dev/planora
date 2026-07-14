@@ -83,7 +83,7 @@ export function SignUpForm() {
                 required
                 autoComplete="name"
                 aria-invalid={hasError}
-                aria-describedby="form-error"
+                aria-describedby={hasError ? "form-error" : undefined}
               />
             </div>
             <div className="space-y-2">
@@ -97,7 +97,7 @@ export function SignUpForm() {
                 required
                 autoComplete="email"
                 aria-invalid={hasError}
-                aria-describedby="form-error"
+                aria-describedby={hasError ? "form-error" : undefined}
               />
             </div>
             <div className="space-y-2">
@@ -112,7 +112,7 @@ export function SignUpForm() {
                 minLength={8}
                 autoComplete="new-password"
                 aria-invalid={hasError}
-                aria-describedby="form-error pw-help"
+                aria-describedby={hasError ? "form-error pw-help" : "pw-help"}
               />
               <p id="pw-help" className="text-sm text-muted-foreground">Minimum 8 characters</p>
             </div>
