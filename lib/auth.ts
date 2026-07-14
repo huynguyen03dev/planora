@@ -39,7 +39,7 @@ export const auth = betterAuth({
     // each target environment — see decision 0023 for the risk note.
     requireEmailVerification: true,
 
-    sendResetPassword: async ({ user, url, token }) => {
+    sendResetPassword: async ({ user, token }) => {
       const resetLink = `${APP_URL}/reset-password?token=${token}`;
 
       await sendEmail({
@@ -55,7 +55,7 @@ export const auth = betterAuth({
   // Email verification config (US-071). `sendOnSignUp` defaults to following
   // `requireEmailVerification` behavior when not set.
   emailVerification: {
-    sendVerificationEmail: async ({ user, url, token }) => {
+    sendVerificationEmail: async ({ user, token }) => {
       const verifyLink = `${APP_URL}/verify-email?token=${token}`;
 
       await sendEmail({
