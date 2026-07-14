@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { auth } from "@/lib/auth";
+import { safeInternalPath } from "@/lib/redirect";
 import {
   Card,
   CardDescription,
@@ -11,10 +12,6 @@ import {
 } from "@/components/ui/card";
 
 import { SignUpForm } from "./sign-up-form";
-
-function safeInternalPath(path: string | undefined): string {
-  return path && path.startsWith("/") && !path.startsWith("//") ? path : "/boards";
-}
 
 export default async function SignUpPage({
   searchParams,

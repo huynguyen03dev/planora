@@ -36,9 +36,19 @@ export function SignUpForm() {
     setError("");
     setLoading(true);
 
+    // Trim before submit so a whitespace-only name cannot bypass the
+    // `required` HTML attribute (browsers treat it as non-empty). Better
+    // Auth does not enforce a non-empty name, so guard at the client.
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError("Name is required");
+      setLoading(false);
+      return;
+    }
+
     try {
       await signUp.email(
-        { name, email, password },
+        { name: trimmedName, email, password },
         {
           onSuccess() {
             // With requireEmailVerification enabled (decision 0023),
@@ -173,7 +183,7 @@ export function SignUpForm() {
               <p id="pw-help" className="text-sm text-muted-foreground">Minimum 8 characters</p>
             </div>
           </CardContent>
-      <CardFooter className="flex flex-col gap-4 pt-6">
+          <CardFooter className="flex flex-col gap-4 pt-6">
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Creating account..." : "Sign Up"}
             </Button>

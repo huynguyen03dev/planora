@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { signIn } from "@/lib/auth-client";
+import { safeInternalPath } from "@/lib/redirect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,11 +19,8 @@ import {
 
 export function SignInForm() {
   const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect");
-  const redirectTo =
-    redirect && redirect.startsWith("/") && !redirect.startsWith("//")
-      ? redirect
-      : "/boards";
+  const redirect = searchParams.get("redirect") ?? undefined;
+  const redirectTo = safeInternalPath(redirect);
   const invitedEmail = searchParams.get("email") ?? "";
   // Preserve invite context when bouncing to the sign-up link.
   const signUpHref = `/sign-up${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
@@ -107,7 +105,7 @@ export function SignInForm() {
               />
             </div>
           </CardContent>
-      <CardFooter className="flex flex-col gap-4 pt-6">
+          <CardFooter className="flex flex-col gap-4 pt-6">
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Signing in..." : "Sign In"}
             </Button>
