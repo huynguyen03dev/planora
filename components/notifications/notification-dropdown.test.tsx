@@ -151,7 +151,7 @@ describe("NotificationDropdown", () => {
   });
 
   it("calls markNotificationReadAction and onMarkOneRead when clicking an unread notification", async () => {
-    actions.markNotificationReadAction.mockResolvedValue(undefined);
+    actions.markNotificationReadAction.mockResolvedValue({ success: true });
     const n1 = makeNotification({
       id: "n-read-me",
       isRead: false,
@@ -174,8 +174,8 @@ describe("NotificationDropdown", () => {
         "n-read-me",
       );
     });
-    expect(onMarkOneRead).toHaveBeenCalledTimes(1);
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(onMarkOneRead)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(onClose)).toHaveBeenCalledTimes(1);
   });
 
   it("does not call markNotificationReadAction for an already-read notification", async () => {
@@ -195,7 +195,7 @@ describe("NotificationDropdown", () => {
   });
 
   it("calls markAllNotificationsReadAction and onMarkAllRead when clicking Mark all read", async () => {
-    actions.markAllNotificationsReadAction.mockResolvedValue(undefined);
+    actions.markAllNotificationsReadAction.mockResolvedValue({ success: true });
     const n1 = makeNotification({ isRead: false });
     mockFetch([n1]);
     const onMarkAllRead = vi.fn();
@@ -249,6 +249,81 @@ describe("NotificationDropdown", () => {
     await waitFor(() => {
       expect(onInvitationCountChange).toHaveBeenCalledWith(2);
     });
+  });
+
+  it("shows error state when fetch fails (network error)", async () => {
+    vi.spyOn(global, "fetch").mockRejectedValue(new Error("Network error"));
+    renderDropdown();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Failed to load notifications/),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole("button", { name: /Retry/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No notifications yet")).not.toBeInTheDocument();
+  });
+
+  it("shows error state (not empty) when notifications API returns non-OK on first load", async () => {
+    // fetch() does not throw on 500 — it resolves with ok: false.
+    vi.spyOn(global, "fetch").mockImplementation((url) => {
+      const s = typeof url === "string" ? url : String(url);
+      if (s.includes("/api/notifications")) {
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          json: () => Promise.resolve({}),
+        } as Response);
+      }
+      if (s.includes("/api/invitations")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ invitations: [] }),
+        } as Response);
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${s}`));
+    });
+    renderDropdown();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Failed to load notifications/),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole("button", { name: /Retry/i }),
+    ).toBeInTheDocument();
+    // Must NOT show the empty state — we don't know if there are notifications.
+    expect(screen.queryByText("No notifications yet")).not.toBeInTheDocument();
+  });
+
+  it("shows error when mark all read fails", async () => {
+    actions.markAllNotificationsReadAction.mockResolvedValue({
+      success: false,
+      error: "Something went wrong",
+    });
+    const n1 = makeNotification({ isRead: false });
+    mockFetch([n1]);
+    const onMarkAllRead = vi.fn();
+    renderDropdown({ onMarkAllRead });
+
+    await waitFor(() => {
+      expect(screen.getByText("Mark all read")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText("Mark all read"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+    });
+
+    // The button should still be visible (unread count unchanged).
+    expect(screen.getByText("Mark all read")).toBeInTheDocument();
+
+    // Callback should not fire on failure.
+    expect(onMarkAllRead).not.toHaveBeenCalled();
   });
 
   it("renders the View all notifications link", async () => {
