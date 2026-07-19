@@ -24,7 +24,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { MemberAvatar } from "@/components/member-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -57,11 +57,6 @@ const ROLE_LABEL: Record<string, string> = {
   editor: "Editor",
   viewer: "Viewer",
 };
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).slice(0, 2);
-  return parts.map((part) => part.charAt(0).toUpperCase()).join("") || "?";
-}
 
 export function MemberRow({
   workspaceId,
@@ -137,10 +132,12 @@ export function MemberRow({
 
   return (
     <div className="flex items-center gap-3 px-4 py-3">
-      <Avatar className="size-9">
-        {member.image ? <AvatarImage src={member.image} alt="" /> : null}
-        <AvatarFallback>{initials(member.name)}</AvatarFallback>
-      </Avatar>
+      <MemberAvatar
+        seed={member.userId}
+        name={member.name}
+        image={member.image}
+        className="size-9"
+      />
 
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 truncate text-sm font-medium">

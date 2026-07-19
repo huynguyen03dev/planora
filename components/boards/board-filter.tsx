@@ -9,7 +9,7 @@ import {
   boardHeaderControlActiveClass,
   boardHeaderControlClass,
 } from "@/components/boards/board-header-controls"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { MemberAvatar } from "@/components/member-avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -28,7 +28,7 @@ import {
   type DueBucket,
 } from "@/lib/board-filter"
 import { labelSwatchStyle } from "@/lib/label-colors"
-import { cn, getInitials } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 
 // Static filter options. `name` is the row's display label.
 const STATUS_OPTIONS: { value: CardStatus; name: string }[] = [
@@ -258,12 +258,7 @@ export function BoardFilter() {
                   checked={filterMemberIds.includes(member.id)}
                   onToggle={() => toggleMemberFilter(member.id)}
                 >
-                  <Avatar size="sm">
-                    {member.image ? (
-                      <AvatarImage src={member.image} alt={member.name} />
-                    ) : null}
-                    <AvatarFallback>{getInitials(member.name)}</AvatarFallback>
-                  </Avatar>
+                  <MemberAvatar seed={member.id} name={member.name} image={member.image} size="sm" />
                   <span className="truncate">{member.name}</span>
                 </CheckRow>
               ))}

@@ -11,10 +11,7 @@ import {
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
 import { BoardFilter } from "@/components/boards/board-filter";
 import { BoardAutomationDialog } from "@/components/workspace/automation/board-automation-dialog";
-import {
-  boardHeaderAvatarFallbackClass,
-  boardHeaderAvatarRingClass,
-} from "@/components/boards/board-header-controls";
+import { boardHeaderAvatarCountClass } from "@/components/boards/board-header-controls";
 import { ArchivedCardsDialog } from "@/components/boards/archived-cards-dialog";
 import type { ArchivedCardData } from "@/components/boards/archived-cards-dialog";
 import { BoardMenu } from "@/components/boards/board-menu";
@@ -29,6 +26,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { avatarColorClass, avatarRingClass } from "@/lib/avatar";
 import { getBoardTheme } from "@/lib/constants";
 import { cn, getInitials } from "@/lib/utils";
 
@@ -201,16 +199,17 @@ export function BoardHeader({
           ) : null}
 
           {watchers.length > 0 ? (
-            <AvatarGroup
-              className={cn("pr-1", boardHeaderAvatarRingClass)}
-              aria-label="Viewing now"
-            >
+            <AvatarGroup className="pr-1" aria-label="Viewing now">
               {visibleWatchers.map((watcher) => (
                 <Avatar
                   key={watcher.id}
-                  // Lift an admin above its overlapping neighbours so the crown
+                  // Per-user lighter-hue separating ring (see lib/avatar). Lift an
+                  // admin above its overlapping neighbours so the crown
                   // (bottom-right) is never hidden under the next avatar.
-                  className={cn(watcher.role === "admin" && "z-10")}
+                  className={cn(
+                    avatarRingClass(watcher.id),
+                    watcher.role === "admin" && "z-10",
+                  )}
                   title={
                     watcher.role === "admin"
                       ? `${watcher.name} (admin)`
@@ -220,7 +219,7 @@ export function BoardHeader({
                   {watcher.image ? (
                     <AvatarImage src={watcher.image} alt={watcher.name} />
                   ) : null}
-                  <AvatarFallback className={boardHeaderAvatarFallbackClass}>
+                  <AvatarFallback className={avatarColorClass(watcher.id)}>
                     {getInitials(watcher.name)}
                   </AvatarFallback>
                   {watcher.role === "admin" ? (
@@ -238,7 +237,7 @@ export function BoardHeader({
               ))}
               {watcherOverflow > 0 ? (
                 <AvatarGroupCount
-                  className={cn("text-xs", boardHeaderAvatarFallbackClass)}
+                  className={cn("text-xs", boardHeaderAvatarCountClass)}
                   aria-label={`${watcherOverflow} more`}
                 >
                   +{watcherOverflow}

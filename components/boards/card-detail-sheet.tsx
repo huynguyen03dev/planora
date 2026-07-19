@@ -28,7 +28,7 @@ import {
   updateCardEstimateAction,
   updateCardPriorityAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { MemberAvatar } from "@/components/member-avatar";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -62,7 +62,7 @@ import type { CommentRecord } from "@/lib/comment";
 import type { ActivityRecord } from "@/lib/activity";
 import type { AttachmentRecord } from "@/lib/attachment";
 import type { CardMemberRecord, AssignableWorkspaceMemberRecord } from "@/lib/card-member";
-import { cn, getInitials } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { resolveMentions } from "@/lib/mention";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
 import { useMentionAutocomplete } from "./use-mention-autocomplete";
@@ -87,24 +87,6 @@ function toDueDateValue(date: Date): string {
   return format(date, "yyyy-MM-dd");
 }
 
-function MemberAvatar({
-  name,
-  image,
-  size = "default",
-  className,
-}: {
-  name: string;
-  image?: string | null;
-  size?: "default" | "sm" | "lg";
-  className?: string;
-}) {
-  return (
-    <Avatar size={size} className={className}>
-      {image ? <AvatarImage src={image} alt={name} /> : null}
-      <AvatarFallback>{getInitials(name)}</AvatarFallback>
-    </Avatar>
-  );
-}
 
 
 type UIComment = {
@@ -842,7 +824,7 @@ function CardDetailDialogBody({
                     key={member.id}
                     className="flex items-center gap-1.5 rounded-full bg-muted py-0.5 pl-0.5 pr-2.5 text-sm"
                   >
-                    <MemberAvatar name={member.name} image={member.image} size="sm" />
+                    <MemberAvatar seed={member.id} name={member.name} image={member.image} size="sm" />
                     <span className="max-w-40 truncate">{member.name}</span>
                     {canEdit ? (
                       <Button
@@ -888,7 +870,7 @@ function CardDetailDialogBody({
                             disabled={isPending}
                             onClick={() => handleAssignMember(member.id)}
                           >
-                            <MemberAvatar name={member.name} image={member.image} size="sm" />
+                            <MemberAvatar seed={member.id} name={member.name} image={member.image} size="sm" />
                             <span className="flex min-w-0 flex-col text-left">
                               <span className="truncate text-sm font-medium">{member.name}</span>
                               <span className="truncate text-xs font-normal text-muted-foreground">
@@ -1239,7 +1221,7 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
                         : "text-popover-foreground",
                     )}
                   >
-                    <MemberAvatar name={member.name} image={member.image} size="sm" />
+                    <MemberAvatar seed={member.id} name={member.name} image={member.image} size="sm" />
                     <span className="flex-1 truncate">{member.name}</span>
                   </div>
                 ))
@@ -1313,7 +1295,7 @@ function CommentItem({ comment, memberNames }: CommentItemProps) {
 
   return (
     <div className="flex items-start gap-3">
-      <MemberAvatar name={comment.user.name} image={comment.user.image} />
+      <MemberAvatar seed={comment.user.id} name={comment.user.name} image={comment.user.image} />
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">{comment.user.name}</span>
@@ -1343,7 +1325,7 @@ function ActivityItem({ activity }: ActivityItemProps) {
 
   return (
     <div className="flex items-start gap-3">
-      <MemberAvatar name={activity.user.name} image={activity.user.image} />
+      <MemberAvatar seed={activity.user.id} name={activity.user.name} image={activity.user.image} />
       <div className="min-w-0 flex-1 space-y-1">
         <p className="text-sm">
           <span className="font-medium">{activity.user.name}</span> {actionLabel}
