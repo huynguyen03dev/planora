@@ -92,7 +92,7 @@ export function AutomationContent({
             onMutated={onMutated}
             trigger={
               <Button size="sm">
-                <HugeiconsIcon icon={PlusSignIcon} className="size-4" />
+                <HugeiconsIcon icon={PlusSignIcon} className="size-4" aria-hidden="true" />
                 New rule
               </Button>
             }
@@ -120,7 +120,7 @@ export function AutomationContent({
         ) : (
           <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
             <div className="flex size-10 items-center justify-center rounded-full bg-secondary text-muted-foreground">
-              <HugeiconsIcon icon={AiMagicIcon} className="size-5" />
+              <HugeiconsIcon icon={AiMagicIcon} className="size-5" aria-hidden="true" />
             </div>
             <div className="space-y-1">
               <p className="text-sm font-medium">No automation rules yet</p>
@@ -164,7 +164,7 @@ export function AutomationContent({
               aria-label="Dismiss warning"
               className="mt-0.5 shrink-0 text-muted-foreground transition-colors hover:text-foreground"
             >
-              <HugeiconsIcon icon={Cancel01Icon} className="size-4" />
+              <HugeiconsIcon icon={Cancel01Icon} className="size-4" aria-hidden="true" />
             </button>
           ) : null}
         </div>

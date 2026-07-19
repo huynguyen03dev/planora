@@ -102,7 +102,7 @@ export function PendingInvitationRow({
             </AlertDialogDescription>
           </AlertDialogHeader>
 
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
 
           <AlertDialogFooter>
             <AlertDialogCancel

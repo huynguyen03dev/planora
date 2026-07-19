@@ -95,7 +95,7 @@ export function ExecutionLogPanel({
           Execution log{logs.length > 0 ? ` (${logs.length})` : ""}
         </h2>
         <Button variant="ghost" size="sm" onClick={refresh} disabled={isPending}>
-          <HugeiconsIcon icon={RefreshIcon} className="size-4" />
+          <HugeiconsIcon icon={RefreshIcon} className="size-4" aria-hidden="true" />
           {isPending ? "Refreshing..." : "Refresh"}
         </Button>
       </div>

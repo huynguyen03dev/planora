@@ -144,6 +144,7 @@ export function CardLabelsSection({
                       >
                         <span
                           className="h-4 w-6 rounded-sm border"
+                          aria-hidden="true"
                           style={labelSwatchStyle(label.color)}
                         />
                         <span className="flex-1">{label.name}</span>
@@ -260,6 +261,7 @@ function ManageLabelsDialog({ boardId, boardLabels }: ManageLabelsDialogProps) {
                 >
                   <span
                     className="h-4 w-6 rounded-sm border"
+                    aria-hidden="true"
                     style={labelSwatchStyle(label.color)}
                   />
                   <span className="flex-1 text-sm">{label.name}</span>

@@ -166,7 +166,7 @@ export function MemberRow({
         </Select>
       ) : (
         <Badge variant={isAdmin ? "default" : "secondary"} className="gap-1">
-          {isAdmin ? <HugeiconsIcon icon={Crown02Icon} className="size-3" /> : null}
+          {isAdmin ? <HugeiconsIcon icon={Crown02Icon} className="size-3" aria-hidden={true} /> : null}
           {ROLE_LABEL[member.role] ?? member.role}
         </Badge>
       )}
@@ -181,7 +181,7 @@ export function MemberRow({
               aria-label={`Actions for ${member.name}`}
               disabled={isPending}
             >
-              <HugeiconsIcon icon={MoreHorizontalIcon} className="size-4" />
+              <HugeiconsIcon icon={MoreHorizontalIcon} className="size-4" aria-hidden={true} />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -194,7 +194,7 @@ export function MemberRow({
                   setLeaveOpen(true);
                 }}
               >
-                <HugeiconsIcon icon={Logout01Icon} className="size-4" />
+                <HugeiconsIcon icon={Logout01Icon} className="size-4" aria-hidden={true} />
                 Leave workspace
               </DropdownMenuItem>
             ) : (
@@ -236,7 +236,7 @@ export function MemberRow({
           </AlertDialogHeader>
 
           {dialogError ? (
-            <p className="text-sm text-destructive">{dialogError}</p>
+            <p role="alert" className="text-sm text-destructive">{dialogError}</p>
           ) : null}
 
           <AlertDialogFooter>
@@ -279,7 +279,7 @@ export function MemberRow({
           </AlertDialogHeader>
 
           {dialogError ? (
-            <p className="text-sm text-destructive">{dialogError}</p>
+            <p role="alert" className="text-sm text-destructive">{dialogError}</p>
           ) : null}
 
           <AlertDialogFooter>

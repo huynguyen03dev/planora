@@ -34,14 +34,19 @@ function Trend({
   }
 
   if (trend.kind === "flat") {
-    return <span className="text-sm text-muted-foreground">→ 0.0%</span>;
+    return (
+      <span className="text-sm text-muted-foreground">
+        <span aria-hidden="true">→</span><span className="sr-only">Flat </span>0.0%
+      </span>
+    );
   }
 
   return (
     <span
       className={`text-sm ${trend.isImprovement ? "text-success-foreground" : "text-destructive"}`}
+      aria-label={`${trend.rising ? "Trending up" : "Trending down"} ${trend.magnitude.toFixed(1)}%`}
     >
-      {trend.rising ? "↑" : "↓"} {trend.magnitude.toFixed(1)}%
+      <span aria-hidden="true">{trend.rising ? "↑" : "↓"}</span> {trend.magnitude.toFixed(1)}%
     </span>
   );
 }

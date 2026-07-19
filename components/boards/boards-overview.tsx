@@ -24,7 +24,7 @@ export function BoardsOverview({ workspaces, boards, starredBoardIds }: BoardsOv
       {starredBoards.length > 0 ? (
         <section className="space-y-3">
           <h2 className="text-sm font-medium text-muted-foreground">
-            ⭐ Starred
+            <span aria-hidden="true">⭐</span> Starred
           </h2>
           <div className="grid grid-cols-[repeat(auto-fill,minmax(13rem,1fr))] gap-4">
             {starredBoards.map((board) => (

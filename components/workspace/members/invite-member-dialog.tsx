@@ -90,7 +90,7 @@ export function InviteMemberDialog({ workspaceId }: InviteMemberDialogProps) {
     >
       <DialogTrigger asChild>
         <Button size="sm">
-          <HugeiconsIcon icon={UserAdd01Icon} className="size-4" />
+          <HugeiconsIcon icon={UserAdd01Icon} className="size-4" aria-hidden={true} />
           Invite
         </Button>
       </DialogTrigger>
@@ -104,7 +104,7 @@ export function InviteMemberDialog({ workspaceId }: InviteMemberDialogProps) {
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
 
           <div className="space-y-2">
             <Label htmlFor="invite-email">Email</Label>
