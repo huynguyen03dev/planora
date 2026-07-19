@@ -23,6 +23,7 @@ type UseInlineTitleEditorResult = {
   handleBlur: (event: React.FocusEvent<HTMLInputElement>) => void;
   handleInputKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
   handleActionsMenuPointerDown: () => void;
+  cancelEditing: () => void;
 };
 
 export function useInlineTitleEditor({
@@ -35,6 +36,7 @@ export function useInlineTitleEditor({
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
   const skipBlurSaveRef = useRef(false);
+  const editGenerationRef = useRef(0);
   const actionsMenuRef = useRef<HTMLDivElement | null>(null);
 
   function setDraftTitle(nextTitle: string) {
@@ -51,6 +53,7 @@ export function useInlineTitleEditor({
     }
 
     skipBlurSaveRef.current = false;
+    editGenerationRef.current += 1;
     setDraftTitleState(initialTitle);
     setError("");
     setEditing(true);
@@ -58,6 +61,7 @@ export function useInlineTitleEditor({
 
   function cancelEditing() {
     skipBlurSaveRef.current = true;
+    editGenerationRef.current += 1;
     setDraftTitleState(initialTitle);
     setError("");
     setEditing(false);
@@ -88,8 +92,18 @@ export function useInlineTitleEditor({
       return;
     }
 
+    const savedGeneration = editGenerationRef.current;
+
     startTransition(async () => {
       const result = await onSave(nextTitle);
+
+      if (editGenerationRef.current !== savedGeneration) {
+        // The edit was cancelled (or superseded by a new edit) while
+        // this save was in flight — discard the result so we never
+        // reopen the editor with a stale error.
+        return;
+      }
+
       if (!result.success) {
         setError(result.error);
         setEditing(true);
@@ -146,5 +160,6 @@ export function useInlineTitleEditor({
     handleBlur,
     handleInputKeyDown,
     handleActionsMenuPointerDown,
+    cancelEditing,
   };
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 
 import {
   updateWorkspaceRequireEstimateAction,
@@ -27,10 +27,28 @@ export function AnalyticsSettingsForm({
     requireEstimateBeforeDone,
   );
   const [error, setError] = useState("");
+  const [initialTimezone, setInitialTimezone] = useState(timezone);
+  const [initialRequireEstimate, setInitialRequireEstimate] = useState(
+    requireEstimateBeforeDone,
+  );
+  const [successMessage, setSuccessMessage] = useState("");
+
+  useEffect(() => {
+    if (!successMessage) return;
+    const timeoutId = window.setTimeout(() => setSuccessMessage(""), 3000);
+    return () => window.clearTimeout(timeoutId);
+  }, [successMessage]);
+
+  const isDirty =
+    draftTimezone !== initialTimezone ||
+    draftRequireEstimate !== initialRequireEstimate;
+
   const [isPending, startTransition] = useTransition();
 
   function handleSave() {
+    if (!isDirty) return;
     setError("");
+    setSuccessMessage("");
 
     startTransition(async () => {
       const timezoneResult = await updateWorkspaceTimezoneAction(
@@ -48,7 +66,12 @@ export function AnalyticsSettingsForm({
       );
       if (!requireEstimateResult.success) {
         setError(requireEstimateResult.error);
+        return;
       }
+
+      setSuccessMessage("Analytics settings saved");
+      setInitialTimezone(draftTimezone.trim() || "UTC");
+      setInitialRequireEstimate(draftRequireEstimate);
     });
   }
 
@@ -62,6 +85,9 @@ export function AnalyticsSettingsForm({
       </div>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {successMessage ? (
+        <p className="text-sm text-muted-foreground">✓ {successMessage}</p>
+      ) : null}
 
       <div className="block space-y-1">
         <Label htmlFor="timezone-input">Timezone</Label>
@@ -90,7 +116,7 @@ export function AnalyticsSettingsForm({
         </Label>
       </div>
 
-      <Button type="button" size="sm" disabled={isPending} onClick={handleSave}>
+      <Button type="button" size="sm" disabled={!isDirty || isPending} onClick={handleSave}>
         {isPending ? "Saving..." : "Save analytics settings"}
       </Button>
     </div>
