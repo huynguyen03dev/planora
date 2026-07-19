@@ -13,19 +13,14 @@ import { memo, useState } from "react";
 import { Draggable } from "@hello-pangea/dnd";
 
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarGroup,
-  AvatarGroupCount,
-  AvatarImage,
-} from "@/components/ui/avatar";
+import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar";
+import { MemberAvatar } from "@/components/member-avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ArchiveCardDialog } from "@/components/boards/archive-card-dialog";
 import { CardCompletionToggle } from "@/components/boards/card-completion-toggle";
 import { LabelMark } from "@/components/boards/label-mark";
-import { cn, getInitials } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 // How many assignee avatars the card face renders before collapsing the rest
 // into a "+N" chip. The store now carries the full assignee set (US-065 filter
@@ -493,12 +488,13 @@ function ListCardItemComponent({
                     {card.memberCount > 0 ? (
                       <AvatarGroup className="shrink-0">
                         {visibleMembers.map((member) => (
-                          <Avatar key={member.id} size="sm">
-                            {member.image ? (
-                              <AvatarImage src={member.image} alt={member.name} />
-                            ) : null}
-                            <AvatarFallback>{getInitials(member.name)}</AvatarFallback>
-                          </Avatar>
+                          <MemberAvatar
+                            key={member.id}
+                            seed={member.id}
+                            name={member.name}
+                            image={member.image}
+                            size="sm"
+                          />
                         ))}
                         {memberOverflow > 0 ? (
                           <AvatarGroupCount

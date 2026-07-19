@@ -7,16 +7,10 @@ import { StarIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 import { toggleBoardStarAction } from "@/app/(authenticated)/(dashboard)/boards/actions";
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarGroup,
-  AvatarGroupCount,
-  AvatarImage,
-} from "@/components/ui/avatar";
+import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar";
+import { MemberAvatar } from "@/components/member-avatar";
 import { Button } from "@/components/ui/button";
 import { getBoardTheme } from "@/lib/constants";
-import { getInitials } from "@/lib/utils";
 import type { WorkspaceBoardMember } from "@/lib/workspace";
 
 type BoardCardProps = {
@@ -84,12 +78,13 @@ export function BoardCard({
           {memberCount > 0 ? (
             <AvatarGroup className="shrink-0">
               {members.map((member) => (
-                <Avatar key={member.id} size="sm">
-                  {member.image ? (
-                    <AvatarImage src={member.image} alt={member.name} />
-                  ) : null}
-                  <AvatarFallback>{getInitials(member.name)}</AvatarFallback>
-                </Avatar>
+                <MemberAvatar
+                  key={member.id}
+                  seed={member.id}
+                  name={member.name}
+                  image={member.image}
+                  size="sm"
+                />
               ))}
               {memberOverflow > 0 ? (
                 <AvatarGroupCount
