@@ -233,7 +233,10 @@ Required environment variables:
 DATABASE_URL="postgresql://user:password@host:5432/dbname?schema=public"
 BETTER_AUTH_SECRET="<generate-with: openssl rand -base64 32>"
 BETTER_AUTH_URL="http://localhost:3000"
+SMTP_HOST="localhost"   # dev/test only → Mailpit sink; prod uses RESEND_API_KEY
 ```
+
+Full env list (email, Cloudinary, cron, trusted origins) in `.env.example`.
 
 Database setup:
 
@@ -243,7 +246,14 @@ Database setup:
 4. Prototyping only: `npx prisma db push` (no migration file — never in prod).
 
 Local PostgreSQL is available via `docker-compose.yml` (postgres:16-alpine,
-port 5432).
+port 5432). The same file runs **Mailpit** (SMTP `:1025`, UI/API `:8025`) as
+the dev/test mail sink.
+
+**Email verification is enforced in every environment** (decisions 0023 + 0025):
+a new account can't reach `/boards` until its link is followed. Never
+disable/forge/seed to bypass. Get the real link from Mailpit (`localhost:8025`)
+locally; E2E does this automatically via the `signUp()` helper. Details in
+decision 0025.
 
 ---
 
