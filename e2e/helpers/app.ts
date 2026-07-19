@@ -7,15 +7,27 @@
  */
 import { expect, type Page } from "@playwright/test";
 
+import { fetchVerificationLink } from "./mail";
+
 export type Creds = { name: string; email: string; password: string };
 
-/** Sign up a brand-new user via /sign-up; resolves once on the boards page. */
+/**
+ * Sign up a brand-new user via /sign-up and complete email verification, then
+ * resolve once on the boards page. Verification is enforced (decision 0023): we
+ * pull the REAL verification link from Mailpit and follow it — no bypass. Only
+ * the link's path+query is used so a non-local NEXT_PUBLIC_APP_URL in the link
+ * still resolves against the test's baseURL.
+ */
 export async function signUp(page: Page, creds: Creds): Promise<void> {
   await page.goto("/sign-up");
   await page.locator("#name").fill(creds.name);
   await page.locator("#email").fill(creds.email);
   await page.locator("#password").fill(creds.password);
   await page.getByRole("button", { name: /sign up/i }).click();
+
+  const link = await fetchVerificationLink(creds.email);
+  const { pathname, search } = new URL(link);
+  await page.goto(`${pathname}${search}`);
   await page.waitForURL(/\/boards/, { timeout: 30_000 });
 }
 
