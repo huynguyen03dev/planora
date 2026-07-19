@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { RefreshIcon } from "@hugeicons/core-free-icons";
+import { RefreshIcon, TimelineListIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 import { getRuleExecutionLogAction } from "@/app/(authenticated)/(dashboard)/workspace/[slug]/automation/actions";
@@ -135,9 +135,17 @@ export function ExecutionLogPanel({
             ))}
           </div>
         ) : (
-          <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-            No rule executions yet. Runs appear here as rules fire.
-          </p>
+          <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
+            <div className="flex size-10 items-center justify-center rounded-full bg-secondary text-muted-foreground">
+              <HugeiconsIcon icon={TimelineListIcon} className="size-5" aria-hidden="true" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-medium">No execution logs yet</p>
+              <p className="text-sm text-muted-foreground">
+                Runs appear here as rules fire.
+              </p>
+            </div>
+          </div>
         )}
       </div>
     </section>
