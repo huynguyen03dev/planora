@@ -5,7 +5,7 @@
 // header. This translucent-white-over-color treatment reads correctly on any
 // header color in both themes, and matches the Share/Star/Menu buttons.
 export const boardHeaderControlClass =
-  "rounded-full border-white/40 bg-white/15 text-white hover:bg-white/25";
+  "rounded-md border-white/40 bg-white/15 text-white hover:bg-white/25";
 
 // Stronger fill for an active/pressed control (filter applied, labels expanded).
 // Pairs with aria-pressed/aria-* so the state is never conveyed by fill alone.

@@ -661,7 +661,7 @@ function ActionStepEditor({
   onMove: (direction: -1 | 1) => void;
 }) {
   return (
-    <div className="flex items-start gap-2 rounded-md border bg-background p-3">
+    <div className="flex items-start gap-2 rounded-md border bg-muted p-3">
       <div className="flex flex-col gap-1">
         <Button
           type="button"

@@ -140,7 +140,7 @@ export function BoardHeader({
 
   return (
     <header
-      className="space-y-4 rounded-t-xl border border-black/10 p-4 md:p-5"
+      className="space-y-4 rounded-t-xl border border-border p-4 md:p-5"
       style={{ background: boardTheme.header }}
     >
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -250,7 +250,7 @@ export function BoardHeader({
             type="button"
             variant="outline"
             size="sm"
-            className="rounded-full border-white/40 bg-white/15 text-white hover:bg-white/25"
+            className="rounded-md border-white/40 bg-white/15 text-white hover:bg-white/25"
           >
             Share
           </Button>
@@ -263,7 +263,7 @@ export function BoardHeader({
             disabled={starPending}
             aria-pressed={isStarred}
             aria-label={isStarred ? "Unstar board" : "Star board"}
-            className={`rounded-full border-white/40 bg-white/15 hover:bg-white/25 ${
+            className={`rounded-md border-white/40 bg-white/15 hover:bg-white/25 ${
               isStarred ? "text-yellow-400 hover:text-yellow-300" : "text-white"
             }`}
           >
