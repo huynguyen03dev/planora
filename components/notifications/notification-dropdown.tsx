@@ -50,8 +50,15 @@ export function NotificationDropdown({
   const [errorByInvitationId, setErrorByInvitationId] = useState<Record<string, string>>({});
   const [isResolving, startResolving] = useTransition();
   const hasLoadedOnceRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   const fetchInbox = useCallback(async () => {
+    // Supersede any in-flight fetch: a rapid close→open (or a Retry mid-flight)
+    // must not let an older response commit stale data over the newer one.
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setIsLoading(true);
     setFetchError(null);
     setMarkAllReadError(null);
@@ -60,8 +67,8 @@ export function NotificationDropdown({
 
     try {
       const [notificationsRes, invitationsRes] = await Promise.all([
-        fetch("/api/notifications?limit=10"),
-        fetch("/api/invitations/pending"),
+        fetch("/api/notifications?limit=10", { signal: controller.signal }),
+        fetch("/api/invitations/pending", { signal: controller.signal }),
       ]);
 
       let nextNotifications: InboxNotificationItem[] | undefined;
@@ -82,9 +89,10 @@ export function NotificationDropdown({
       }
 
       // Commit state atomically — only replace populated data when both
-      // endpoints succeeded, preventing a partial failure from stitching
-      // fresh data onto stale.
-      if (!anyFailure) {
+      // endpoints succeeded and this fetch wasn't superseded, preventing a
+      // partial failure (or a stale in-flight response) from stitching fresh
+      // data onto stale.
+      if (!anyFailure && !controller.signal.aborted) {
         setNotifications(nextNotifications ?? []);
         setInvitations(nextInvitations ?? []);
         onInvitationCountChange((nextInvitations ?? []).length);
@@ -93,14 +101,18 @@ export function NotificationDropdown({
     } catch {
       anyFailure = true;
     } finally {
-      // Surface error on first load for both network errors (catch) and
-      // non-OK HTTP responses (anyFailure set from ok checks above).
-      // When already loaded once, stay quiet — don't replace populated data.
-      if (anyFailure && !hasLoadedOnceRef.current) {
-        setFetchError("Failed to load notifications. Please try again.");
-      }
+      // A superseded (aborted) fetch must not touch shared state — the fetch
+      // that replaced it owns the loading/error/data now.
+      if (!controller.signal.aborted) {
+        // Surface error on first load for both network errors (catch) and
+        // non-OK HTTP responses (anyFailure set from ok checks above).
+        // When already loaded once, stay quiet — don't replace populated data.
+        if (anyFailure && !hasLoadedOnceRef.current) {
+          setFetchError("Failed to load notifications. Please try again.");
+        }
 
-      setIsLoading(false);
+        setIsLoading(false);
+      }
     }
   }, [onInvitationCountChange]);
 
@@ -108,6 +120,9 @@ export function NotificationDropdown({
     if (isOpen) {
       fetchInbox();
     }
+    // Abort the in-flight fetch when the dropdown closes/unmounts so a late
+    // response can't commit onto a closed panel.
+    return () => abortRef.current?.abort();
   }, [isOpen, fetchInbox]);
 
   const handleNotificationClick = useCallback(
@@ -128,10 +143,10 @@ export function NotificationDropdown({
       onClose();
 
       if (notification.linkUrl) {
-        window.location.href = notification.linkUrl;
+        router.push(notification.linkUrl);
       }
     },
-    [onClose, onMarkOneRead],
+    [onClose, onMarkOneRead, router],
   );
 
   async function handleMarkAllRead() {
