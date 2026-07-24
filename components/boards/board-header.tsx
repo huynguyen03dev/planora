@@ -140,7 +140,7 @@ export function BoardHeader({
 
   return (
     <header
-      className="space-y-4 rounded-t-xl border border-border p-4 md:p-5"
+      className="space-y-4 rounded-t-xl border border-white/15 p-4 md:p-5"
       style={{ background: boardTheme.header }}
     >
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">

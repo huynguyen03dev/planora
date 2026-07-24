@@ -64,23 +64,30 @@ export function NotificationDropdown({
         fetch("/api/invitations/pending"),
       ]);
 
+      let nextNotifications: InboxNotificationItem[] | undefined;
+      let nextInvitations: InboxInvitationItem[] | undefined;
+
       if (notificationsRes.ok) {
         const data = await notificationsRes.json();
-        setNotifications(data.notifications ?? []);
+        nextNotifications = data.notifications ?? [];
       } else {
         anyFailure = true;
       }
 
       if (invitationsRes.ok) {
         const data = await invitationsRes.json();
-        const pending: InboxInvitationItem[] = data.invitations ?? [];
-        setInvitations(pending);
-        onInvitationCountChange(pending.length);
+        nextInvitations = data.invitations ?? [];
       } else {
         anyFailure = true;
       }
 
+      // Commit state atomically — only replace populated data when both
+      // endpoints succeeded, preventing a partial failure from stitching
+      // fresh data onto stale.
       if (!anyFailure) {
+        setNotifications(nextNotifications ?? []);
+        setInvitations(nextInvitations ?? []);
+        onInvitationCountChange((nextInvitations ?? []).length);
         hasLoadedOnceRef.current = true;
       }
     } catch {
@@ -106,9 +113,13 @@ export function NotificationDropdown({
   const handleNotificationClick = useCallback(
     async (notification: InboxNotificationItem) => {
       if (!notification.isRead) {
-        const result = await markNotificationReadAction(notification.id);
-        if (result.success) {
-          onMarkOneRead();
+        try {
+          const result = await markNotificationReadAction(notification.id);
+          if (result.success) {
+            onMarkOneRead();
+          }
+        } catch {
+          // Ignore — proceed to navigation even if mark-read fails.
         }
         // On failure the badge stays accurate (parent count unchanged). The
         // user's primary intent — navigate — still proceeds.
@@ -125,13 +136,17 @@ export function NotificationDropdown({
 
   async function handleMarkAllRead() {
     setMarkAllReadError(null);
-    const result = await markAllNotificationsReadAction();
-    if (!result.success) {
-      setMarkAllReadError(result.error);
-      return;
+    try {
+      const result = await markAllNotificationsReadAction();
+      if (!result.success) {
+        setMarkAllReadError(result.error);
+        return;
+      }
+      setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+      onMarkAllRead();
+    } catch {
+      setMarkAllReadError("Failed to mark all as read. Please try again.");
     }
-    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
-    onMarkAllRead();
   }
 
   function setInvitationError(invitationId: string, error: string) {
@@ -215,7 +230,7 @@ export function NotificationDropdown({
             onClick={handleMarkAllRead}
             className="flex h-auto items-center gap-1 p-1 text-xs text-muted-foreground hover:text-foreground"
           >
-            <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-3.5" />
+            <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-3.5" aria-hidden="true" />
             Mark all read
           </Button>
         )}
@@ -231,6 +246,7 @@ export function NotificationDropdown({
             <HugeiconsIcon
               icon={Notification03Icon}
               className="size-8 opacity-50 text-destructive"
+              aria-hidden="true"
             />
             <span className="text-sm text-destructive" role="alert">
               {fetchError}
@@ -246,7 +262,7 @@ export function NotificationDropdown({
           </div>
         ) : items.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-8 text-muted-foreground">
-            <HugeiconsIcon icon={Notification03Icon} className="size-8 opacity-50" />
+            <HugeiconsIcon icon={Notification03Icon} className="size-8 opacity-50" aria-hidden="true" />
             <span className="text-sm">No notifications yet</span>
           </div>
         ) : (
@@ -260,6 +276,7 @@ export function NotificationDropdown({
                   <HugeiconsIcon
                     icon={UserGroupIcon}
                     className="mt-0.5 size-4 shrink-0 text-primary"
+                    aria-hidden="true"
                   />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium leading-tight">

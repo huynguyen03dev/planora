@@ -51,27 +51,23 @@ export function AnalyticsSettingsForm({
     setSuccessMessage("");
 
     startTransition(async () => {
-      const timezoneResult = await updateWorkspaceTimezoneAction(
-        workspaceId,
-        draftTimezone.trim() || "UTC",
-      );
+      const trimmedTimezone = draftTimezone.trim() || "UTC";
+      const timezoneResult = await updateWorkspaceTimezoneAction(workspaceId, trimmedTimezone);
       if (!timezoneResult.success) {
         setError(timezoneResult.error);
         return;
       }
+      setInitialTimezone(trimmedTimezone);
+      setDraftTimezone(trimmedTimezone);
 
-      const requireEstimateResult = await updateWorkspaceRequireEstimateAction(
-        workspaceId,
-        draftRequireEstimate,
-      );
+      const requireEstimateResult = await updateWorkspaceRequireEstimateAction(workspaceId, draftRequireEstimate);
       if (!requireEstimateResult.success) {
         setError(requireEstimateResult.error);
         return;
       }
+      setInitialRequireEstimate(draftRequireEstimate);
 
       setSuccessMessage("Analytics settings saved");
-      setInitialTimezone(draftTimezone.trim() || "UTC");
-      setInitialRequireEstimate(draftRequireEstimate);
     });
   }
 
@@ -84,9 +80,9 @@ export function AnalyticsSettingsForm({
         </p>
       </div>
 
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
       {successMessage ? (
-        <p className="text-sm text-muted-foreground">✓ {successMessage}</p>
+        <p className="text-sm text-muted-foreground" role="status">✓ {successMessage}</p>
       ) : null}
 
       <div className="block space-y-1">
