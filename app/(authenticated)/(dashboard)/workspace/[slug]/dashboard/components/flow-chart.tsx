@@ -121,11 +121,11 @@ export function FlowChart({ data, createdTotal, completedTotal }: FlowChartProps
         </div>
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5">
-            <span className="h-0.5 w-4 rounded" style={{ backgroundColor: CREATED_COLOR }} />
+            <span className="h-0.5 w-4 rounded" style={{ backgroundColor: CREATED_COLOR }} aria-hidden="true" />
             Created
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="h-0.5 w-4 rounded" style={{ backgroundColor: COMPLETED_COLOR }} />
+            <span className="h-0.5 w-4 rounded" style={{ backgroundColor: COMPLETED_COLOR }} aria-hidden="true" />
             Completed
           </span>
         </div>
@@ -232,11 +232,11 @@ export function FlowChart({ data, createdTotal, completedTotal }: FlowChartProps
           >
             <div className="font-medium">{formatChartDate(hoverPt.date)}</div>
             <div className="mt-0.5 flex items-center gap-1.5 text-muted-foreground">
-              <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: CREATED_COLOR }} />
+              <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: CREATED_COLOR }} aria-hidden="true" />
               Created {hoverPt.created}
             </div>
             <div className="flex items-center gap-1.5 text-muted-foreground">
-              <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: COMPLETED_COLOR }} />
+              <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: COMPLETED_COLOR }} aria-hidden="true" />
               Completed {hoverPt.completed}
             </div>
           </div>

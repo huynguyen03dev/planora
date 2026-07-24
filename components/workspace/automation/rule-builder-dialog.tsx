@@ -382,7 +382,7 @@ export function RuleBuilderDialog({
               the form tail overflow onto the footer (US-066 browser QA). */}
           <div className="min-h-0 flex-1 overflow-y-auto pr-4">
             <div className="space-y-5">
-              {error ? <p className="text-sm text-destructive">{error}</p> : null}
+              {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
 
               {/* Name + description */}
               <div className="space-y-2">
@@ -484,7 +484,7 @@ export function RuleBuilderDialog({
                         onValueChange={(v) => updateConfig({ labelId: v })}
                         disabled={isPending}
                       >
-                        <SelectTrigger className="w-full">
+                        <SelectTrigger className="w-full" aria-label="Label added">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -506,7 +506,7 @@ export function RuleBuilderDialog({
                         onValueChange={(v) => updateConfig({ priority: v })}
                         disabled={isPending}
                       >
-                        <SelectTrigger className="w-full">
+                        <SelectTrigger className="w-full" aria-label="Priority is">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -552,7 +552,7 @@ export function RuleBuilderDialog({
                     onClick={addStep}
                     disabled={isPending || draft.actions.length >= 20}
                   >
-                    <HugeiconsIcon icon={PlusSignIcon} className="size-4" />
+                    <HugeiconsIcon icon={PlusSignIcon} className="size-4" aria-hidden="true" />
                     Add action
                   </Button>
                 </div>
@@ -625,7 +625,7 @@ function ConfigListSelect({
     <div className="space-y-2">
       <Label className="text-sm">{label}</Label>
       <Select value={value} onValueChange={onChange} disabled={disabled}>
-        <SelectTrigger className="w-full">
+        <SelectTrigger className="w-full" aria-label={label}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -661,7 +661,7 @@ function ActionStepEditor({
   onMove: (direction: -1 | 1) => void;
 }) {
   return (
-    <div className="flex items-start gap-2 rounded-md border bg-background p-3">
+    <div className="flex items-start gap-2 rounded-md border bg-muted p-3">
       <div className="flex flex-col gap-1">
         <Button
           type="button"
@@ -672,7 +672,7 @@ function ActionStepEditor({
           aria-label="Move action up"
           className="text-muted-foreground"
         >
-          <HugeiconsIcon icon={ArrowUp01Icon} className="size-4" />
+          <HugeiconsIcon icon={ArrowUp01Icon} className="size-4" aria-hidden="true" />
         </Button>
         <Button
           type="button"
@@ -683,7 +683,7 @@ function ActionStepEditor({
           aria-label="Move action down"
           className="text-muted-foreground"
         >
-          <HugeiconsIcon icon={ArrowDown01Icon} className="size-4" />
+          <HugeiconsIcon icon={ArrowDown01Icon} className="size-4" aria-hidden="true" />
         </Button>
       </div>
 
@@ -716,7 +716,7 @@ function ActionStepEditor({
         title={total === 1 ? "A rule needs at least one action" : "Remove action"}
         className="pt-1 text-muted-foreground transition-colors hover:text-destructive disabled:opacity-30"
       >
-        <HugeiconsIcon icon={Delete02Icon} className="size-4" />
+        <HugeiconsIcon icon={Delete02Icon} className="size-4" aria-hidden="true" />
       </button>
     </div>
   );

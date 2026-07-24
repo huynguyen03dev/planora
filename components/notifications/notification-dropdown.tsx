@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useTransition } from "react";
+import { useState, useEffect, useCallback, useRef, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -45,31 +45,61 @@ export function NotificationDropdown({
   const [notifications, setNotifications] = useState<InboxNotificationItem[]>([]);
   const [invitations, setInvitations] = useState<InboxInvitationItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [markAllReadError, setMarkAllReadError] = useState<string | null>(null);
   const [errorByInvitationId, setErrorByInvitationId] = useState<Record<string, string>>({});
   const [isResolving, startResolving] = useTransition();
+  const hasLoadedOnceRef = useRef(false);
 
   const fetchInbox = useCallback(async () => {
     setIsLoading(true);
+    setFetchError(null);
+    setMarkAllReadError(null);
+
+    let anyFailure = false;
+
     try {
       const [notificationsRes, invitationsRes] = await Promise.all([
         fetch("/api/notifications?limit=10"),
         fetch("/api/invitations/pending"),
       ]);
 
+      let nextNotifications: InboxNotificationItem[] | undefined;
+      let nextInvitations: InboxInvitationItem[] | undefined;
+
       if (notificationsRes.ok) {
         const data = await notificationsRes.json();
-        setNotifications(data.notifications ?? []);
+        nextNotifications = data.notifications ?? [];
+      } else {
+        anyFailure = true;
       }
 
       if (invitationsRes.ok) {
         const data = await invitationsRes.json();
-        const pending: InboxInvitationItem[] = data.invitations ?? [];
-        setInvitations(pending);
-        onInvitationCountChange(pending.length);
+        nextInvitations = data.invitations ?? [];
+      } else {
+        anyFailure = true;
+      }
+
+      // Commit state atomically — only replace populated data when both
+      // endpoints succeeded, preventing a partial failure from stitching
+      // fresh data onto stale.
+      if (!anyFailure) {
+        setNotifications(nextNotifications ?? []);
+        setInvitations(nextInvitations ?? []);
+        onInvitationCountChange((nextInvitations ?? []).length);
+        hasLoadedOnceRef.current = true;
       }
     } catch {
-      // Silently fail — the bell badge still reflects the last known counts.
+      anyFailure = true;
     } finally {
+      // Surface error on first load for both network errors (catch) and
+      // non-OK HTTP responses (anyFailure set from ok checks above).
+      // When already loaded once, stay quiet — don't replace populated data.
+      if (anyFailure && !hasLoadedOnceRef.current) {
+        setFetchError("Failed to load notifications. Please try again.");
+      }
+
       setIsLoading(false);
     }
   }, [onInvitationCountChange]);
@@ -83,8 +113,16 @@ export function NotificationDropdown({
   const handleNotificationClick = useCallback(
     async (notification: InboxNotificationItem) => {
       if (!notification.isRead) {
-        await markNotificationReadAction(notification.id);
-        onMarkOneRead();
+        try {
+          const result = await markNotificationReadAction(notification.id);
+          if (result.success) {
+            onMarkOneRead();
+          }
+        } catch {
+          // Ignore — proceed to navigation even if mark-read fails.
+        }
+        // On failure the badge stays accurate (parent count unchanged). The
+        // user's primary intent — navigate — still proceeds.
       }
 
       onClose();
@@ -97,9 +135,18 @@ export function NotificationDropdown({
   );
 
   async function handleMarkAllRead() {
-    await markAllNotificationsReadAction();
-    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
-    onMarkAllRead();
+    setMarkAllReadError(null);
+    try {
+      const result = await markAllNotificationsReadAction();
+      if (!result.success) {
+        setMarkAllReadError(result.error);
+        return;
+      }
+      setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+      onMarkAllRead();
+    } catch {
+      setMarkAllReadError("Failed to mark all as read. Please try again.");
+    }
   }
 
   function setInvitationError(invitationId: string, error: string) {
@@ -171,6 +218,11 @@ export function NotificationDropdown({
     <div className="w-full flex flex-col">
       <div className="flex items-center justify-between border-b px-4 py-2">
         <span className="text-sm font-semibold">Notifications</span>
+        {markAllReadError && (
+          <span className="text-xs text-destructive" role="alert">
+            {markAllReadError}
+          </span>
+        )}
         {hasUnreadNotifications && (
           <Button
             type="button"
@@ -178,7 +230,7 @@ export function NotificationDropdown({
             onClick={handleMarkAllRead}
             className="flex h-auto items-center gap-1 p-1 text-xs text-muted-foreground hover:text-foreground"
           >
-            <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-3.5" />
+            <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-3.5" aria-hidden="true" />
             Mark all read
           </Button>
         )}
@@ -189,9 +241,28 @@ export function NotificationDropdown({
           <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
             Loading...
           </div>
+        ) : fetchError ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-8">
+            <HugeiconsIcon
+              icon={Notification03Icon}
+              className="size-8 opacity-50 text-destructive"
+              aria-hidden="true"
+            />
+            <span className="text-sm text-destructive" role="alert">
+              {fetchError}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={fetchInbox}
+            >
+              Retry
+            </Button>
+          </div>
         ) : items.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-8 text-muted-foreground">
-            <HugeiconsIcon icon={Notification03Icon} className="size-8 opacity-50" />
+            <HugeiconsIcon icon={Notification03Icon} className="size-8 opacity-50" aria-hidden="true" />
             <span className="text-sm">No notifications yet</span>
           </div>
         ) : (
@@ -205,6 +276,7 @@ export function NotificationDropdown({
                   <HugeiconsIcon
                     icon={UserGroupIcon}
                     className="mt-0.5 size-4 shrink-0 text-primary"
+                    aria-hidden="true"
                   />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium leading-tight">

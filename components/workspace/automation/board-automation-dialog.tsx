@@ -115,7 +115,7 @@ export function BoardAutomationDialog({ boardId, boardTitle }: BoardAutomationDi
           size="sm"
           className={cn("gap-1.5", boardHeaderControlClass)}
         >
-          <HugeiconsIcon icon={AiMagicIcon} size={16} />
+          <HugeiconsIcon icon={AiMagicIcon} size={16} aria-hidden="true" />
           Automation
         </Button>
       </DialogTrigger>
@@ -137,7 +137,7 @@ export function BoardAutomationDialog({ boardId, boardTitle }: BoardAutomationDi
             <AutomationSkeleton />
           ) : error ? (
             <div className="flex flex-col items-center gap-3 py-10 text-center">
-              <p className="text-sm text-destructive">{error}</p>
+              <p className="text-sm text-destructive" role="alert">{error}</p>
               <Button type="button" variant="outline" size="sm" onClick={load}>
                 Try again
               </Button>

@@ -70,10 +70,9 @@ describe("ExecutionLogPanel", () => {
   it("renders empty state when there are no log entries", () => {
     renderPanel({ initialLogs: [] });
 
+    expect(screen.getByText("No execution logs yet")).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "No rule executions yet. Runs appear here as rules fire.",
-      ),
+      screen.getByText("Runs appear here as rules fire."),
     ).toBeInTheDocument();
     expect(screen.getByText("Execution log")).toBeInTheDocument();
   });

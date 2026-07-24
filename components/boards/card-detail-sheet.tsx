@@ -204,7 +204,7 @@ export function CardDetailSheet({
       }}
     >
       <DialogContent
-        className="h-[min(90vh,820px)] max-w-[min(96vw,768px)] overflow-hidden p-0"
+        className="h-[min(90vh,820px)] max-w-[min(96vw,768px)] overflow-hidden bg-popover p-0"
         onEscapeKeyDown={(e) => {
           // While the hero title is being edited, Escape reverts the field
           // (handled on the input) and must NOT close the dialog. Cancel Radix's
@@ -485,7 +485,7 @@ function CardDetailDialogBody({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
+    <div className="flex h-full min-h-0 flex-col">
       {/* Document-style header: the title is the hero (inline-editable), with an
           "Add to card" action row beneath it — no breadcrumb, no "Edit card"
           heading, no uppercase TITLE label (US-043). The Dialog still needs an

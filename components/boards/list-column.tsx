@@ -170,6 +170,7 @@ function ListColumnComponent({
     handleBlur,
     handleInputKeyDown,
     handleActionsMenuPointerDown,
+    cancelEditing,
   } = titleEditor;
 
   function handleDelete() {
@@ -361,7 +362,25 @@ function ListColumnComponent({
               )}
             </div>
 
-            {error ? <p className="text-xs text-destructive">{error}</p> : null}
+            {error ? (
+              <p role="alert" className="text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
+
+            {canEdit && editing ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={isPending}
+                onPointerDown={handleActionsMenuPointerDown}
+                onClick={cancelEditing}
+                className="self-start text-muted-foreground"
+              >
+                Cancel
+              </Button>
+            ) : null}
 
             <Droppable droppableId={list.id} type="card" isDropDisabled={!canSortCards}>
               {(dropProvided, dropSnapshot) => (

@@ -1,6 +1,8 @@
 import Link from "next/link";
-import { Analytics01Icon, UserMultipleIcon } from "@hugeicons/core-free-icons";
+import { Analytics01Icon, GridIcon, UserMultipleIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+
+import { buttonVariants } from "@/components/ui/button";
 
 import { verifySession } from "@/lib/dal";
 import { listWorkspaceMembershipsByUserId } from "@/lib/workspace";
@@ -70,9 +72,23 @@ export default async function WorkspacePage() {
           })}
         </ul>
       ) : (
-        <p className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">
-          You are not a member of any workspace yet.
-        </p>
+        <div className="flex flex-1 flex-col items-center justify-center px-4 py-16">
+          <div className="max-w-sm text-center">
+            <div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-xl bg-muted">
+              <HugeiconsIcon icon={GridIcon} className="size-8" aria-hidden="true" />
+            </div>
+            <h1 className="mb-2 text-xl font-semibold">Create your first workspace</h1>
+            <p className="mb-6 text-sm text-muted-foreground">
+              Workspaces help you organize boards for different teams or projects.
+            </p>
+            <Link
+              href="/workspace?createWorkspace=1"
+              className={buttonVariants({ size: "lg" })}
+            >
+              Create workspace
+            </Link>
+          </div>
+        </div>
       )}
     </main>
   );

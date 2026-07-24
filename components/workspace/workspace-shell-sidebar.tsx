@@ -32,13 +32,13 @@ export function WorkspaceShellSidebar({
       label: "Boards",
       href: `/boards?workspace=${workspaceId}`,
       icon: KanbanIcon,
-      active: false,
+      active: pathname === base || pathname === `${base}/`,
     },
     {
       label: "Analytics",
       href: `${base}/dashboard`,
       icon: Analytics01Icon,
-      active: pathname === `${base}/dashboard`,
+      active: pathname.startsWith(`${base}/dashboard`),
     },
     {
       label: "Members",

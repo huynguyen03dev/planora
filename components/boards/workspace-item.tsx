@@ -73,6 +73,7 @@ export function WorkspaceItem({ workspace }: WorkspaceItemProps) {
       <button
         type="button"
         onClick={() => setManuallyExpanded((value) => !value)}
+        aria-expanded={expanded}
         className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-sidebar-accent"
       >
         <div
@@ -81,7 +82,7 @@ export function WorkspaceItem({ workspace }: WorkspaceItemProps) {
           {initial}
         </div>
         <span className="flex-1 truncate text-left">{workspace.name}</span>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs text-muted-foreground" aria-hidden="true">
           {expanded ? "▼" : "▶"}
         </span>
       </button>

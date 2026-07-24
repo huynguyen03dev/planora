@@ -220,6 +220,7 @@ export function CardChecklistsSection({
                     }))
                   }
                   placeholder="Add an item…"
+                  aria-label="Add an item"
                   disabled={isPending}
                   className="h-9"
                 />
@@ -248,6 +249,7 @@ export function CardChecklistsSection({
             value={newChecklistTitle}
             onChange={(event) => setNewChecklistTitle(event.target.value)}
             placeholder="Checklist title"
+            aria-label="Checklist title"
             disabled={isPending}
             autoFocus
             className="h-9"

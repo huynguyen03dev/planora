@@ -10,7 +10,17 @@ import {
   removeCardLabelAction,
   updateLabelAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -144,6 +154,7 @@ export function CardLabelsSection({
                       >
                         <span
                           className="h-4 w-6 rounded-sm border"
+                          aria-hidden="true"
                           style={labelSwatchStyle(label.color)}
                         />
                         <span className="flex-1">{label.name}</span>
@@ -183,6 +194,7 @@ function ManageLabelsDialog({ boardId, boardLabels }: ManageLabelsDialogProps) {
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [deleteConfirmLabel, setDeleteConfirmLabel] = useState<LabelChip | null>(null);
 
   function run(action: () => Promise<{ success: boolean; error?: string }>) {
     if (isPending) {
@@ -201,6 +213,26 @@ function ManageLabelsDialog({ boardId, boardLabels }: ManageLabelsDialogProps) {
     });
   }
 
+  function handleDeleteConfirm() {
+    if (!deleteConfirmLabel || isPending) {
+      return;
+    }
+    setError("");
+    const formData = new FormData();
+    formData.set("labelId", deleteConfirmLabel.id);
+    startTransition(async () => {
+      const result = await deleteLabelAction(formData);
+      if (!result.success) {
+        setError(result.error ?? "Something went wrong.");
+        return;
+      }
+      setEditingId(null);
+      setCreating(false);
+      setDeleteConfirmLabel(null);
+      router.refresh();
+    });
+  }
+
   return (
     <Dialog
       open={open}
@@ -210,6 +242,7 @@ function ManageLabelsDialog({ boardId, boardLabels }: ManageLabelsDialogProps) {
           setEditingId(null);
           setCreating(false);
           setError("");
+          setDeleteConfirmLabel(null);
         }
       }}
     >
@@ -260,6 +293,7 @@ function ManageLabelsDialog({ boardId, boardLabels }: ManageLabelsDialogProps) {
                 >
                   <span
                     className="h-4 w-6 rounded-sm border"
+                    aria-hidden="true"
                     style={labelSwatchStyle(label.color)}
                   />
                   <span className="flex-1 text-sm">{label.name}</span>
@@ -278,9 +312,8 @@ function ManageLabelsDialog({ boardId, boardLabels }: ManageLabelsDialogProps) {
                     size="sm"
                     disabled={isPending}
                     onClick={() => {
-                      const formData = new FormData();
-                      formData.set("labelId", label.id);
-                      run(() => deleteLabelAction(formData));
+                      setError("");
+                      setDeleteConfirmLabel(label);
                     }}
                   >
                     Delete
@@ -318,6 +351,54 @@ function ManageLabelsDialog({ boardId, boardLabels }: ManageLabelsDialogProps) {
           </Button>
         )}
       </DialogContent>
+
+      <AlertDialog
+        open={deleteConfirmLabel !== null}
+        onOpenChange={(next) => {
+          if (isPending) {
+            return;
+          }
+          if (!next) {
+            setDeleteConfirmLabel(null);
+            setError("");
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete &quot;{deleteConfirmLabel?.name}&quot;?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove this label from every card on this board. Cards
+              that currently use this label will no longer have it assigned.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {error && deleteConfirmLabel ? (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              className={buttonVariants({ variant: "outline" })}
+              disabled={isPending}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className={buttonVariants({ variant: "destructive" })}
+              onClick={(event) => {
+                event.preventDefault();
+                handleDeleteConfirm();
+              }}
+              disabled={isPending}
+            >
+              {isPending ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

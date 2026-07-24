@@ -148,7 +148,7 @@ export function RuleRow({
               onMutated={onMutated}
               trigger={
                 <Button variant="ghost" size="icon" aria-label={`Edit ${rule.name}`}>
-                  <HugeiconsIcon icon={PencilEdit01Icon} className="size-4" />
+                  <HugeiconsIcon icon={PencilEdit01Icon} className="size-4" aria-hidden="true" />
                 </Button>
               }
             />
@@ -159,7 +159,7 @@ export function RuleRow({
               onClick={() => setConfirmOpen(true)}
               className="text-muted-foreground hover:text-destructive"
             >
-              <HugeiconsIcon icon={Delete02Icon} className="size-4" />
+              <HugeiconsIcon icon={Delete02Icon} className="size-4" aria-hidden="true" />
             </Button>
 
             <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>

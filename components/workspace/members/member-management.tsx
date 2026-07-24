@@ -73,6 +73,7 @@ export function MemberManagement({
         <HugeiconsIcon
           icon={Search01Icon}
           className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+          aria-hidden={true}
         />
         <Input
           value={filter}
@@ -97,7 +98,7 @@ export function MemberManagement({
               />
             ))
           ) : (
-            <p className="px-4 py-6 text-center text-sm text-muted-foreground">
+            <p className="px-4 py-6 text-center text-sm text-muted-foreground" role="status">
               No members match &quot;{filter}&quot;.
             </p>
           )}
@@ -128,7 +129,7 @@ export function MemberManagement({
 
       {toast ? (
         <div
-          role="status"
+          role="alert"
           className="fixed right-4 top-4 z-[60] rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive shadow-md"
         >
           {toast}
