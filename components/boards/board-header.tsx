@@ -13,7 +13,7 @@ import { BoardFilter } from "@/components/boards/board-filter";
 import { BoardAutomationDialog } from "@/components/workspace/automation/board-automation-dialog";
 import { boardHeaderAvatarCountClass } from "@/components/boards/board-header-controls";
 import { ArchivedCardsDialog } from "@/components/boards/archived-cards-dialog";
-import type { ArchivedCardData } from "@/components/boards/archived-cards-dialog";
+import type { ArchivedCardData, ArchivedListData } from "@/components/boards/archived-cards-dialog";
 import { BoardMenu } from "@/components/boards/board-menu";
 import {
   Avatar,
@@ -42,7 +42,11 @@ type BoardHeaderProps = {
   canEdit: boolean;
   canDelete: boolean;
   canArchiveCard: boolean;
+  canDeleteList?: boolean;
   archivedCards: ArchivedCardData[];
+  archivedLists?: ArchivedListData[];
+  // Admin-only permanent delete affordance (US-074 Slice C).
+  canPermanentDelete?: boolean;
   starred: boolean;
 };
 
@@ -51,7 +55,10 @@ export function BoardHeader({
   canEdit,
   canDelete,
   canArchiveCard,
+  canDeleteList = false,
   archivedCards,
+  archivedLists = [],
+  canPermanentDelete = false,
   starred,
 }: BoardHeaderProps) {
   // Live presence: who currently has this board open. Server-driven, deduped.
@@ -280,7 +287,9 @@ export function BoardHeader({
 
           <ArchivedCardsDialog
             archivedCards={archivedCards}
-            canRestore={canArchiveCard}
+            archivedLists={archivedLists}
+            canRestore={canArchiveCard || canDeleteList}
+            canPermanentDelete={canPermanentDelete}
           />
 
           <BoardMenu board={board} canEdit={canEdit} canDelete={canDelete} />

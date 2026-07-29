@@ -31,6 +31,26 @@ export const deleteListSchema = z.object({
 
 export type DeleteListInput = z.infer<typeof deleteListSchema>;
 
+export const archiveListSchema = deleteListSchema;
+export type ArchiveListInput = DeleteListInput;
+
+export const restoreListSchema = deleteListSchema;
+export type RestoreListInput = DeleteListInput;
+
+export const permanentDeleteListSchema = z.object({
+  listId: z.string().uuid({ message: "Invalid list ID" }),
+  confirmationText: z
+    .string({ message: "Confirmation text is required" })
+    .min(1, "Confirmation text is required"),
+  force: z
+    .enum(["true", "false"])
+    .optional()
+    .default("false")
+    .transform((val) => val === "true"),
+});
+
+export type PermanentDeleteListInput = z.infer<typeof permanentDeleteListSchema>;
+
 const maybeListIdSchema = z
   .string({ message: "Invalid list ID" })
   .uuid({ message: "Invalid list ID" })

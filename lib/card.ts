@@ -3,6 +3,7 @@ import "server-only";
 import type { Prisma } from "@/app/generated/prisma/client";
 
 import db from "@/lib/prisma";
+
 import {
   CARD_POSITION_GAP,
   LIVE_CARD_SCOPE,
@@ -266,6 +267,7 @@ export async function getCardWithListAndBoard(
         select: {
           id: true,
           boardId: true,
+          archivedAt: true,
           board: {
             select: {
               id: true,
@@ -279,6 +281,14 @@ export async function getCardWithListAndBoard(
   });
 
   if (!card) {
+    return null;
+  }
+
+  // US-074 Slice B2: reject if the parent list is archived, making the card
+  // immutable through all ordinary card/checklist/comment/member/label/attachment
+  // actions. Only archive-aware flows (getArchivedCardWithListAndBoard,
+  // getArchivedCards) resolve cards under archived lists.
+  if (card.list.archivedAt !== null) {
     return null;
   }
 
@@ -511,6 +521,7 @@ export async function getCardWithListAndMembers(cardId: string): Promise<{
         select: {
           id: true,
           boardId: true,
+          archivedAt: true,
           board: {
             select: {
               id: true,
@@ -528,6 +539,11 @@ export async function getCardWithListAndMembers(cardId: string): Promise<{
   });
 
   if (!card) {
+    return null;
+  }
+
+  // US-074 Slice B2: reject if the parent list is archived.
+  if (card.list.archivedAt !== null) {
     return null;
   }
 
@@ -566,6 +582,7 @@ export async function getArchivedCards(
       archivedAt: { not: null },
       list: {
         boardId,
+        archivedAt: null,
         board: { archivedAt: null },
       },
     },
@@ -625,6 +642,7 @@ export async function getArchivedCardWithListAndBoard(
         select: {
           id: true,
           boardId: true,
+          archivedAt: true,
           board: {
             select: {
               id: true,
@@ -638,6 +656,13 @@ export async function getArchivedCardWithListAndBoard(
   });
 
   if (!card) {
+    return null;
+  }
+
+  // US-074 Slice B2: a card can only be restored if its parent list is active.
+  // Block restoreCardAction when the parent list is archived — the user must
+  // restore the list first.
+  if (card.list.archivedAt !== null) {
     return null;
   }
 
@@ -656,8 +681,10 @@ export async function getArchivedCardWithListAndBoard(
 export async function updateCardCover(
   cardId: string,
   coverImage: string | null,
+  client?: Prisma.TransactionClient,
 ): Promise<CardDetailRecord> {
-  return db.card.update({
+  const c = client ?? db;
+  return c.card.update({
     where: { id: cardId, archivedAt: null },
     data: { coverImage },
     select: CARD_DETAIL_SELECT,

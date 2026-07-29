@@ -8,37 +8,11 @@ import { AUTOMATION_ACTOR_USER_ID } from "./index";
 import { evaluateConditions } from "./matcher";
 import { ChainTracker } from "./loop-guard";
 import { executeRuleActions, type DeferredEffect } from "./executor";
-import type { RuleEventPayload } from "./types";
+import { RuleExecutionError, type RuleEventPayload } from "./types";
 
 type Client = Prisma.TransactionClient;
 
 type ExecutionStatus = "success" | "skipped" | "error" | "halted";
-
-/**
- * Thrown when a rule action fails inside the trigger transaction. The evaluator
- * does NOT log an error row inside the tx (it would roll back with it); it throws
- * this so the Server Action can roll the tx back and then write the error
- * `RuleExecutionLog` row post-rollback via {@link logRuleExecutionError}
- * (decision 0022).
- */
-export class RuleExecutionError extends Error {
-  readonly context: {
-    workspaceId: string;
-    ruleId: string;
-    ruleName: string;
-    chainId: string;
-    chainDepth: number;
-    cardId: string | null;
-    triggerType: TriggerType;
-    cause: unknown;
-  };
-
-  constructor(message: string, context: RuleExecutionError["context"]) {
-    super(message);
-    this.name = "RuleExecutionError";
-    this.context = context;
-  }
-}
 
 export interface EvaluateRulesParams {
   /** The trigger's transaction client — all rule reads/writes share it. */
@@ -201,12 +175,16 @@ export async function evaluateRules(
         client,
         rule: {
           id: rule.id,
+          name: rule.name,
           workspaceId,
           boardId: rule.boardId,
           actions: parsedActions.data,
         },
         event,
         actorId,
+        triggerType,
+        chainId: chain.chainId,
+        chainDepth: chain.depth,
       });
       effects.push(...result.effects);
 

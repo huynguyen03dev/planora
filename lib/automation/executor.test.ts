@@ -4,7 +4,7 @@ import type { Prisma } from "@/app/generated/prisma/client";
 
 import type { ActionStep } from "@/lib/schemas/automation";
 
-import type { RuleEventPayload } from "./types";
+import { RuleExecutionError, type RuleEventPayload } from "./types";
 import { CARD_POSITION_GAP } from "@/lib/ordering";
 
 // ─── Mocks ───────────────────────────────────────────────────────────
@@ -93,7 +93,13 @@ import { resolveRecipient, resolveRemoveScope } from "./resolver";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
-function makeClient(): Prisma.TransactionClient {
+function makeClient(targetListOverrides?: {
+  archivedAt?: Date | null;
+  workspaceId?: string;
+  /** When true, list.findUnique resolves to null (list not found). */
+  notFound?: boolean;
+}): Prisma.TransactionClient {
+  const target = targetListOverrides ?? { archivedAt: null, workspaceId: "ws-1" };
   return {
     card: {
       findUniqueOrThrow: vi.fn(),
@@ -106,11 +112,19 @@ function makeClient(): Prisma.TransactionClient {
     cardHistoryEvent: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
+    list: {
+      findUnique: vi.fn().mockResolvedValue(
+        target.notFound
+          ? null
+          : { archivedAt: target.archivedAt ?? null, board: { workspaceId: target.workspaceId } },
+      ),
+    },
   } as unknown as Prisma.TransactionClient;
 }
 
 const baseRule = {
   id: "rule-1",
+  name: "Test Rule",
   workspaceId: "ws-1",
   boardId: "board-1",
 };
@@ -139,6 +153,9 @@ describe("executeRuleActions", () => {
         rule: { ...baseRule, actions: [{ type: "set-priority", priority: "HIGH" }] },
         event: { boardId: "board-1" },
         actorId: ACTOR,
+        triggerType: "card-moved-to-list",
+        chainId: "",
+        chainDepth: 0,
       }),
     ).rejects.toThrow("event.cardId is required");
   });
@@ -151,6 +168,9 @@ describe("executeRuleActions", () => {
         rule: { ...baseRule, actions: [{ type: "set-priority", priority: "HIGH" }] },
         event: { cardId: "card-1" },
         actorId: ACTOR,
+        triggerType: "card-moved-to-list",
+        chainId: "",
+        chainDepth: 0,
       }),
     ).rejects.toThrow("event.boardId is required");
   });
@@ -180,6 +200,9 @@ describe("executeRuleActions", () => {
       rule: { ...baseRule, actions },
       event: baseEvent,
       actorId: ACTOR,
+      triggerType: "card-moved-to-list",
+      chainId: "",
+      chainDepth: 0,
     });
 
     expect(callOrder).toEqual(["updateCardPriority", "addCardLabel"]);
@@ -204,6 +227,9 @@ describe("executeRuleActions", () => {
         rule: { ...baseRule, actions },
         event: baseEvent,
         actorId: ACTOR,
+        triggerType: "card-moved-to-list",
+        chainId: "",
+        chainDepth: 0,
       }),
     ).rejects.toThrow("DB error");
 
@@ -221,6 +247,9 @@ describe("executeRuleActions", () => {
       rule: { ...baseRule, actions },
       event: baseEvent,
       actorId: ACTOR,
+      triggerType: "card-moved-to-list",
+      chainId: "",
+      chainDepth: 0,
     });
 
     expect(updateCardPriority).toHaveBeenCalledWith("card-1", "URGENT", client);
@@ -253,6 +282,9 @@ describe("executeRuleActions", () => {
         rule: { ...baseRule, actions },
         event: baseEvent,
         actorId: ACTOR,
+        triggerType: "card-moved-to-list",
+        chainId: "",
+        chainDepth: 0,
       });
 
       expect(cardFindFirst).toHaveBeenCalledWith({
@@ -298,6 +330,9 @@ describe("executeRuleActions", () => {
         rule: { ...baseRule, actions },
         event: baseEvent,
         actorId: ACTOR,
+        triggerType: "card-moved-to-list",
+        chainId: "",
+        chainDepth: 0,
       });
 
       expect(cardUpdate).toHaveBeenCalledWith({
@@ -329,6 +364,9 @@ describe("executeRuleActions", () => {
         rule: { ...baseRule, actions },
         event: baseEvent,
         actorId: ACTOR,
+        triggerType: "card-moved-to-list",
+        chainId: "",
+        chainDepth: 0,
       });
 
       expect(buildCardMoveLifecycleEvents).toHaveBeenCalledWith({
@@ -346,6 +384,193 @@ describe("executeRuleActions", () => {
         expect.arrayContaining([expect.objectContaining({ ruleId: "rule-1" })]),
       );
     });
+
+    // ── Target-list validation (US-074 Slice B2) ───────────────────
+
+    it("rejects a missing target list (list not found) with RuleExecutionError", async () => {
+      const client = makeClient({ notFound: true });
+      const cardFindUniqueOrThrow = client.card.findUniqueOrThrow as ReturnType<typeof vi.fn>;
+      cardFindUniqueOrThrow.mockResolvedValue({
+        listId: "list-1",
+        estimateHours: null,
+      });
+
+      const actions: ActionStep[] = [{ type: "move-card-to-list", targetListId: "list-missing" }];
+
+      await expect(
+        executeRuleActions({
+          client,
+          rule: { ...baseRule, actions },
+          event: baseEvent,
+          actorId: ACTOR,
+          triggerType: "card-moved-to-list",
+          chainId: "",
+          chainDepth: 0,
+        }),
+      ).rejects.toBeInstanceOf(RuleExecutionError);
+
+      const err = await executeRuleActions({
+        client,
+        rule: { ...baseRule, actions },
+        event: baseEvent,
+        actorId: ACTOR,
+        triggerType: "card-moved-to-list",
+        chainId: "",
+        chainDepth: 0,
+      }).catch((e: unknown) => e);
+
+      expect((err as RuleExecutionError).message).toContain("not found");
+      // The card must NOT be updated when the target is missing
+      expect((client.card.update as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    });
+
+    it("rejects an archived target list with RuleExecutionError", async () => {
+      const client = makeClient({ archivedAt: new Date(), workspaceId: "ws-1" });
+      const cardFindUniqueOrThrow = client.card.findUniqueOrThrow as ReturnType<typeof vi.fn>;
+      cardFindUniqueOrThrow.mockResolvedValue({
+        listId: "list-1",
+        estimateHours: null,
+      });
+
+      const actions: ActionStep[] = [{ type: "move-card-to-list", targetListId: "list-archived" }];
+
+      await expect(
+        executeRuleActions({
+          client,
+          rule: { ...baseRule, actions },
+          event: baseEvent,
+          actorId: ACTOR,
+          triggerType: "card-moved-to-list",
+          chainId: "",
+          chainDepth: 0,
+        }),
+      ).rejects.toBeInstanceOf(RuleExecutionError);
+
+      const err = await executeRuleActions({
+        client,
+        rule: { ...baseRule, actions },
+        event: baseEvent,
+        actorId: ACTOR,
+        triggerType: "card-moved-to-list",
+        chainId: "",
+        chainDepth: 0,
+      }).catch((e: unknown) => e);
+
+      expect((err as RuleExecutionError).message).toContain("archived");
+      expect((client.card.update as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    });
+
+    it("rejects a target list outside the rule workspace with RuleExecutionError", async () => {
+      const client = makeClient({ archivedAt: null, workspaceId: "ws-foreign" });
+      const cardFindUniqueOrThrow = client.card.findUniqueOrThrow as ReturnType<typeof vi.fn>;
+      cardFindUniqueOrThrow.mockResolvedValue({
+        listId: "list-1",
+        estimateHours: null,
+      });
+
+      const actions: ActionStep[] = [{ type: "move-card-to-list", targetListId: "list-foreign" }];
+
+      await expect(
+        executeRuleActions({
+          client,
+          rule: { ...baseRule, actions },
+          event: baseEvent,
+          actorId: ACTOR,
+          triggerType: "card-moved-to-list",
+          chainId: "",
+          chainDepth: 0,
+        }),
+      ).rejects.toBeInstanceOf(RuleExecutionError);
+
+      const err = await executeRuleActions({
+        client,
+        rule: { ...baseRule, actions },
+        event: baseEvent,
+        actorId: ACTOR,
+        triggerType: "card-moved-to-list",
+        chainId: "",
+        chainDepth: 0,
+      }).catch((e: unknown) => e);
+
+      expect((err as RuleExecutionError).message).toContain("outside the rule workspace");
+      expect((client.card.update as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    });
+
+    it("proves guard is live: archived-list rejection prevents card.update", async () => {
+      // The guard rejects a move to an archived list. This test does NOT
+      // perform a sabotage inversion (removing the guard and observing the
+      // mutation proceed) — the evaluator-level catch of RuleExecutionError
+      // and tx rollback provides that guarantee. Here we prove the guard
+      // fires and the card is never mutated.
+      const client = makeClient({ archivedAt: new Date(), workspaceId: "ws-1" });
+      const cardFindUniqueOrThrow = client.card.findUniqueOrThrow as ReturnType<typeof vi.fn>;
+
+      cardFindUniqueOrThrow.mockResolvedValue({
+        listId: "list-1",
+        estimateHours: null,
+      });
+
+      const actions: ActionStep[] = [{ type: "move-card-to-list", targetListId: "list-archived" }];
+
+      await expect(
+        executeRuleActions({
+          client,
+          rule: { ...baseRule, actions },
+          event: baseEvent,
+          actorId: ACTOR,
+          triggerType: "card-moved-to-list",
+          chainId: "",
+          chainDepth: 0,
+        }),
+      ).rejects.toBeInstanceOf(RuleExecutionError);
+      expect((client.card.update as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    });
+
+    // ── Audit-context proof (US-074 Slice B2) ──────────────────────
+
+    it("throws RuleExecutionError with real triggerType, chainId, chainDepth, and descriptive cause (not null)", async () => {
+      // Regression proof: executor threads evaluation metadata (triggerType,
+      // chainId, chainDepth) into the RuleExecutionError context so that
+      // logRuleExecutionError persists real trigger/cascade data, not
+      // hardcoded "card-moved-to-list" / empty strings / cause:null.
+      const client = makeClient({ notFound: true });
+      const cardFindUniqueOrThrow = client.card.findUniqueOrThrow as ReturnType<typeof vi.fn>;
+      cardFindUniqueOrThrow.mockResolvedValue({
+        listId: "list-1",
+        estimateHours: null,
+      });
+
+      const actions: ActionStep[] = [{ type: "move-card-to-list", targetListId: "list-missing" }];
+
+      const err = await executeRuleActions({
+        client,
+        rule: { ...baseRule, actions },
+        event: baseEvent,
+        actorId: ACTOR,
+        triggerType: "due-date-approaching",
+        chainId: "cascade-42",
+        chainDepth: 2,
+      }).catch((e: unknown) => e) as RuleExecutionError;
+
+      // The error message must describe what went wrong, not "null"
+      expect(err.message).toContain("not found");
+      expect(err.message).not.toBe("null");
+
+      // The triggerType must reflect the evaluation context, not a hardcoded value
+      expect(err.context.triggerType).toBe("due-date-approaching");
+
+      // The chain metadata must carry the evaluation cascade identity
+      expect(err.context.chainId).toBe("cascade-42");
+      expect(err.context.chainDepth).toBe(2);
+
+      // The cause must be a proper Error with the descriptive message,
+      // so logRuleExecutionError persists something meaningful, not "null"
+      expect(err.context.cause).toBeInstanceOf(Error);
+      expect((err.context.cause as Error).message).toContain("not found");
+
+      // No card update must have been attempted
+      expect((client.card.update as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    });
   });
 
   // ── add-label ──────────────────────────────────────────────────────
@@ -359,6 +584,9 @@ describe("executeRuleActions", () => {
       rule: { ...baseRule, actions: [{ type: "add-label", labelId: "label-1" }] },
       event: baseEvent,
       actorId: ACTOR,
+      triggerType: "card-moved-to-list",
+      chainId: "",
+      chainDepth: 0,
     });
 
     expect(result.effects).toEqual([]);
@@ -374,6 +602,9 @@ describe("executeRuleActions", () => {
       rule: { ...baseRule, actions: [{ type: "add-label", labelId: "label-1" }] },
       event: baseEvent,
       actorId: ACTOR,
+      triggerType: "card-moved-to-list",
+      chainId: "",
+      chainDepth: 0,
     });
 
     expect(result.effects).toContainEqual({
@@ -398,6 +629,9 @@ describe("executeRuleActions", () => {
       rule: { ...baseRule, actions: [{ type: "remove-label", labelId: "label-1" }] },
       event: baseEvent,
       actorId: ACTOR,
+      triggerType: "card-moved-to-list",
+      chainId: "",
+      chainDepth: 0,
     });
 
     expect(result.effects).toContainEqual({
@@ -423,6 +657,9 @@ describe("executeRuleActions", () => {
       rule: { ...baseRule, actions: [{ type: "assign-member", recipient: "card-assignees" }] },
       event: baseEvent,
       actorId: ACTOR,
+      triggerType: "card-moved-to-list",
+      chainId: "",
+      chainDepth: 0,
     });
 
     expect(resolveRecipient).toHaveBeenCalledWith(client, "card-assignees", {
@@ -465,6 +702,9 @@ describe("executeRuleActions", () => {
       rule: { ...baseRule, actions: [{ type: "assign-member", recipient: "user-42" }] },
       event: baseEvent,
       actorId: ACTOR,
+      triggerType: "card-moved-to-list",
+      chainId: "",
+      chainDepth: 0,
     });
 
     expect(result.effects).toEqual([]);
@@ -484,6 +724,9 @@ describe("executeRuleActions", () => {
       rule: { ...baseRule, actions: [{ type: "remove-member", scope: "all" }] },
       event: baseEvent,
       actorId: ACTOR,
+      triggerType: "card-moved-to-list",
+      chainId: "",
+      chainDepth: 0,
     });
 
     expect(resolveRemoveScope).toHaveBeenCalledWith(client, "all", {
@@ -511,6 +754,9 @@ describe("executeRuleActions", () => {
       rule: { ...baseRule, actions: [{ type: "remove-member", scope: "user-a" }] },
       event: baseEvent,
       actorId: ACTOR,
+      triggerType: "card-moved-to-list",
+      chainId: "",
+      chainDepth: 0,
     });
 
     expect(result.effects).toEqual([]);
@@ -541,6 +787,9 @@ describe("executeRuleActions", () => {
         rule: { ...baseRule, actions: [{ type: "set-completion", completed: true }] },
         event: baseEvent,
         actorId: ACTOR,
+        triggerType: "card-moved-to-list",
+        chainId: "",
+        chainDepth: 0,
       });
 
       expect(setCardCompletion).toHaveBeenCalledWith(
@@ -594,6 +843,9 @@ describe("executeRuleActions", () => {
         rule: { ...baseRule, actions: [{ type: "set-completion", completed: true }] },
         event: baseEvent,
         actorId: ACTOR,
+        triggerType: "card-moved-to-list",
+        chainId: "",
+        chainDepth: 0,
       });
 
       // A no-op set-completion (card already in the requested state) must not
@@ -625,6 +877,9 @@ describe("executeRuleActions", () => {
         rule: { ...baseRule, actions: [{ type: "set-completion", completed: false }] },
         event: baseEvent,
         actorId: ACTOR,
+        triggerType: "card-moved-to-list",
+        chainId: "",
+        chainDepth: 0,
       });
 
       expect(result.effects).toContainEqual({
@@ -654,6 +909,9 @@ describe("executeRuleActions", () => {
       },
       event: baseEvent,
       actorId: ACTOR,
+      triggerType: "card-moved-to-list",
+      chainId: "",
+      chainDepth: 0,
     });
 
     expect(resolveRecipient).toHaveBeenCalledWith(client, "card-assignees", {
@@ -684,6 +942,9 @@ describe("executeRuleActions", () => {
       },
       event: baseEvent,
       actorId: ACTOR,
+      triggerType: "card-moved-to-list",
+      chainId: "",
+      chainDepth: 0,
     });
 
     expect(result.effects).toEqual([

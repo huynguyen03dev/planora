@@ -13,11 +13,17 @@ export {
   createListSchema,
   updateListSchema,
   deleteListSchema,
+  archiveListSchema,
+  restoreListSchema,
   reorderListSchema,
+  permanentDeleteListSchema,
   type CreateListInput,
   type UpdateListInput,
   type DeleteListInput,
+  type ArchiveListInput,
+  type RestoreListInput,
   type ReorderListInput,
+  type PermanentDeleteListInput,
 } from "./list";
 export {
   createCardSchema,

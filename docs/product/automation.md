@@ -186,3 +186,19 @@ the matcher, resolver, loop-guard, cycle-check, executor, effects, and evaluator
 and the full Server Action security boundary + business logic
 (`tests/server-actions/automation-rules.test.ts`). The management UI (React
 components) has no automated coverage — the standing no-RTL gap.
+
+## Failure Isolation & Stale Targets (Roadmap US-075)
+
+- **Failure Isolation:** Rule action execution failures (e.g. missing target lists, unassigned members, or deleted labels) are handled gracefully so they do not crash the primary user card edit or corrupt transaction state.
+- **Diagnostic Logging:** Every execution attempt writes structured status (`partially_failed` or `failed`) and diagnostic details (`errorDetails`) to `RuleExecutionLog`.
+- **Decision Gate (Inside Packet):** Resolves Strict Rollback (Option A) vs Best-Effort Continuation (Option B) for multi-action step failures prior to implementation.
+
+## Trigger Expansion (Roadmap US-080)
+
+- **Card Attribute Triggers:** Expands `RuleTriggerType` to support `due-date-changed`, `estimate-changed`, `priority-changed`, and `card-stale-in-capture`.
+- **Scope Limit:** Strictly card attribute changes inline within the Prisma transaction. No external webhooks, HTTP postbacks, external API integrations, or SLA tracking engines.
+
+## Recurring Card Scheduler (Roadmap US-082)
+
+- **Scheduled Template Instantiation:** Integrates recurring card rules with the `/api/cron/recurring-cards` execution tick.
+- **Deduplication:** Uses atomic `dedupKey = <scheduleId>:<YYYY-MM-DD>` database transactions to prevent duplicate card creation across overlapping cron ticks. Depends on US-081.

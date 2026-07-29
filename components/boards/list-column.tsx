@@ -351,9 +351,8 @@ function ListColumnComponent({
                       {canDelete && (
                         <DropdownMenuItem
                           onSelect={() => setDeleteDialogOpen(true)}
-                          className="text-destructive focus:text-destructive"
                         >
-                          Delete
+                          Archive list
                         </DropdownMenuItem>
                       )}
                     </DropdownMenuContent>
@@ -514,9 +513,9 @@ function ListColumnComponent({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete list?</AlertDialogTitle>
+            <AlertDialogTitle>Archive list?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete the list &quot;{list.title}&quot; and all its cards. This action cannot be undone.
+              This will archive the list &quot;{list.title}&quot; and hide it from the active board. The list and its cards remain intact.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -527,9 +526,8 @@ function ListColumnComponent({
                 handleDelete();
               }}
               disabled={isDeleting}
-              className="bg-destructive hover:bg-destructive/90"
             >
-              {isDeleting ? "Deleting..." : "Delete"}
+              {isDeleting ? "Archiving..." : "Archive list"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

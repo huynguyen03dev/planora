@@ -245,17 +245,22 @@ model BoardStar {
 }
 
 model List {
-  id        String  @id @default(uuid())
-  boardId   String
-  board     Board   @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  title     String
-  position  Float
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String    @id @default(uuid())
+  boardId    String
+  board      Board     @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  title      String
+  position   Float
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   cards Card[]
 
-  @@unique([boardId, position])
+  @@index([boardId, archivedAt])
+  // Partial UNIQUE index `list_boardId_position_live_key` on (boardId, position)
+  // WHERE archivedAt IS NULL enforces live-list position uniqueness (US-074, decision 0026).
+  // It cannot be expressed as `@@unique` (Prisma has no WHERE predicate), so it lives in
+  // migration SQL only and is intentionally invisible to `prisma migrate` — expect drift.
   @@map("list")
 }
 

@@ -13,7 +13,7 @@ import {
 } from "@/lib/realtime/server";
 
 import type { DeferredEffect } from "./executor";
-import type { RuleExecutionError } from "./evaluator";
+import type { RuleExecutionError } from "./types";
 
 /**
  * Fire a rule cascade's deferred effects AFTER the trigger transaction commits.

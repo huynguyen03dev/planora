@@ -176,6 +176,7 @@ export async function POST(request: Request) {
   if (windowMin !== null) {
     // Scan cards with dueDate in [now, now + windowMin*60_000) that are
     // incomplete/non-archived/non-deleted.
+    // US-074 Slice B2: exclude cards whose parent list is archived.
     const windowEnd = new Date(now.getTime() + windowMin * 60_000);
     const scheduledCards = await db.card.findMany({
       where: {
@@ -183,6 +184,7 @@ export async function POST(request: Request) {
         completedAt: null,
         archivedAt: null,
         deletedAt: null,
+        list: { archivedAt: null },
       },
       select: {
         id: true,

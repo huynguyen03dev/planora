@@ -30,11 +30,11 @@ carry rich metadata. All mutations are Server Actions under
 
 - Ordered columns on a board, ordered by `position Float`, unique per
   `(boardId, position)`.
-- Actions: `createListAction`, `updateListAction` (rename), `deleteListAction`,
-  `reorderListAction`.
+- Actions: `createListAction`, `updateListAction` (rename), `deleteListAction` (legacy alias for `archiveListAction`), `archiveListAction`, `reorderListAction`, `restoreListAction` (pending in Slice C: `permanentlyDeleteListAction`).
 - Lists carry **no** completion flag. Completion is a property of the card, not
   of its column (decision 0020) — a list named "Done" is an ordinary list and may
   hold a mix of complete and incomplete cards.
+- **Safe List Lifecycle (US-074, Decision 0026 Accepted):** Slices A & B implemented — archiving (`archiveListAction` / `deleteListAction`) soft-deletes the list (`archivedAt = now()`), hiding it and its cards from active board queries. Slice B adds list discovery & restore. Slice B2 adds archived-list boundary hardening: central resolver guards (`getListWithBoard`, `getCardWithListAndBoard`, `getCardWithListAndMembers`) reject mutations on cards under archived lists; checklist scopes expose `listArchived`; due-date reminders and scheduled automation exclude archived-list cards. Slice C (admin permanent delete) pending.
 
 ## Cards
 
@@ -69,7 +69,10 @@ carry rich metadata. All mutations are Server Actions under
   exposes an **Archived cards** view (editor/admin only) listing the board's
   archived cards with their original list and a Restore button (US-016).
   Cards-only for now — list and board (closed-boards) restore are deferred
-  follow-ups; permanent (hard) delete from the archive view is not yet built.
+  follow-ups. Permanent delete from the archive view is implemented for
+  archived lists (Slice C: `permanentlyDeleteListAction`, admin-only via
+  `organization:["update"]`, with exact title confirmation, Cloudinary attachment
+  guard (decision 0029), and active-cards force option).
 
 ## Card metadata
 
@@ -207,3 +210,15 @@ transaction, including the user's edit. Rule-driven mutations are attributed to
 the seeded **"Planora Automation"** system user with `metadata: { ruleId }` on
 their history events, so they never inflate a real user's counts. See
 `automation.md` and decision 0022.
+
+## Personal Productivity & Capture (Roadmap IN-04)
+
+- **Today / My Work View (US-077):** A unified personal dashboard (`/today`) aggregating cards assigned to the current user across authorized workspace boards, grouped into Overdue, Today, Upcoming, and Unscheduled sections. This is strictly a **read model** over existing `Card`, `CardMember`, `dueDate`, `priority`, and `archivedAt` data; no new domain table is introduced.
+- **Global Quick Capture (US-078):** A low-friction modal accessible via header button or global keyboard shortcut (`C` / `Cmd+K`) from any page. Wraps existing `createCardAction` to create standard `Card` entities on a selected board and list. No separate capture entity.
+- **Per-Board Capture & Triage (US-079):** Kanbans designate an inbox list (defaults to left-most column) for receiving quick-captured cards. Includes a triage toolbar for rapid one-click moves, assignments, and due-date settings. Uses standard cards. Escalate to high-risk if schema additions are required.
+- **External Intake Deferral (Decision 0028 Accepted):** External email (`support@`) and public web form intake are explicitly deferred and out of scope. Intake is strictly first-party via authenticated workspace sessions.
+
+## Reusable Workflows (Roadmap IN-04)
+
+- **Card Templates (US-081):** Standalone vertical slice allowing workspace members to define templates (pre-configured title, description skeleton, priority, labels, checklist structures) and instantiate new active cards from templates. Data model decision gate (dedicated template tables vs `isTemplate` flag) is recorded inside the packet.
+- **Recurring Cards (US-082):** Scheduled template instantiation on recurring intervals (daily, weekly, monthly) using `/api/cron` and atomic deduplication keys (`<scheduleId>:<date>`). Depends on US-081. Scheduler/dedup decision gate is recorded inside the packet.

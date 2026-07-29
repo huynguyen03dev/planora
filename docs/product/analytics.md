@@ -92,3 +92,10 @@ The engine and export are the best-tested part of the app
 (`lib/analytics/engine.test.ts`, `tests/analytics-export.test.ts`,
 `lib/card-history.test.ts`). Keep new metrics test-backed — they are pure
 functions over the event stream and cheap to test.
+
+## First-Party Usage Telemetry Baseline (Roadmap US-076, Decision 0027 Proposed)
+
+- **First-Party Infrastructure:** Measures daily active retention and feature usage (Today view, Quick Capture, Rule execution) using internal `UsageTelemetryEvent` storage. 100% first-party: zero third-party analytics SDKs, tracking pixels, or external SaaS providers.
+- **Privacy & Zero-PII Boundary:** Event payloads record only event names, hashed/UUID `workspaceId`, `userId` HMAC hash, and timestamp. Zero card titles, descriptions, comments, or PII are ever captured.
+- **Rolling Bounded Retention:** Raw telemetry rows are retained for a rolling 90-day window, after which an automated daily cron prunes expired raw events while preserving daily aggregate summaries.
+- **Workspace Admin Dashboard:** Provides workspace admins with high-level DAU and feature usage metrics within the Workspace Analytics shell.

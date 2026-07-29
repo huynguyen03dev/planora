@@ -26,6 +26,10 @@ export interface ListCreatedPayload extends BoardEventPayload {
   list: ListSnapshot;
 }
 
+export interface ListRestoredPayload extends BoardEventPayload {
+  list: ListSnapshot;
+}
+
 export interface ListUpdatedPayload extends BoardEventPayload {
   listId: string;
   title?: string;
@@ -154,6 +158,7 @@ export type ServerToClientEvents = {
   "card:moved": (payload: CardMovedPayload) => void;
   "list:moved": (payload: ListMovedPayload) => void;
   "list:created": (payload: ListCreatedPayload) => void;
+  "list:restored": (payload: ListRestoredPayload) => void;
   "list:updated": (payload: ListUpdatedPayload) => void;
   "list:deleted": (payload: ListDeletedPayload) => void;
   "card:created": (payload: CardCreatedPayload) => void;

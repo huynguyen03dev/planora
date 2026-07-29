@@ -18,7 +18,9 @@
 
 import type { Prisma } from "@/app/generated/prisma/client";
 
-import type { TriggerType, ActionStep } from "@/lib/schemas/automation";
+import type { ActionStep } from "@/lib/schemas/automation";
+import type { TriggerType } from "@/lib/schemas/automation";
+import { RuleExecutionError, type RuleEventPayload } from "./types";
 import { updateCardPriority } from "@/lib/card";
 import { setCardCompletion } from "@/lib/card";
 import { addCardLabel, removeCardLabel } from "@/lib/label";
@@ -34,7 +36,6 @@ import {
 } from "@/lib/card-history";
 import { CARD_POSITION_GAP, LIVE_CARD_SCOPE } from "@/lib/ordering";
 
-import type { RuleEventPayload } from "./types";
 import { resolveRecipient, resolveRemoveScope } from "./resolver";
 
 // ─── Public types ────────────────────────────────────────────────────
@@ -65,12 +66,21 @@ export interface ExecuteRuleParams {
   client: Prisma.TransactionClient;
   rule: {
     id: string;
+    name: string;
     workspaceId: string;
     boardId: string | null;
     actions: ActionStep[];
   };
   event: RuleEventPayload;
   actorId: string;
+  /** The trigger type of the evaluation that produced this execution — threaded
+   *  into RuleExecutionError context so logRuleExecutionError persists the real
+   *  trigger, not a hardcoded fallback (US-074 Slice B2 audit fix). */
+  triggerType: TriggerType;
+  /** Chain tracker identity and depth for the current evaluation cascade.
+   *  Empty string / 0 when no cascade tracking applies (direct call). */
+  chainId: string;
+  chainDepth: number;
 }
 
 export interface ExecuteRuleResult {
@@ -113,6 +123,66 @@ export async function executeRuleActions(
           select: { listId: true, estimateHours: true },
         });
         const fromListId = card.listId;
+
+        // US-074 Slice B2: validate target list exists, is not archived, and
+        // belongs to the rule's workspace before mutating. A stale/missing/foreign
+        // target throws RuleExecutionError → atomic rollback (US-075 owns
+        // failure-isolation follow-up; we do NOT invent best-effort here).
+        const targetList = await client.list.findUnique({
+          where: { id: step.targetListId },
+          select: {
+            archivedAt: true,
+            board: { select: { workspaceId: true } },
+          },
+        });
+
+        if (!targetList) {
+          throw new RuleExecutionError(
+            `move-card-to-list: target list "${step.targetListId}" not found`,
+            {
+              workspaceId,
+              ruleId: rule.id,
+              ruleName: rule.name,
+              chainId: params.chainId,
+              chainDepth: params.chainDepth,
+              cardId,
+              triggerType: params.triggerType,
+              cause: new Error(`target list "${step.targetListId}" not found`),
+            },
+          );
+        }
+
+        if (targetList.archivedAt !== null) {
+          throw new RuleExecutionError(
+            `move-card-to-list: target list "${step.targetListId}" is archived`,
+            {
+              workspaceId,
+              ruleId: rule.id,
+              ruleName: rule.name,
+              chainId: params.chainId,
+              chainDepth: params.chainDepth,
+              cardId,
+              triggerType: params.triggerType,
+              cause: new Error(`target list "${step.targetListId}" is archived`),
+            },
+          );
+        }
+
+        if (targetList.board.workspaceId !== workspaceId) {
+          throw new RuleExecutionError(
+            `move-card-to-list: target list "${step.targetListId}" is outside the rule workspace`,
+            {
+              workspaceId,
+              ruleId: rule.id,
+              ruleName: rule.name,
+              chainId: params.chainId,
+              chainDepth: params.chainDepth,
+              cardId,
+              triggerType: params.triggerType,
+              cause: new Error(`target list "${step.targetListId}" is outside the rule workspace`),
+            },
+          );
+        }
 
         const members = await client.cardMember.findMany({
           where: { cardId },

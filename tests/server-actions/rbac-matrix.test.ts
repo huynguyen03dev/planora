@@ -117,6 +117,7 @@ describe("Layer 2 — board-page UI map agrees with the server (lib/authorizatio
     ["canCreateCard", "card", "create"],
     ["canEditCard", "card", "update"],
     ["canArchiveCard", "card", "update"], // archive = soft-delete via card update
+    ["canPermanentDelete", "organization", "update"], // admin-only permanent purge
     ["canComment", "comment", "create"],
   ];
 

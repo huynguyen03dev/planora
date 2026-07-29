@@ -54,6 +54,33 @@ export interface RuleEventPayload {
   _chainDepth?: number;
 }
 
+// ─── RuleExecutionError ───────────────────────────────────────────
+// Shared error class thrown when a rule action fails inside the trigger
+// transaction. The evaluator does NOT log an error row inside the tx (it
+// would roll back with it); it throws this so the Server Action can roll
+// the tx back and then write the error RuleExecutionLog row post-rollback.
+// Defined here (not in evaluator.ts) so both evaluator.ts and executor.ts
+// can throw/catch it without a circular dependency.
+
+export class RuleExecutionError extends Error {
+  readonly context: {
+    workspaceId: string;
+    ruleId: string;
+    ruleName: string;
+    chainId: string;
+    chainDepth: number;
+    cardId: string | null;
+    triggerType: TriggerType;
+    cause: unknown;
+  };
+
+  constructor(message: string, context: RuleExecutionError["context"]) {
+    super(message);
+    this.name = "RuleExecutionError";
+    this.context = context;
+  }
+}
+
 // ─── Re-exports from schema (convenience) ───────────────────────────
 
 export type { TriggerType, TriggerConfig };
