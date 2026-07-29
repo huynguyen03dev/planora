@@ -52,6 +52,8 @@ import {
   createList,
   updateListTitle,
   getListWithBoard,
+  getArchivedListWithBoard,
+  restoreList,
   reorderListByNeighbors,
 } from "@/lib/list";
 import { createActivityEntry } from "@/lib/activity";
@@ -66,6 +68,7 @@ import {
   emitCardMoved,
   emitListMoved,
   emitListCreated,
+  emitListRestored,
   emitListUpdated,
   emitListDeleted,
   emitCardCreated,
@@ -77,13 +80,16 @@ import {
   emitCommentCreated,
 } from "@/lib/realtime/server";
 import { notifyCardAssigned, notifyCommentOnCard, notifyMentioned } from "@/lib/notification";
-import { evaluateRules, RuleExecutionError } from "@/lib/automation/evaluator";
+import { evaluateRules } from "@/lib/automation/evaluator";
+import { RuleExecutionError } from "@/lib/automation/types";
 import { fireDeferredEffects, logRuleExecutionError } from "@/lib/automation/effects";
 import type { DeferredEffect } from "@/lib/automation/executor";
 import {
   createListSchema,
   updateListSchema,
-  deleteListSchema,
+  archiveListSchema,
+  restoreListSchema,
+  permanentDeleteListSchema,
   reorderListSchema,
   createCardSchema,
   archiveCardSchema,
@@ -118,13 +124,13 @@ import {
   buildCardCompletedEvent,
   buildCardReopenedEvent,
   buildCardCreatedEvent,
-    buildCardDeletedEvent,
-    buildCardMemberAssignedEvent,
+  buildCardMemberAssignedEvent,
     buildCardMemberUnassignedEvent,
     buildCardMoveLifecycleEvents,
     buildDueDateChangedEvent,
     buildDueDateClearedEvent,
     buildDueDateSetEvent,
+  buildCardDeletedEvent,
   buildEstimateChangedEvent,
   buildEstimateSetEvent,
   recordCardHistoryEvents,
@@ -167,9 +173,15 @@ type UpdateListResult =
   | { success: true }
   | { success: false; error: string };
 
-type DeleteListResult =
+export type ArchiveListResult =
   | { success: true }
   | { success: false; error: string };
+
+export type RestoreListResult =
+  | { success: true }
+  | { success: false; error: string };
+
+export type DeleteListResult = ArchiveListResult;
 
 type CreateCardResult =
   | { success: true; cardId: string }
@@ -294,77 +306,253 @@ export async function updateListAction(
   }
 }
 
-export async function deleteListAction(
+export async function archiveListAction(
   formData: FormData,
-): Promise<DeleteListResult> {
+): Promise<ArchiveListResult> {
   const rawData = Object.fromEntries(formData);
-  const parsed = deleteListSchema.safeParse(rawData);
+  const parsed = archiveListSchema.safeParse(rawData);
 
   if (!parsed.success) {
     return { success: false, error: "List not found" };
   }
 
-  const { userId } = await verifySession();
+  await verifySession();
 
   const { listId } = parsed.data;
 
   const result = await getListWithBoard(listId);
-  if (!result || result.board.archivedAt) {
+  if (!result || result.board.archivedAt || result.list.archivedAt !== null) {
     return { success: false, error: "List not found" };
   }
 
-  const canDeleteList = await hasWorkspacePermission(result.board.workspaceId, {
+  const canArchiveList = await hasWorkspacePermission(result.board.workspaceId, {
     list: ["delete"],
   });
 
-  if (!canDeleteList) {
+  if (!canArchiveList) {
     return { success: false, error: "List not found" };
   }
 
   try {
     await db.$transaction(async (tx) => {
+      await tx.list.update({
+        where: { id: listId },
+        data: { archivedAt: new Date() },
+      });
+    });
+    revalidatePath(`/boards/${result.list.boardId}`);
+    // US-074 Slice A: reuse list:deleted as active-board view-removal signal
+    emitListDeleted(result.list.boardId, { listId });
+    emitAnalyticsRefresh(result.board.workspaceId);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to archive list. Please try again." };
+  }
+}
+
+/** Legacy export for deleteListAction (US-074 Slice A) */
+export const deleteListAction = archiveListAction;
+
+export async function restoreListAction(
+  formData: FormData,
+): Promise<RestoreListResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = restoreListSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    return { success: false, error: "List not found" };
+  }
+
+  await verifySession();
+
+  const { listId } = parsed.data;
+
+  const result = await getArchivedListWithBoard(listId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "List not found" };
+  }
+
+  const canRestoreList = await hasWorkspacePermission(result.board.workspaceId, {
+    list: ["delete"],
+  });
+
+  if (!canRestoreList) {
+    return { success: false, error: "List not found" };
+  }
+
+  try {
+    const restoredList = await restoreList(listId);
+    revalidatePath(`/boards/${restoredList.boardId}`);
+    emitListRestored(restoredList.boardId, {
+      list: {
+        id: restoredList.id,
+        title: restoredList.title,
+        boardId: restoredList.boardId,
+        position: restoredList.position,
+      },
+    });
+    emitAnalyticsRefresh(result.board.workspaceId);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to restore list. Please try again." };
+  }
+}
+
+export type PermanentDeleteListResult =
+  | { success: true }
+  | { success: false; error: string };
+
+const LIST_TITLE_MISMATCH = "Title confirmation does not match";
+const CLOUDINARY_BLOCK =
+  "Cannot permanently delete this list: it contains attachments stored in Cloudinary. Contact your workspace admin to resolve this.";
+const LIVE_CARDS_BLOCK =
+  "This list contains active cards. Use force delete to permanently delete them as well.";
+const CONCURRENT_RESTORE =
+  "This list was restored while processing. Please try again.";
+
+export async function permanentlyDeleteListAction(
+  formData: FormData,
+): Promise<PermanentDeleteListResult> {
+  // verifySession is the very first operation: rejects unauthenticated callers
+  // before any schema parsing, DB reads, or writes (governing invariant).
+  const { userId } = await verifySession();
+
+  const rawData = Object.fromEntries(formData);
+  const parsed = permanentDeleteListSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    return { success: false, error: "List not found" };
+  }
+
+  const { listId, confirmationText, force } = parsed.data;
+
+  const result = await getArchivedListWithBoard(listId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "List not found" };
+  }
+
+  const canPermanentDelete = await hasWorkspacePermission(
+    result.board.workspaceId,
+    { organization: ["update"] },
+  );
+
+  if (!canPermanentDelete) {
+    return { success: false, error: "List not found" };
+  }
+
+  // Exact case-sensitive title confirmation
+  if (confirmationText !== result.list.title) {
+    return { success: false, error: LIST_TITLE_MISMATCH };
+  }
+
+  try {
+    await db.$transaction(async (tx) => {
+      // Acquire row lock on the list and revalidate archived status under the
+      // lock (US-074, in-flight purge race fix).
+      const locked = await tx.$queryRaw<
+        Array<{ id: string; archivedAt: Date | null }>
+      >`SELECT id, "archivedAt" FROM "list" WHERE id = ${listId} FOR UPDATE`;
+
+      if (locked.length === 0 || locked[0].archivedAt === null) {
+        throw new Error("CONCURRENT_RESTORE");
+      }
+
+      // Cloudinary attachment guard under the lock (decision 0029).
+      const cloudinaryAttachment = await tx.attachment.findFirst({
+        where: {
+          card: { listId },
+          cloudinaryPublicId: { not: null },
+        },
+        select: { id: true },
+      });
+
+      if (cloudinaryAttachment) {
+        throw new Error("CLOUDINARY_BLOCK");
+      }
+
+      // Count live cards (not archived, not deleted) inside the tx
+      const liveCards = await tx.card.count({
+        where: {
+          listId,
+          archivedAt: null,
+          deletedAt: null,
+        },
+      });
+
+      if (liveCards > 0 && !force) {
+        throw new Error("LIVE_CARDS_EXIST");
+      }
+
+      // Snapshot every cascaded card for history events
       const cards = await tx.card.findMany({
         where: { listId },
         select: {
           id: true,
+          archivedAt: true,
+          deletedAt: true,
+          completedAt: true,
           estimateHours: true,
           dueDate: true,
-          completedAt: true,
-          archivedAt: true,
           members: {
             select: { userId: true },
             orderBy: { assignedAt: "asc" },
           },
         },
       });
-      await recordCardHistoryEvents(
-        tx,
-        cards.map((card) =>
-          buildCardDeletedEvent(
-            result.board.workspaceId,
-            result.board.id,
-            card.id,
-            {
-              memberIds: card.members.map((member) => member.userId),
-              estimateHours: card.estimateHours,
-              dueDate: toIsoOrNull(card.dueDate),
-              completedAt: toIsoOrNull(card.completedAt),
-              archivedAt: toIsoOrNull(card.archivedAt),
-            },
-            userId,
-          ),
+
+      // Write truthful CARD_DELETED CardHistoryEvent rows for every card
+      const events = cards.map((card) =>
+        buildCardDeletedEvent(
+          result.board.workspaceId,
+          result.list.boardId,
+          card.id,
+          {
+            memberIds: card.members.map((m) => m.userId),
+            estimateHours: card.estimateHours,
+            dueDate: card.dueDate?.toISOString() ?? null,
+            completedAt: card.completedAt?.toISOString() ?? null,
+            archivedAt: card.archivedAt?.toISOString() ?? null,
+          },
+          userId,
         ),
       );
-      await tx.list.delete({
-        where: { id: listId },
+
+      await recordCardHistoryEvents(tx, events);
+
+      // Conditionally delete the list — still must be archived.
+      // READ COMMITTED + conditional deleteMany on the list row
+      // is the selected race mechanism.
+      const deleteResult = await tx.list.deleteMany({
+        where: {
+          id: listId,
+          archivedAt: { not: null },
+        },
       });
+
+      // count 0 means concurrent restore: roll back all history
+      if (deleteResult.count === 0) {
+        throw new Error("CONCURRENT_RESTORE");
+      }
     });
+
     revalidatePath(`/boards/${result.list.boardId}`);
     emitListDeleted(result.list.boardId, { listId });
     emitAnalyticsRefresh(result.board.workspaceId);
     return { success: true };
-  } catch {
-    return { success: false, error: "Failed to delete list. Please try again." };
+  } catch (error) {
+    if (error instanceof Error && error.message === "LIVE_CARDS_EXIST") {
+      return { success: false, error: LIVE_CARDS_BLOCK };
+    }
+    if (error instanceof Error && error.message === "CLOUDINARY_BLOCK") {
+      return { success: false, error: CLOUDINARY_BLOCK };
+    }
+    if (error instanceof Error && error.message === "CONCURRENT_RESTORE") {
+      return { success: false, error: CONCURRENT_RESTORE };
+    }
+    return {
+      success: false,
+      error: "Failed to permanently delete list. Please try again.",
+    };
   }
 }
 
@@ -1211,34 +1399,81 @@ export async function setCardCoverAction(
   }
 
   try {
-    await createAttachment({
-      cardId: parsedCardId,
-      userId: actorUserId,
-      fileName: file.name,
-      fileUrl: cloudinaryResult.secureUrl,
-      fileType: file.type,
-      fileSize: file.size,
-      cloudinaryPublicId: cloudinaryResult.publicId,
-      cloudinaryResourceType: cloudinaryResult.resourceType,
+    // Acquire a row lock on the parent List and revalidate it's still active
+    // before inserting the attachment (US-074, in-flight upload race fix).
+    const listId = cardResult.list.id;
+    const result = await db.$transaction(async (tx) => {
+      // SELECT ... FOR UPDATE on the parent list row
+      const list = await tx.$queryRaw<
+        Array<{ id: string; archivedAt: Date | null }>
+      >`SELECT id, "archivedAt" FROM "list" WHERE id = ${listId} FOR UPDATE`;
+
+      if (list.length === 0 || list[0].archivedAt !== null) {
+        throw new Error("LIST_ARCHIVED_OR_DELETED");
+      }
+
+      await createAttachment(
+        {
+          cardId: parsedCardId,
+          userId: actorUserId,
+          fileName: file.name,
+          fileUrl: cloudinaryResult.secureUrl,
+          fileType: file.type,
+          fileSize: file.size,
+          cloudinaryPublicId: cloudinaryResult.publicId,
+          cloudinaryResourceType: cloudinaryResult.resourceType,
+        },
+        tx,
+      );
+
+      await createActivityEntry(
+        {
+          workspaceId: cardResult.board.workspaceId,
+          boardId: cardResult.board.id,
+          cardId: parsedCardId,
+          userId: actorUserId,
+          action: "CREATED",
+          entityType: "ATTACHMENT",
+          metadata: {
+            fileName: file.name,
+            fileSize: file.size,
+          },
+        },
+        tx,
+      );
+
+      const updatedCard = await updateCardCover(
+        parsedCardId,
+        cloudinaryResult.secureUrl,
+        tx,
+      );
+
+      return updatedCard;
     });
 
-    await createActivityEntry({
-      workspaceId: cardResult.board.workspaceId,
-      boardId: cardResult.board.id,
-      cardId: parsedCardId,
-      userId: actorUserId,
-      action: "CREATED",
-      entityType: "ATTACHMENT",
-      metadata: {
-        fileName: file.name,
-        fileSize: file.size,
-      },
-    });
-
-    const card = await updateCardCover(parsedCardId, cloudinaryResult.secureUrl);
     revalidatePath(`/boards/${cardResult.board.id}`);
-    return { success: true, card };
+    return { success: true, card: result };
   } catch (error) {
+    if (error instanceof Error && error.message === "LIST_ARCHIVED_OR_DELETED") {
+      // Compensate: destroy the just-uploaded Cloudinary asset
+      try {
+        const { v2: cloudinary } = await import("cloudinary");
+        const config = (await import("@/lib/cloudinary")).getCloudinaryConfig();
+        cloudinary.config({
+          cloud_name: config.cloudName,
+          api_key: config.apiKey,
+          api_secret: config.apiSecret,
+        });
+        await cloudinary.uploader.destroy(cloudinaryResult.publicId, {
+          resource_type: cloudinaryResult.resourceType,
+        });
+        console.log("Cleaned up orphaned Cloudinary file:", cloudinaryResult.publicId);
+      } catch (cleanupError) {
+        console.error("Failed to clean up Cloudinary file:", cleanupError);
+      }
+      return { success: false, error: "Card not found" };
+    }
+
     console.error("Failed to set card cover:", error);
     try {
       const { v2: cloudinary } = await import("cloudinary");
@@ -1998,33 +2233,74 @@ export async function uploadAttachmentAction(
   }
 
   try {
-    const attachment = await createAttachment({
-      cardId: parsedCardId,
-      userId: actorUserId,
-      fileName: file.name,
-      fileUrl: cloudinaryResult.secureUrl,
-      fileType: file.type,
-      fileSize: file.size,
-      cloudinaryPublicId: cloudinaryResult.publicId,
-      cloudinaryResourceType: cloudinaryResult.resourceType,
-    });
+    // Acquire a row lock on the parent List and revalidate it's still active
+    // before inserting the attachment (US-074, in-flight upload race fix).
+    const listId = cardResult.list.id;
+    const attachment = await db.$transaction(async (tx) => {
+      const list = await tx.$queryRaw<
+        Array<{ id: string; archivedAt: Date | null }>
+      >`SELECT id, "archivedAt" FROM "list" WHERE id = ${listId} FOR UPDATE`;
 
-    await createActivityEntry({
-      workspaceId: cardResult.board.workspaceId,
-      boardId: cardResult.board.id,
-      cardId: parsedCardId,
-      userId: actorUserId,
-      action: "CREATED",
-      entityType: "ATTACHMENT",
-      metadata: {
-        fileName: file.name,
-        fileSize: file.size,
-      },
+      if (list.length === 0 || list[0].archivedAt !== null) {
+        throw new Error("LIST_ARCHIVED_OR_DELETED");
+      }
+
+      const att = await createAttachment(
+        {
+          cardId: parsedCardId,
+          userId: actorUserId,
+          fileName: file.name,
+          fileUrl: cloudinaryResult.secureUrl,
+          fileType: file.type,
+          fileSize: file.size,
+          cloudinaryPublicId: cloudinaryResult.publicId,
+          cloudinaryResourceType: cloudinaryResult.resourceType,
+        },
+        tx,
+      );
+
+      await createActivityEntry(
+        {
+          workspaceId: cardResult.board.workspaceId,
+          boardId: cardResult.board.id,
+          cardId: parsedCardId,
+          userId: actorUserId,
+          action: "CREATED",
+          entityType: "ATTACHMENT",
+          metadata: {
+            fileName: file.name,
+            fileSize: file.size,
+          },
+        },
+        tx,
+      );
+
+      return att;
     });
 
     revalidatePath(`/boards/${cardResult.board.id}`);
     return { success: true, attachmentId: attachment.id };
   } catch (error) {
+    if (error instanceof Error && error.message === "LIST_ARCHIVED_OR_DELETED") {
+      // Compensate: destroy the just-uploaded Cloudinary asset
+      try {
+        const { v2: cloudinary } = await import("cloudinary");
+        const config = (await import("@/lib/cloudinary")).getCloudinaryConfig();
+        cloudinary.config({
+          cloud_name: config.cloudName,
+          api_key: config.apiKey,
+          api_secret: config.apiSecret,
+        });
+        await cloudinary.uploader.destroy(cloudinaryResult.publicId, {
+          resource_type: cloudinaryResult.resourceType,
+        });
+        console.log("Cleaned up orphaned Cloudinary file:", cloudinaryResult.publicId);
+      } catch (cleanupError) {
+        console.error("Failed to clean up Cloudinary file:", cleanupError);
+      }
+      return { success: false, error: "Card not found" };
+    }
+
     console.error("Failed to save attachment:", error);
     try {
       const { v2: cloudinary } = await import("cloudinary");
@@ -2404,7 +2680,7 @@ export async function deleteChecklistAction(
   const { checklistId } = parsed.data;
 
   const scope = await getChecklistWithCard(checklistId);
-  if (!scope || scope.board.archivedAt || scope.cardArchived) {
+  if (!scope || scope.board.archivedAt || scope.cardArchived || scope.listArchived) {
     return { success: false, error: "Checklist not found" };
   }
 
@@ -2445,7 +2721,7 @@ export async function createChecklistItemAction(
   const { checklistId, title } = parsed.data;
 
   const scope = await getChecklistWithCard(checklistId);
-  if (!scope || scope.board.archivedAt || scope.cardArchived) {
+  if (!scope || scope.board.archivedAt || scope.cardArchived || scope.listArchived) {
     return { success: false, error: "Checklist not found" };
   }
 
@@ -2477,7 +2753,7 @@ export async function toggleChecklistItemAction(
   const { itemId, isCompleted } = parsed.data;
 
   const scope = await getChecklistItemWithCard(itemId);
-  if (!scope || scope.board.archivedAt || scope.cardArchived) {
+  if (!scope || scope.board.archivedAt || scope.cardArchived || scope.listArchived) {
     return { success: false, error: "Item not found" };
   }
 
@@ -2509,7 +2785,7 @@ export async function deleteChecklistItemAction(
   const { itemId } = parsed.data;
 
   const scope = await getChecklistItemWithCard(itemId);
-  if (!scope || scope.board.archivedAt || scope.cardArchived) {
+  if (!scope || scope.board.archivedAt || scope.cardArchived || scope.listArchived) {
     return { success: false, error: "Item not found" };
   }
 

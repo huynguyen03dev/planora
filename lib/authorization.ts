@@ -28,6 +28,8 @@ export type BoardPagePermissions = {
   canEditCard: boolean;
   canArchiveCard: boolean;
   canComment: boolean;
+  // Admin-only permanent delete affordance (US-074 Slice C).
+  canPermanentDelete: boolean;
 };
 
 const rolePermissionMap: Record<WorkspaceRole, BoardPagePermissions> = {
@@ -41,6 +43,7 @@ const rolePermissionMap: Record<WorkspaceRole, BoardPagePermissions> = {
     canEditCard: true,
     canArchiveCard: true,
     canComment: true,
+    canPermanentDelete: true,
   },
   editor: {
     canEditBoard: true,
@@ -52,6 +55,7 @@ const rolePermissionMap: Record<WorkspaceRole, BoardPagePermissions> = {
     canEditCard: true,
     canArchiveCard: true,
     canComment: true,
+    canPermanentDelete: false,
   },
   viewer: {
     canEditBoard: false,
@@ -63,6 +67,7 @@ const rolePermissionMap: Record<WorkspaceRole, BoardPagePermissions> = {
     canEditCard: false,
     canArchiveCard: false,
     canComment: true,
+    canPermanentDelete: false,
   },
 };
 

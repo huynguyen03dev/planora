@@ -32,6 +32,7 @@ Workspace
 | `/sign-in`, `/sign-up` | Email + password auth |
 | `/boards` | All workspaces and their boards for the current user |
 | `/boards/[boardId]` | The kanban board: drag-and-drop lists and cards |
+| `/today` | Personal focus dashboard: cross-board read-only view of assigned work (US-077) |
 | `/workspace` | Member management and invitations |
 | `/workspace/[slug]/dashboard` | Analytics dashboard (burndown, lead time, KPIs) |
 | `/notifications` | The user's notifications |
@@ -52,5 +53,13 @@ Workspace
 ## Non-goals / not built yet
 
 - No public/REST API for data (mutations are Next.js Server Actions only).
-- No E2E test coverage or CI test gate yet.
+- No external email or public form intake (explicitly deferred per Decision 0028).
 - `/profile` is a placeholder.
+
+## Product Roadmap (Initiative IN-04: Daily Work & Structured Intake)
+
+Planora's accepted roadmap focuses on daily-use retention for small product and engineering teams (3–20 members):
+1. **Foundation & Data Safety:** Safe list lifecycle (US-074), automation rule failure isolation (US-075), and first-party usage telemetry (US-076).
+2. **Personal Focus:** Today / My Work read-only cross-board view (US-077).
+3. **Structured Intake & Triage:** Global quick capture (US-078) and per-board capture/triage lists (US-079) using first-class cards.
+4. **Advanced Workflows:** Automation trigger expansion (US-080), standalone card templates (US-081), and recurring cards (US-082).

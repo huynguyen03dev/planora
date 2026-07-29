@@ -17,7 +17,8 @@ import type { Prisma } from "@/app/generated/prisma/client";
 import { notifyAutomation } from "@/lib/notification";
 import { triggerConfigSchema } from "@/lib/schemas/automation";
 
-import { evaluateRules, RuleExecutionError } from "./evaluator";
+import { evaluateRules } from "./evaluator";
+import { RuleExecutionError } from "./types";
 import { fireDeferredEffects, logRuleExecutionError } from "./effects";
 import type { DeferredNotification } from "./executor";
 import type { DeferredEffect } from "./executor";

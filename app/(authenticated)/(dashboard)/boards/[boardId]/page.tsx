@@ -18,7 +18,9 @@ import { getActivityByCardId } from "@/lib/activity";
 import type { ActivityRecord } from "@/lib/activity";
 import { getBoardTheme } from "@/lib/constants";
 import { verifySession } from "@/lib/dal";
-import { getListsByBoardId } from "@/lib/list";
+import { getListsByBoardId, getArchivedLists } from "@/lib/list";
+import type { ArchivedListRecord } from "@/lib/list";
+import db from "@/lib/prisma";
 import { getCardMembers, getAssignableWorkspaceMembers } from "@/lib/card-member";
 import type { CardMemberRecord, AssignableWorkspaceMemberRecord } from "@/lib/card-member";
 import { getBoardLabels, getCardLabels } from "@/lib/label";
@@ -66,6 +68,7 @@ export default async function BoardPage({
     canEditCard,
     canArchiveCard,
     canComment,
+    canPermanentDelete,
   } = getBoardPagePermissionsForRole(role);
 
   const rawCardId = resolvedSearchParams.cardId;
@@ -75,16 +78,47 @@ export default async function BoardPage({
       : null;
 
   // Load lists + board labels first (needed regardless of card selection).
-  // Archived cards only matter to users who can restore them (editor/admin).
-  const [lists, boardLabels, archivedCards, starredBoardIds] = await Promise.all([
+  // Archived cards & lists only matter to users who can restore them (editor/admin).
+  const [lists, boardLabels, archivedCards, archivedLists, starredBoardIds] = await Promise.all([
     getListsByBoardId(boardId),
     getBoardLabels(boardId),
     canArchiveCard
       ? getArchivedCards(boardId)
       : Promise.resolve([] as ArchivedCardRecord[]),
+    canDeleteList
+      ? getArchivedLists(boardId)
+      : Promise.resolve([] as ArchivedListRecord[]),
     getStarredBoardIds(userId),
   ]);
   const isBoardStarred = starredBoardIds.includes(board.id);
+
+  // For admin users, batch-query live card counts and Cloudinary attachment
+  // presence for the permanent-delete UI (US-074 Slice C). Avoids N+1.
+  const listIds = canPermanentDelete ? archivedLists.map((l) => l.id) : [];
+  let liveCardCountByList: Map<string, number> | undefined;
+  const cloudinaryBlockedListIds = new Set<string>();
+  if (listIds.length > 0) {
+    const [cardGroups, cloudinaryAttachments] = await Promise.all([
+      db.card.groupBy({
+        by: ["listId"],
+        where: { listId: { in: listIds }, archivedAt: null, deletedAt: null },
+        _count: true,
+      }),
+      // Distinct list IDs with Cloudinary-backed attachments; no cap (the
+      // set deduplicates and handles any attachment count per list).
+      db.attachment.findMany({
+        where: {
+          card: { listId: { in: listIds } },
+          cloudinaryPublicId: { not: null },
+        },
+        select: { card: { select: { listId: true } } },
+      }),
+    ]);
+    liveCardCountByList = new Map(cardGroups.map((g) => [g.listId, g._count]));
+    for (const a of cloudinaryAttachments) {
+      cloudinaryBlockedListIds.add(a.card.listId);
+    }
+  }
 
   // Initialize data variables
   let selectedCard = null;
@@ -240,11 +274,20 @@ export default async function BoardPage({
           canEdit={canEditBoard}
           canDelete={canDeleteBoard}
           canArchiveCard={canArchiveCard}
+          canDeleteList={canDeleteList}
           archivedCards={archivedCards.map((card) => ({
             id: card.id,
             title: card.title,
             listTitle: card.listTitle,
           }))}
+          archivedLists={archivedLists.map((list) => ({
+            id: list.id,
+            title: list.title,
+            cardCount: list.cardCount,
+            liveCardCount: liveCardCountByList?.get(list.id) ?? 0,
+            cloudinaryBlocked: cloudinaryBlockedListIds.has(list.id),
+          }))}
+          canPermanentDelete={canPermanentDelete}
           starred={isBoardStarred}
         />
 

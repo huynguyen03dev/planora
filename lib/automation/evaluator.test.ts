@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-import { evaluateRules, RuleExecutionError } from "./evaluator";
+import { evaluateRules } from "./evaluator";
+import { RuleExecutionError } from "./types";
 import { executeRuleActions } from "./executor";
 import type { RuleEventPayload } from "./types";
 
@@ -22,7 +23,10 @@ type RuleRow = {
 };
 
 function makeClient(rules: RuleRow[]) {
-  const create = vi.fn(async (_args: { data: Record<string, unknown> }) => ({ id: "log" }));
+  const create = vi.fn(async (args: { data: Record<string, unknown> }) => {
+    void args;
+    return { id: "log" };
+  });
   const client = {
     rule: { findMany: vi.fn(async () => rules) },
     ruleExecutionLog: { create },

@@ -5,6 +5,7 @@ const mockDb = vi.hoisted(() => ({
   card: {
     findUnique: vi.fn(),
     findFirst: vi.fn(),
+    findMany: vi.fn(),
     update: vi.fn(),
   },
 }));
@@ -15,6 +16,10 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import {
+  getArchivedCards,
+  getCardWithListAndBoard,
+  getCardWithListAndMembers,
+  getArchivedCardWithListAndBoard,
   reorderCardWithinListByNeighbors,
   resolveCompletedAt,
   setCardCompletion,
@@ -210,5 +215,281 @@ describe("setCardCompletion (US-045)", () => {
 
     expect(result.transitioned).toBe(false);
     expect(result.card.completedAt).toBe(EARLIER);
+  });
+});
+
+describe("getArchivedCards parent list filter (US-074 Slice B)", () => {
+  it("filters out cards whose parent list is archived", async () => {
+    const now = new Date();
+    mockDb.card.findMany.mockResolvedValueOnce([
+      {
+        id: "c-1",
+        title: "Card 1",
+        listId: "l-1",
+        archivedAt: now,
+        list: { title: "List 1" },
+      },
+    ]);
+
+    const res = await getArchivedCards("b-1");
+
+    expect(mockDb.card.findMany).toHaveBeenCalledWith({
+      where: {
+        archivedAt: { not: null },
+        list: {
+          boardId: "b-1",
+          archivedAt: null,
+          board: { archivedAt: null },
+        },
+      },
+      orderBy: { archivedAt: "desc" },
+      select: {
+        id: true,
+        title: true,
+        listId: true,
+        archivedAt: true,
+        list: {
+          select: { title: true },
+        },
+      },
+    });
+
+    expect(res).toEqual([
+      {
+        id: "c-1",
+        title: "Card 1",
+        listId: "l-1",
+        listTitle: "List 1",
+        archivedAt: now,
+      },
+    ]);
+  });
+});
+
+describe("US-074 Slice B2 — resolver-level parent-list archive hardening", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe("getCardWithListAndBoard", () => {
+    it("queries with archivedAt:null and returns row when parent list is active", async () => {
+      const now = new Date();
+      mockDb.card.findUnique.mockResolvedValueOnce({
+        id: "c-1",
+        listId: "l-1",
+        title: "Card",
+        description: null,
+        position: 16384,
+        priority: null,
+        dueDate: null,
+        estimateHours: null,
+        completedAt: null,
+        deletedAt: null,
+        coverImage: null,
+        archivedAt: null,
+        createdById: "u-1",
+        createdAt: now,
+        updatedAt: now,
+        list: {
+          id: "l-1",
+          boardId: "b-1",
+          archivedAt: null,
+          board: { id: "b-1", workspaceId: "ws-1", archivedAt: null },
+        },
+      });
+
+      const res = await getCardWithListAndBoard("c-1");
+      expect(res).not.toBeNull();
+      expect(res!.card.id).toBe("c-1");
+      expect(mockDb.card.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "c-1", archivedAt: null },
+        }),
+      );
+    });
+
+    it("returns null when parent list is archived (archivedAt !== null)", async () => {
+      mockDb.card.findUnique.mockResolvedValueOnce({
+        id: "c-1",
+        listId: "l-1",
+        title: "Card",
+        description: null,
+        position: 16384,
+        priority: null,
+        dueDate: null,
+        estimateHours: null,
+        completedAt: null,
+        deletedAt: null,
+        coverImage: null,
+        archivedAt: null,
+        createdById: "u-1",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        list: {
+          id: "l-1",
+          boardId: "b-1",
+          archivedAt: new Date(), // parent list IS archived
+          board: { id: "b-1", workspaceId: "ws-1", archivedAt: null },
+        },
+      });
+
+      const res = await getCardWithListAndBoard("c-1");
+      expect(res).toBeNull();
+    });
+
+    it("returns null when card is not found", async () => {
+      mockDb.card.findUnique.mockResolvedValueOnce(null);
+      const res = await getCardWithListAndBoard("c-missing");
+      expect(res).toBeNull();
+    });
+  });
+
+  describe("getCardWithListAndMembers", () => {
+    it("queries with archivedAt:null and returns row with memberIds when parent list is active", async () => {
+      const now = new Date();
+      mockDb.card.findUnique.mockResolvedValueOnce({
+        id: "c-1",
+        listId: "l-1",
+        title: "Card",
+        description: null,
+        position: 16384,
+        priority: null,
+        dueDate: null,
+        estimateHours: null,
+        completedAt: null,
+        deletedAt: null,
+        coverImage: null,
+        archivedAt: null,
+        createdById: "u-1",
+        createdAt: now,
+        updatedAt: now,
+        list: {
+          id: "l-1",
+          boardId: "b-1",
+          archivedAt: null,
+          board: { id: "b-1", workspaceId: "ws-1" },
+        },
+        members: [{ userId: "m-1" }, { userId: "m-2" }],
+      });
+
+      const res = await getCardWithListAndMembers("c-1");
+      expect(res).not.toBeNull();
+      expect(res!.card.id).toBe("c-1");
+      expect(res!.memberIds).toEqual(["m-1", "m-2"]);
+      expect(mockDb.card.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "c-1", archivedAt: null },
+        }),
+      );
+    });
+
+    it("returns null when parent list is archived", async () => {
+      mockDb.card.findUnique.mockResolvedValueOnce({
+        id: "c-1",
+        listId: "l-1",
+        title: "Card",
+        description: null,
+        position: 16384,
+        priority: null,
+        dueDate: null,
+        estimateHours: null,
+        completedAt: null,
+        deletedAt: null,
+        coverImage: null,
+        archivedAt: null,
+        createdById: "u-1",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        list: {
+          id: "l-1",
+          boardId: "b-1",
+          archivedAt: new Date(), // parent list IS archived
+          board: { id: "b-1", workspaceId: "ws-1" },
+        },
+        members: [],
+      });
+
+      const res = await getCardWithListAndMembers("c-1");
+      expect(res).toBeNull();
+    });
+
+    it("returns null when card is not found", async () => {
+      mockDb.card.findUnique.mockResolvedValueOnce(null);
+      const res = await getCardWithListAndMembers("c-missing");
+      expect(res).toBeNull();
+    });
+  });
+
+  describe("getArchivedCardWithListAndBoard", () => {
+    it("returns null when parent list is archived (requires active parent list)", async () => {
+      mockDb.card.findFirst.mockResolvedValueOnce({
+        id: "c-1",
+        listId: "l-1",
+        title: "Card",
+        description: null,
+        position: 16384,
+        priority: null,
+        dueDate: null,
+        estimateHours: null,
+        completedAt: null,
+        deletedAt: null,
+        coverImage: null,
+        archivedAt: new Date(), // card IS archived
+        createdById: "u-1",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        list: {
+          id: "l-1",
+          boardId: "b-1",
+          archivedAt: new Date(), // parent list IS archived
+          board: { id: "b-1", workspaceId: "ws-1", archivedAt: null },
+        },
+      });
+
+      const res = await getArchivedCardWithListAndBoard("c-1");
+      expect(res).toBeNull();
+    });
+
+    it("returns row when card is archived but parent list is active", async () => {
+      const now = new Date();
+      mockDb.card.findFirst.mockResolvedValueOnce({
+        id: "c-1",
+        listId: "l-1",
+        title: "Card",
+        description: null,
+        position: 16384,
+        priority: null,
+        dueDate: null,
+        estimateHours: null,
+        completedAt: null,
+        deletedAt: null,
+        coverImage: null,
+        archivedAt: now, // card IS archived
+        createdById: "u-1",
+        createdAt: now,
+        updatedAt: now,
+        list: {
+          id: "l-1",
+          boardId: "b-1",
+          archivedAt: null, // parent list is ACTIVE
+          board: { id: "b-1", workspaceId: "ws-1", archivedAt: null },
+        },
+      });
+
+      const res = await getArchivedCardWithListAndBoard("c-1");
+      expect(res).not.toBeNull();
+      expect(res!.card.id).toBe("c-1");
+      expect(mockDb.card.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "c-1", archivedAt: { not: null } },
+        }),
+      );
+    });
+
+    it("returns null when card is not found", async () => {
+      mockDb.card.findFirst.mockResolvedValueOnce(null);
+      const res = await getArchivedCardWithListAndBoard("c-missing");
+      expect(res).toBeNull();
+    });
   });
 });

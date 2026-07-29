@@ -132,18 +132,19 @@ function signOut() {
 }
 
 /** ChecklistScopeRecord shape from getChecklistWithCard. */
-function checklistScope(workspaceId: string, opts: { cardArchived?: boolean } = {}) {
+function checklistScope(workspaceId: string, opts: { cardArchived?: boolean; listArchived?: boolean } = {}) {
   return {
     id: CHECKLIST_ID,
     cardId: CARD_ID,
     boardId: BOARD_A,
     cardArchived: opts.cardArchived ?? false,
+    listArchived: opts.listArchived ?? false,
     board: { id: BOARD_A, workspaceId, archivedAt: null },
   };
 }
 /** getChecklistItemWithCard adds itemId/checklistId to the scope. */
-function itemScope(workspaceId: string) {
-  return { ...checklistScope(workspaceId), itemId: ITEM_ID, checklistId: CHECKLIST_ID };
+function itemScope(workspaceId: string, opts: { cardArchived?: boolean; listArchived?: boolean } = {}) {
+  return { ...checklistScope(workspaceId, opts), itemId: ITEM_ID, checklistId: CHECKLIST_ID };
 }
 
 beforeEach(() => {
@@ -341,7 +342,7 @@ describe("deleteChecklistItemAction (card:update)", () => {
   });
 });
 
-describe("archived guards", () => {
+describe("archived guards (US-074 Slice B2)", () => {
   it("rejects when the owning board is archived", async () => {
     signInAs("u", WS_A, "editor");
     h.getChecklistWithCard.mockResolvedValue({
@@ -358,6 +359,36 @@ describe("archived guards", () => {
     h.getChecklistItemWithCard.mockResolvedValue({ ...itemScope(WS_A), cardArchived: true });
     const r = await toggleChecklistItemAction(formData({ itemId: ITEM_ID, isCompleted: "false" }));
     expect(r).toEqual({ success: false, error: "Item not found" });
+    expectNoWrites(...writeSeams);
+  });
+
+  it("rejects checklist actions when the parent list is archived", async () => {
+    signInAs("u", WS_A, "editor");
+    const fakeScope = checklistScope(WS_A, { listArchived: true });
+    expect(fakeScope.listArchived).toBe(true);
+    // Verify mock returns the scope
+    h.getChecklistWithCard.mockResolvedValue(fakeScope);
+    h.getChecklistItemWithCard.mockResolvedValue(itemScope(WS_A, { listArchived: true }));
+
+    const r1 = await deleteChecklistAction(formData({ checklistId: CHECKLIST_ID }));
+    expect(r1).toEqual({ success: false, error: "Checklist not found" });
+
+    const r2 = await createChecklistItemAction(
+      formData({ checklistId: CHECKLIST_ID, title: "test" }),
+    );
+    expect(r2.success).toBe(false);
+    expect(r2).toMatchObject({ success: false, error: "Checklist not found" });
+
+    const r3 = await toggleChecklistItemAction(
+      formData({ itemId: ITEM_ID, isCompleted: "true" }),
+    );
+    expect(r3.success).toBe(false);
+    expect(r3).toEqual({ success: false, error: "Item not found" });
+
+    const r4 = await deleteChecklistItemAction(formData({ itemId: ITEM_ID }));
+    expect(r4.success).toBe(false);
+    expect(r4).toEqual({ success: false, error: "Item not found" });
+
     expectNoWrites(...writeSeams);
   });
 });

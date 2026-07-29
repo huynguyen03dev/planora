@@ -28,6 +28,7 @@ export type ListRecord = {
   boardId: string;
   title: string;
   position: number;
+  archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -75,13 +76,14 @@ export async function getListsByBoardId(
   boardId: string,
 ): Promise<ListWithCardsRecord[]> {
   const lists = await db.list.findMany({
-    where: { boardId },
+    where: { boardId, archivedAt: null },
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
     select: {
       id: true,
       boardId: true,
       title: true,
       position: true,
+      archivedAt: true,
       createdAt: true,
       updatedAt: true,
       cards: {
@@ -169,7 +171,7 @@ export async function createList(data: {
 }): Promise<ListRecord> {
   for (let attempt = 0; attempt < MAX_CREATE_LIST_RETRIES; attempt += 1) {
     const lastList = await db.list.findFirst({
-      where: { boardId: data.boardId },
+      where: { boardId: data.boardId, archivedAt: null },
       orderBy: { position: "desc" },
       select: { position: true },
     });
@@ -188,6 +190,7 @@ export async function createList(data: {
           boardId: true,
           title: true,
           position: true,
+          archivedAt: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -206,13 +209,14 @@ export async function createList(data: {
 
 export async function updateListTitle(listId: string, title: string): Promise<ListRecord> {
   return db.list.update({
-    where: { id: listId },
+    where: { id: listId, archivedAt: null },
     data: { title },
     select: {
       id: true,
       boardId: true,
       title: true,
       position: true,
+      archivedAt: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -220,12 +224,12 @@ export async function updateListTitle(listId: string, title: string): Promise<Li
 }
 
 async function normalizeListPositions(boardId: string): Promise<void> {
-  // Collision-safe under the live `list_boardId_position_key` unique index: an
+  // Collision-safe under the live `list_boardId_position_live_key` unique index: an
   // in-place renumber can transiently assign a position another list still
   // holds and abort mid-transaction, so renumber via a disjoint staging band.
   await db.$transaction(async (tx) => {
     const lists = await tx.list.findMany({
-      where: { boardId },
+      where: { boardId, archivedAt: null },
       orderBy: [{ position: "asc" }, { createdAt: "asc" }],
       select: { id: true, position: true },
     });
@@ -281,32 +285,32 @@ export async function resolveListPosition(
   const prevList = prevListId
     ? await client.list.findUnique({
         where: { id: prevListId },
-        select: { id: true, boardId: true, position: true },
+        select: { id: true, boardId: true, position: true, archivedAt: true },
       })
     : null;
   const nextList = nextListId
     ? await client.list.findUnique({
         where: { id: nextListId },
-        select: { id: true, boardId: true, position: true },
+        select: { id: true, boardId: true, position: true, archivedAt: true },
       })
     : null;
 
-  if (prevListId && (!prevList || prevList.boardId !== boardId)) {
+  if (prevListId && (!prevList || prevList.boardId !== boardId || Boolean(prevList.archivedAt))) {
     throw new StaleNeighborError("prev");
   }
 
-  if (nextListId && (!nextList || nextList.boardId !== boardId)) {
+  if (nextListId && (!nextList || nextList.boardId !== boardId || Boolean(nextList.archivedAt))) {
     throw new StaleNeighborError("next");
   }
 
   const notMoved = excludeListId ? { id: { not: excludeListId } } : {};
+  const activeScope = { boardId, archivedAt: null, ...notMoved };
 
   if (prevList) {
     const following = await client.list.findFirst({
       where: {
-        boardId,
+        ...activeScope,
         position: { gt: prevList.position },
-        ...notMoved,
       },
       orderBy: { position: "asc" },
       select: { position: true },
@@ -321,9 +325,8 @@ export async function resolveListPosition(
   if (nextList) {
     const preceding = await client.list.findFirst({
       where: {
-        boardId,
+        ...activeScope,
         position: { lt: nextList.position },
-        ...notMoved,
       },
       orderBy: { position: "desc" },
       select: { position: true },
@@ -336,7 +339,7 @@ export async function resolveListPosition(
   }
 
   const lastList = await client.list.findFirst({
-    where: { boardId, ...notMoved },
+    where: activeScope,
     orderBy: { position: "desc" },
     select: { position: true },
   });
@@ -371,10 +374,11 @@ export async function reorderListByNeighbors(data: {
             id: true,
             boardId: true,
             position: true,
+            archivedAt: true,
           },
         });
 
-        if (!currentList) {
+        if (!currentList || Boolean(currentList.archivedAt)) {
           throw new Error("List not found");
         }
 
@@ -397,6 +401,7 @@ export async function reorderListByNeighbors(data: {
             boardId: true,
             title: true,
             position: true,
+            archivedAt: true,
             createdAt: true,
             updatedAt: true,
           },
@@ -432,10 +437,25 @@ export async function reorderListByNeighbors(data: {
   throw new Error("Failed to reorder list after retries");
 }
 
-export async function deleteList(listId: string): Promise<void> {
-  await db.list.delete({
+export async function archiveList(listId: string): Promise<ListRecord> {
+  return db.list.update({
     where: { id: listId },
+    data: { archivedAt: new Date() },
+    select: {
+      id: true,
+      boardId: true,
+      title: true,
+      position: true,
+      archivedAt: true,
+      createdAt: true,
+      updatedAt: true,
+    },
   });
+}
+
+/** Legacy alias for archiveList (US-074 Slice A) */
+export async function deleteList(listId: string): Promise<void> {
+  await archiveList(listId);
 }
 
 export async function getListWithBoard(listId: string): Promise<{
@@ -443,12 +463,13 @@ export async function getListWithBoard(listId: string): Promise<{
   board: { id: string; workspaceId: string; archivedAt: Date | null };
 } | null> {
   const list = await db.list.findUnique({
-    where: { id: listId },
+    where: { id: listId, archivedAt: null },
     select: {
       id: true,
       boardId: true,
       title: true,
       position: true,
+      archivedAt: true,
       createdAt: true,
       updatedAt: true,
       board: {
@@ -467,4 +488,171 @@ export async function getListWithBoard(listId: string): Promise<{
 
   const { board, ...listData } = list;
   return { list: listData, board };
+}
+
+export type ArchivedListRecord = {
+  id: string;
+  boardId: string;
+  title: string;
+  position: number;
+  archivedAt: Date;
+  cardCount: number;
+};
+
+export async function getArchivedLists(
+  boardId: string,
+): Promise<ArchivedListRecord[]> {
+  const lists = await db.list.findMany({
+    where: {
+      boardId,
+      archivedAt: { not: null },
+      board: { archivedAt: null },
+    },
+    orderBy: { archivedAt: "desc" },
+    select: {
+      id: true,
+      boardId: true,
+      title: true,
+      position: true,
+      archivedAt: true,
+      _count: {
+        select: {
+          cards: {
+            where: { deletedAt: null },
+          },
+        },
+      },
+    },
+  });
+
+  return lists.map((list) => ({
+    id: list.id,
+    boardId: list.boardId,
+    title: list.title,
+    position: list.position,
+    archivedAt: list.archivedAt as Date,
+    cardCount: list._count.cards,
+  }));
+}
+
+export async function getArchivedListWithBoard(listId: string): Promise<{
+  list: ListRecord;
+  board: { id: string; workspaceId: string; archivedAt: Date | null };
+} | null> {
+  const list = await db.list.findFirst({
+    where: {
+      id: listId,
+      archivedAt: { not: null },
+      board: { archivedAt: null },
+    },
+    select: {
+      id: true,
+      boardId: true,
+      title: true,
+      position: true,
+      archivedAt: true,
+      createdAt: true,
+      updatedAt: true,
+      board: {
+        select: {
+          id: true,
+          workspaceId: true,
+          archivedAt: true,
+        },
+      },
+    },
+  });
+
+  if (!list) {
+    return null;
+  }
+
+  const { board, ...listData } = list;
+  return { list: listData, board };
+}
+
+const MAX_RESTORE_LIST_RETRIES = 5;
+
+export async function restoreList(listId: string): Promise<ListRecord> {
+  for (let attempt = 0; attempt < MAX_RESTORE_LIST_RETRIES; attempt += 1) {
+    try {
+      return await db.$transaction(async (tx) => {
+        const targetList = await tx.list.findFirst({
+          where: {
+            id: listId,
+            archivedAt: { not: null },
+            board: { archivedAt: null },
+          },
+          select: { id: true, boardId: true, position: true },
+        });
+
+        if (!targetList) {
+          throw new Error("LIST_NOT_FOUND");
+        }
+
+        const occupied = await tx.list.findFirst({
+          where: {
+            boardId: targetList.boardId,
+            archivedAt: null,
+            position: targetList.position,
+          },
+          select: { id: true },
+        });
+
+        let newPosition = targetList.position;
+        if (occupied) {
+          const lastActive = await tx.list.findFirst({
+            where: { boardId: targetList.boardId, archivedAt: null },
+            orderBy: { position: "desc" },
+            select: { position: true },
+          });
+
+          newPosition = lastActive ? lastActive.position + LIST_POSITION_GAP : LIST_POSITION_GAP;
+        }
+
+        const updateResult = await tx.list.updateMany({
+          where: {
+            id: listId,
+            archivedAt: { not: null },
+          },
+          data: {
+            archivedAt: null,
+            position: newPosition,
+          },
+        });
+
+        if (updateResult.count === 0) {
+          throw new Error("LIST_NOT_FOUND");
+        }
+
+        return tx.list.findUniqueOrThrow({
+          where: { id: listId },
+          select: {
+            id: true,
+            boardId: true,
+            title: true,
+            position: true,
+            archivedAt: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === "LIST_NOT_FOUND") {
+        throw error;
+      }
+
+      if (isUniqueConstraintError(error)) {
+        if (attempt < MAX_RESTORE_LIST_RETRIES - 1) {
+          continue;
+        }
+        throw new Error("Failed to restore list after retrying position conflicts");
+      }
+
+      throw error;
+    }
+  }
+
+  throw new Error("Failed to restore list after retrying position conflicts");
 }

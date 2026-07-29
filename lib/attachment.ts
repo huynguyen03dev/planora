@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { Prisma } from "@/app/generated/prisma/client";
+
 import db from "@/lib/prisma";
 
 export type AttachmentRecord = {
@@ -48,17 +50,21 @@ export async function getAttachmentsByCardId(
   });
 }
 
-export async function createAttachment(data: {
-  cardId: string;
-  userId: string;
-  fileName: string;
-  fileUrl: string;
-  fileType: string;
-  fileSize: number;
-  cloudinaryPublicId?: string;
-  cloudinaryResourceType?: string;
-}): Promise<AttachmentRecord> {
-  return db.attachment.create({
+export async function createAttachment(
+  data: {
+    cardId: string;
+    userId: string;
+    fileName: string;
+    fileUrl: string;
+    fileType: string;
+    fileSize: number;
+    cloudinaryPublicId?: string;
+    cloudinaryResourceType?: string;
+  },
+  client?: Prisma.TransactionClient,
+): Promise<AttachmentRecord> {
+  const c = client ?? db;
+  return c.attachment.create({
     data: {
       cardId: data.cardId,
       userId: data.userId,

@@ -127,3 +127,24 @@ describe("ListColumn — add-card composer dismissal", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("ListColumn — safe list archive (US-074 Slice A)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useBoardStore.getState().reset();
+  });
+
+  it("opens archive confirmation dialog and calls deleteListAction on confirm", async () => {
+    renderList();
+    await user.click(screen.getByRole("button", { name: "List actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Archive list" }));
+
+    expect(screen.getByText("Archive list?")).toBeInTheDocument();
+    expect(
+      screen.getByText(/This will archive the list "Backlog" and hide it from the active board/i),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Archive list" }));
+    expect(actions.deleteListAction).toHaveBeenCalledTimes(1);
+  });
+});

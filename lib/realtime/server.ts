@@ -87,6 +87,25 @@ export function emitListCreated(boardId: string, payload: {
   }
 }
 
+export function emitListRestored(boardId: string, payload: {
+  list: ListSnapshot;
+}) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.board(boardId)).emit("list:restored", {
+      boardId,
+      ...payload,
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit list:restored:", error);
+  }
+}
+
 export function emitListUpdated(boardId: string, payload: {
   listId: string;
   title?: string;

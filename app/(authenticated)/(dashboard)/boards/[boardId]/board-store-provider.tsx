@@ -17,6 +17,7 @@ import type {
   ListCreatedPayload,
   ListDeletedPayload,
   ListMovedPayload,
+  ListRestoredPayload,
   ListUpdatedPayload,
   Watcher,
 } from "@/lib/realtime/types";
@@ -151,6 +152,13 @@ export function BoardStoreProvider({
       applyOrDefer(applyRemoteListCreated, payload);
     }
 
+    function handleListRestored(payload: ListRestoredPayload) {
+      applyOrDefer((p) => {
+        applyRemoteListCreated(p);
+        router.refresh();
+      }, payload);
+    }
+
     function handleListUpdated(payload: ListUpdatedPayload) {
       applyRemoteListUpdated(payload);
     }
@@ -224,6 +232,7 @@ export function BoardStoreProvider({
     socket.on("card:moved", handleCardMoved);
     socket.on("list:moved", handleListMoved);
     socket.on("list:created", handleListCreated);
+    socket.on("list:restored", handleListRestored);
     socket.on("list:updated", handleListUpdated);
     socket.on("list:deleted", handleListDeleted);
     socket.on("card:created", handleCardCreated);
@@ -242,6 +251,7 @@ export function BoardStoreProvider({
       socket.off("card:moved", handleCardMoved);
       socket.off("list:moved", handleListMoved);
       socket.off("list:created", handleListCreated);
+      socket.off("list:restored", handleListRestored);
       socket.off("list:updated", handleListUpdated);
       socket.off("list:deleted", handleListDeleted);
       socket.off("card:created", handleCardCreated);

@@ -89,8 +89,9 @@ export function listWithBoardFixture(
       boardId,
       title: "List",
       position: 16384,
+      archivedAt: null as Date | null,
     },
-    board: { id: boardId, workspaceId, archivedAt: null },
+    board: { id: boardId, workspaceId, archivedAt: null as Date | null },
   };
 }
 

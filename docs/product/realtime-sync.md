@@ -39,6 +39,7 @@ Typed via `ServerToClientEvents` / `ClientToServerEvents` in
 | `card:archived` | board | cardId | **deferred** |
 | `list:moved` | board | listId, position | **deferred** (structural); cross-client reorder proven live on a non-dragging observer (US-012) |
 | `list:created` | board | list snapshot | **deferred** |
+| `list:restored` | board | list snapshot | **deferred** (structural); inserts empty list into store then triggers router.refresh to fetch cards |
 | `list:updated` | board | title | live (in-place) |
 | `list:deleted` | board | listId | **deferred** |
 | `comment:created` | board | comment + activity + author | live (in-place); cross-client propagation to an open detail sheet proven (US-012) |

@@ -225,6 +225,26 @@ describe("applyRemoteListCreated", () => {
 
     expect(listOrder()).toEqual(["list-1", "list-2", "list-3"]);
   });
+
+  it("handles restored list snapshot payload by inserting empty list sorted by position", () => {
+    useBoardStore.setState({ boardId: "board-1", lists: makeLists() });
+
+    useBoardStore.getState().applyRemoteListCreated({
+      boardId: "board-1",
+      list: {
+        id: "list-restored",
+        title: "Restored List",
+        boardId: "board-1",
+        position: 24576,
+      },
+    });
+
+    expect(listOrder()).toEqual(["list-1", "list-restored", "list-2", "list-3"]);
+    const restored = useBoardStore
+      .getState()
+      .lists.find((list) => list.id === "list-restored")!;
+    expect(restored.cards).toEqual([]);
+  });
 });
 
 describe("applyRemoteListUpdated", () => {
