@@ -4,7 +4,8 @@ import type { Prisma } from "@/app/generated/prisma/client";
 
 import type { ActionStep } from "@/lib/schemas/automation";
 
-import { RuleExecutionError, type RuleEventPayload } from "./types";
+import type { RuleEventPayload } from "./types";
+import { RuleExecutionError } from "./types";
 import { CARD_POSITION_GAP } from "@/lib/ordering";
 
 // ─── Mocks ───────────────────────────────────────────────────────────
@@ -74,6 +75,15 @@ vi.mock("@/lib/card-history", () => ({
 vi.mock("@/lib/automation/resolver", () => ({
   resolveRecipient: vi.fn().mockResolvedValue(["user-1"]),
   resolveRemoveScope: vi.fn().mockResolvedValue(["user-1"]),
+  // Decision 0030: the executor maps this into a structured
+  // MEMBER_NOT_IN_WORKSPACE RuleExecutionError — tests construct it from the
+  // mocked module so instanceof checks inside the executor match.
+  CrossWorkspaceTargetError: class CrossWorkspaceTargetError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = "CrossWorkspaceTargetError";
+    }
+  },
 }));
 
 // ─── Imports (after mocks) ───────────────────────────────────────────
@@ -89,7 +99,7 @@ import {
   buildCardMemberUnassignedEvent,
   recordCardHistoryEvents,
 } from "@/lib/card-history";
-import { resolveRecipient, resolveRemoveScope } from "./resolver";
+import { resolveRecipient, resolveRemoveScope, CrossWorkspaceTargetError } from "./resolver";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -102,7 +112,23 @@ function makeClient(targetListOverrides?: {
   const target = targetListOverrides ?? { archivedAt: null, workspaceId: "ws-1" };
   return {
     card: {
-      findUniqueOrThrow: vi.fn(),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({
+        id: "card-1",
+        listId: "list-1",
+        title: "Card",
+        description: null,
+        position: 1,
+        priority: null,
+        dueDate: null,
+        estimateHours: null,
+        completedAt: null,
+        deletedAt: null,
+        coverImage: null,
+        archivedAt: null,
+        createdById: "user-1",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
       findFirst: vi.fn(),
       update: vi.fn().mockResolvedValue({}),
     },
@@ -118,6 +144,10 @@ function makeClient(targetListOverrides?: {
           ? null
           : { archivedAt: target.archivedAt ?? null, board: { workspaceId: target.workspaceId } },
       ),
+    },
+    label: {
+      // Decision 0030 label guard: default = a label inside the rule workspace.
+      findUnique: vi.fn().mockResolvedValue({ board: { workspaceId: "ws-1" } }),
     },
   } as unknown as Prisma.TransactionClient;
 }
@@ -385,9 +415,9 @@ describe("executeRuleActions", () => {
       );
     });
 
-    // ── Target-list validation (US-074 Slice B2) ───────────────────
+    // ── Target-list validation (US-074 Slice B2 + decision 0030) ───
 
-    it("rejects a missing target list (list not found) with RuleExecutionError", async () => {
+    it("ISOLATES a missing target list: no throw, failed stepOutcome with TARGET_LIST_NOT_FOUND + target id", async () => {
       const client = makeClient({ notFound: true });
       const cardFindUniqueOrThrow = client.card.findUniqueOrThrow as ReturnType<typeof vi.fn>;
       cardFindUniqueOrThrow.mockResolvedValue({
@@ -397,19 +427,9 @@ describe("executeRuleActions", () => {
 
       const actions: ActionStep[] = [{ type: "move-card-to-list", targetListId: "list-missing" }];
 
-      await expect(
-        executeRuleActions({
-          client,
-          rule: { ...baseRule, actions },
-          event: baseEvent,
-          actorId: ACTOR,
-          triggerType: "card-moved-to-list",
-          chainId: "",
-          chainDepth: 0,
-        }),
-      ).rejects.toBeInstanceOf(RuleExecutionError);
-
-      const err = await executeRuleActions({
+      // Decision 0030: a structured stale-target error must NOT escape the
+      // executor — the primary card mutation commits; the step is audited.
+      const result = await executeRuleActions({
         client,
         rule: { ...baseRule, actions },
         event: baseEvent,
@@ -417,14 +437,24 @@ describe("executeRuleActions", () => {
         triggerType: "card-moved-to-list",
         chainId: "",
         chainDepth: 0,
-      }).catch((e: unknown) => e);
+      });
 
-      expect((err as RuleExecutionError).message).toContain("not found");
+      expect(result.stepOutcomes).toHaveLength(1);
+      expect(result.stepOutcomes[0]).toMatchObject({
+        stepIndex: 0,
+        actionType: "move-card-to-list",
+        status: "failed",
+        code: "TARGET_LIST_NOT_FOUND",
+        targetId: "list-missing",
+      });
+      expect(result.stepOutcomes[0]).toMatchObject({
+        message: expect.stringContaining("not found"),
+      });
       // The card must NOT be updated when the target is missing
       expect((client.card.update as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     });
 
-    it("rejects an archived target list with RuleExecutionError", async () => {
+    it("ISOLATES an archived target list: failed stepOutcome with TARGET_LIST_ARCHIVED", async () => {
       const client = makeClient({ archivedAt: new Date(), workspaceId: "ws-1" });
       const cardFindUniqueOrThrow = client.card.findUniqueOrThrow as ReturnType<typeof vi.fn>;
       cardFindUniqueOrThrow.mockResolvedValue({
@@ -434,19 +464,7 @@ describe("executeRuleActions", () => {
 
       const actions: ActionStep[] = [{ type: "move-card-to-list", targetListId: "list-archived" }];
 
-      await expect(
-        executeRuleActions({
-          client,
-          rule: { ...baseRule, actions },
-          event: baseEvent,
-          actorId: ACTOR,
-          triggerType: "card-moved-to-list",
-          chainId: "",
-          chainDepth: 0,
-        }),
-      ).rejects.toBeInstanceOf(RuleExecutionError);
-
-      const err = await executeRuleActions({
+      const result = await executeRuleActions({
         client,
         rule: { ...baseRule, actions },
         event: baseEvent,
@@ -454,13 +472,20 @@ describe("executeRuleActions", () => {
         triggerType: "card-moved-to-list",
         chainId: "",
         chainDepth: 0,
-      }).catch((e: unknown) => e);
+      });
 
-      expect((err as RuleExecutionError).message).toContain("archived");
+      expect(result.stepOutcomes[0]).toMatchObject({
+        status: "failed",
+        code: "TARGET_LIST_ARCHIVED",
+        targetId: "list-archived",
+      });
+      expect(result.stepOutcomes[0]).toMatchObject({
+        message: expect.stringContaining("archived"),
+      });
       expect((client.card.update as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     });
 
-    it("rejects a target list outside the rule workspace with RuleExecutionError", async () => {
+    it("ISOLATES a target list outside the rule workspace: TARGET_LIST_FOREIGN_WORKSPACE", async () => {
       const client = makeClient({ archivedAt: null, workspaceId: "ws-foreign" });
       const cardFindUniqueOrThrow = client.card.findUniqueOrThrow as ReturnType<typeof vi.fn>;
       cardFindUniqueOrThrow.mockResolvedValue({
@@ -470,19 +495,7 @@ describe("executeRuleActions", () => {
 
       const actions: ActionStep[] = [{ type: "move-card-to-list", targetListId: "list-foreign" }];
 
-      await expect(
-        executeRuleActions({
-          client,
-          rule: { ...baseRule, actions },
-          event: baseEvent,
-          actorId: ACTOR,
-          triggerType: "card-moved-to-list",
-          chainId: "",
-          chainDepth: 0,
-        }),
-      ).rejects.toBeInstanceOf(RuleExecutionError);
-
-      const err = await executeRuleActions({
+      const result = await executeRuleActions({
         client,
         rule: { ...baseRule, actions },
         event: baseEvent,
@@ -490,18 +503,23 @@ describe("executeRuleActions", () => {
         triggerType: "card-moved-to-list",
         chainId: "",
         chainDepth: 0,
-      }).catch((e: unknown) => e);
+      });
 
-      expect((err as RuleExecutionError).message).toContain("outside the rule workspace");
+      expect(result.stepOutcomes[0]).toMatchObject({
+        status: "failed",
+        code: "TARGET_LIST_FOREIGN_WORKSPACE",
+        targetId: "list-foreign",
+      });
+      expect(result.stepOutcomes[0]).toMatchObject({
+        message: expect.stringContaining("outside the rule workspace"),
+      });
       expect((client.card.update as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     });
 
     it("proves guard is live: archived-list rejection prevents card.update", async () => {
-      // The guard rejects a move to an archived list. This test does NOT
-      // perform a sabotage inversion (removing the guard and observing the
-      // mutation proceed) — the evaluator-level catch of RuleExecutionError
-      // and tx rollback provides that guarantee. Here we prove the guard
-      // fires and the card is never mutated.
+      // The guard rejects a move to an archived list. Under decision 0030 the
+      // rejection is ISOLATED (no throw) — the proof is that the step failed
+      // with TARGET_LIST_ARCHIVED and the card was never mutated.
       const client = makeClient({ archivedAt: new Date(), workspaceId: "ws-1" });
       const cardFindUniqueOrThrow = client.card.findUniqueOrThrow as ReturnType<typeof vi.fn>;
 
@@ -512,27 +530,28 @@ describe("executeRuleActions", () => {
 
       const actions: ActionStep[] = [{ type: "move-card-to-list", targetListId: "list-archived" }];
 
-      await expect(
-        executeRuleActions({
-          client,
-          rule: { ...baseRule, actions },
-          event: baseEvent,
-          actorId: ACTOR,
-          triggerType: "card-moved-to-list",
-          chainId: "",
-          chainDepth: 0,
-        }),
-      ).rejects.toBeInstanceOf(RuleExecutionError);
+      const result = await executeRuleActions({
+        client,
+        rule: { ...baseRule, actions },
+        event: baseEvent,
+        actorId: ACTOR,
+        triggerType: "card-moved-to-list",
+        chainId: "",
+        chainDepth: 0,
+      });
+
+      expect(result.stepOutcomes[0]).toMatchObject({
+        status: "failed",
+        code: "TARGET_LIST_ARCHIVED",
+      });
       expect((client.card.update as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     });
 
-    // ── Audit-context proof (US-074 Slice B2) ──────────────────────
+    // ── Audit payload proof (decision 0030) ───────────────────────
 
-    it("throws RuleExecutionError with real triggerType, chainId, chainDepth, and descriptive cause (not null)", async () => {
-      // Regression proof: executor threads evaluation metadata (triggerType,
-      // chainId, chainDepth) into the RuleExecutionError context so that
-      // logRuleExecutionError persists real trigger/cascade data, not
-      // hardcoded "card-moved-to-list" / empty strings / cause:null.
+    it("failed stepOutcome carries the descriptive message (not \"null\") for the audit", async () => {
+      // The per-step audit must describe what went wrong, not "null" — the
+      // evaluator persists it into RuleExecutionLog.metadata.
       const client = makeClient({ notFound: true });
       const cardFindUniqueOrThrow = client.card.findUniqueOrThrow as ReturnType<typeof vi.fn>;
       cardFindUniqueOrThrow.mockResolvedValue({
@@ -542,7 +561,7 @@ describe("executeRuleActions", () => {
 
       const actions: ActionStep[] = [{ type: "move-card-to-list", targetListId: "list-missing" }];
 
-      const err = await executeRuleActions({
+      const result = await executeRuleActions({
         client,
         rule: { ...baseRule, actions },
         event: baseEvent,
@@ -550,26 +569,251 @@ describe("executeRuleActions", () => {
         triggerType: "due-date-approaching",
         chainId: "cascade-42",
         chainDepth: 2,
-      }).catch((e: unknown) => e) as RuleExecutionError;
+      });
 
-      // The error message must describe what went wrong, not "null"
-      expect(err.message).toContain("not found");
-      expect(err.message).not.toBe("null");
-
-      // The triggerType must reflect the evaluation context, not a hardcoded value
-      expect(err.context.triggerType).toBe("due-date-approaching");
-
-      // The chain metadata must carry the evaluation cascade identity
-      expect(err.context.chainId).toBe("cascade-42");
-      expect(err.context.chainDepth).toBe(2);
-
-      // The cause must be a proper Error with the descriptive message,
-      // so logRuleExecutionError persists something meaningful, not "null"
-      expect(err.context.cause).toBeInstanceOf(Error);
-      expect((err.context.cause as Error).message).toContain("not found");
+      const failed = result.stepOutcomes[0] as Extract<typeof result.stepOutcomes[number], { status: "failed" }>;
+      expect(failed.code).toBe("TARGET_LIST_NOT_FOUND");
+      expect(failed.targetId).toBe("list-missing");
+      expect(failed.message).toContain("not found");
+      expect(failed.message).not.toBe("null");
 
       // No card update must have been attempted
       expect((client.card.update as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    });
+
+    // ── Decision 0030: best-effort continuation + two-class taxonomy ──
+
+    it("best-effort: a stale middle step does not block independent siblings (steps 1+3 apply, step 2 audited)", async () => {
+      const client = makeClient({ notFound: true });
+      const cardFindUniqueOrThrow = client.card.findUniqueOrThrow as ReturnType<typeof vi.fn>;
+      cardFindUniqueOrThrow.mockResolvedValue({
+        completedAt: null,
+        listId: "list-1",
+        estimateHours: null,
+        dueDate: null,
+      });
+
+      const actions: ActionStep[] = [
+        { type: "set-priority", priority: "HIGH" },
+        { type: "move-card-to-list", targetListId: "list-stale" },
+        { type: "set-completion", completed: true },
+      ];
+
+      const result = await executeRuleActions({
+        client,
+        rule: { ...baseRule, actions },
+        event: baseEvent,
+        actorId: ACTOR,
+        triggerType: "card-created",
+        chainId: "c-1",
+        chainDepth: 0,
+      });
+
+      // Steps 1 + 3 committed (best-effort continuation, decision 0030)
+      expect(updateCardPriority).toHaveBeenCalledWith("card-1", "HIGH", client);
+      expect(setCardCompletion).toHaveBeenCalledWith(client, "card-1", true, null);
+      // Step 2 never moved the card
+      expect((client.card.update as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+
+      expect(result.stepOutcomes).toHaveLength(3);
+      expect(result.stepOutcomes[0]).toMatchObject({ stepIndex: 0, status: "success" });
+      expect(result.stepOutcomes[1]).toMatchObject({
+        stepIndex: 1,
+        status: "failed",
+        code: "TARGET_LIST_NOT_FOUND",
+        targetId: "list-stale",
+      });
+      expect(result.stepOutcomes[2]).toMatchObject({ stepIndex: 2, status: "success" });
+
+      // Effects + produced events come from succeeded steps ONLY (invariants
+      // #5 and #7): no card-moved effect, no card-moved-to-list event.
+      expect(result.effects).toEqual([
+        { kind: "card-updated", boardId: "board-1", cardId: "card-1" },
+        { kind: "completion-updated", boardId: "board-1", cardId: "card-1", completed: true },
+      ]);
+      expect(result.producedEvents).toEqual([
+        {
+          triggerType: "card-completed",
+          payload: { cardId: "card-1", boardId: "board-1", listId: "list-1", completed: true },
+        },
+      ]);
+    });
+
+    it("an unexpected (non-RuleExecutionError) error still ABORTS — propagates, nothing isolated", async () => {
+      const client = makeClient();
+      // Once-only: the abort test must not leak its poisoned implementation
+      // into later tests (clearAllMocks does not reset implementations).
+      vi.mocked(updateCardPriority).mockRejectedValueOnce(new Error("db exploded"));
+
+      const actions: ActionStep[] = [
+        { type: "set-priority", priority: "HIGH" },
+        { type: "set-priority", priority: "LOW" },
+      ];
+
+      // Decision 0030 class 2: unexpected errors retain pre-0030 behavior —
+      // they escape the executor, abort the shared tx, and are logged
+      // post-rollback by the caller.
+      await expect(
+        executeRuleActions({
+          client,
+          rule: { ...baseRule, actions },
+          event: baseEvent,
+          actorId: ACTOR,
+          triggerType: "card-created",
+          chainId: "",
+          chainDepth: 0,
+        }),
+      ).rejects.toThrow("db exploded");
+    });
+
+    it("a CODE-LESS RuleExecutionError is the unexpected class: ABORTS (re-thrown unchanged), no isolation, no continuation", async () => {
+      // Review hardening: the isolation predicate is `instanceof
+      // RuleExecutionError && code != null`. A structured error WITHOUT a code
+      // (e.g. a future guard that forgets its code) must NOT be isolated — it
+      // aborts the shared tx like any unexpected error, preserving invariant
+      // #4 by construction.
+      const client = makeClient();
+      vi.mocked(updateCardPriority).mockRejectedValueOnce(
+        new RuleExecutionError("code-less boom", {
+          workspaceId: "ws-1",
+          ruleId: "rule-1",
+          ruleName: "Test Rule",
+          chainId: "",
+          chainDepth: 0,
+          cardId: "card-1",
+          triggerType: "card-created",
+          cause: new Error("code-less boom"),
+        }),
+      );
+
+      const actions: ActionStep[] = [
+        { type: "set-priority", priority: "HIGH" },
+        { type: "set-completion", completed: true },
+      ];
+
+      const err = await executeRuleActions({
+        client,
+        rule: { ...baseRule, actions },
+        event: baseEvent,
+        actorId: ACTOR,
+        triggerType: "card-created",
+        chainId: "",
+        chainDepth: 0,
+      }).catch((e: unknown) => e);
+
+      // The code-less error propagates unchanged → the tx aborts (the action
+      // layer logs it post-rollback via the unexpected path).
+      expect(err).toBeInstanceOf(RuleExecutionError);
+      expect((err as RuleExecutionError).code).toBeUndefined();
+      expect((err as RuleExecutionError).message).toBe("code-less boom");
+      // No best-effort continuation: the independent sibling step never ran.
+      expect(setCardCompletion).not.toHaveBeenCalled();
+    });
+
+    it("ISOLATES a departed-member assign target as MEMBER_NOT_IN_WORKSPACE and continues", async () => {
+      const client = makeClient();
+      vi.mocked(resolveRecipient).mockRejectedValue(
+        new CrossWorkspaceTargetError("User user-gone is not a member of workspace ws-1"),
+      );
+
+      const actions: ActionStep[] = [
+        { type: "assign-member", recipient: "user-gone" },
+        { type: "set-priority", priority: "HIGH" },
+      ];
+
+      const result = await executeRuleActions({
+        client,
+        rule: { ...baseRule, actions },
+        event: baseEvent,
+        actorId: ACTOR,
+        triggerType: "card-created",
+        chainId: "",
+        chainDepth: 0,
+      });
+
+      expect(result.stepOutcomes[0]).toMatchObject({
+        status: "failed",
+        code: "MEMBER_NOT_IN_WORKSPACE",
+        targetId: "user-gone",
+      });
+      expect(result.stepOutcomes[1]).toMatchObject({ status: "success" });
+      expect(assignMemberToCard).not.toHaveBeenCalled();
+    });
+
+    it("ISOLATES a departed-member notify target as MEMBER_NOT_IN_WORKSPACE (no notification pushed)", async () => {
+      const client = makeClient();
+      vi.mocked(resolveRecipient).mockRejectedValue(
+        new CrossWorkspaceTargetError("User user-gone is not a member of workspace ws-1"),
+      );
+
+      const actions: ActionStep[] = [{ type: "notify-member", recipient: "user-gone" }];
+
+      const result = await executeRuleActions({
+        client,
+        rule: { ...baseRule, actions },
+        event: baseEvent,
+        actorId: ACTOR,
+        triggerType: "card-created",
+        chainId: "",
+        chainDepth: 0,
+      });
+
+      expect(result.stepOutcomes[0]).toMatchObject({
+        status: "failed",
+        code: "MEMBER_NOT_IN_WORKSPACE",
+        targetId: "user-gone",
+      });
+      expect(result.effects).toEqual([]); // invariant #5: no effect for the failed step
+    });
+
+    it("ISOLATES a deleted-label add target as LABEL_NOT_FOUND (no attach attempted)", async () => {
+      const client = makeClient();
+      (client.label.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+      const actions: ActionStep[] = [{ type: "add-label", labelId: "label-gone" }];
+
+      const result = await executeRuleActions({
+        client,
+        rule: { ...baseRule, actions },
+        event: baseEvent,
+        actorId: ACTOR,
+        triggerType: "card-created",
+        chainId: "",
+        chainDepth: 0,
+      });
+
+      expect(result.stepOutcomes[0]).toMatchObject({
+        status: "failed",
+        code: "LABEL_NOT_FOUND",
+        targetId: "label-gone",
+      });
+      expect(addCardLabel).not.toHaveBeenCalled();
+    });
+
+    it("ISOLATES a foreign-workspace label as LABEL_NOT_FOUND (remove-label guard too)", async () => {
+      const client = makeClient();
+      (client.label.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        board: { workspaceId: "ws-foreign" },
+      });
+
+      const actions: ActionStep[] = [{ type: "remove-label", labelId: "label-foreign" }];
+
+      const result = await executeRuleActions({
+        client,
+        rule: { ...baseRule, actions },
+        event: baseEvent,
+        actorId: ACTOR,
+        triggerType: "card-created",
+        chainId: "",
+        chainDepth: 0,
+      });
+
+      expect(result.stepOutcomes[0]).toMatchObject({
+        status: "failed",
+        code: "LABEL_NOT_FOUND",
+        targetId: "label-foreign",
+      });
+      expect(removeCardLabel).not.toHaveBeenCalled();
     });
   });
 

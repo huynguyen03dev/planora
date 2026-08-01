@@ -7,12 +7,12 @@ import { actionsSchema, triggerConfigSchema, type TriggerType } from "@/lib/sche
 import { AUTOMATION_ACTOR_USER_ID } from "./index";
 import { evaluateConditions } from "./matcher";
 import { ChainTracker } from "./loop-guard";
-import { executeRuleActions, type DeferredEffect } from "./executor";
+import { executeRuleActions, type DeferredEffect, type StepOutcome } from "./executor";
 import { RuleExecutionError, type RuleEventPayload } from "./types";
 
 type Client = Prisma.TransactionClient;
 
-type ExecutionStatus = "success" | "skipped" | "error" | "halted";
+type ExecutionStatus = "success" | "partially_failed" | "failed" | "skipped" | "error" | "halted";
 
 export interface EvaluateRulesParams {
   /** The trigger's transaction client — all rule reads/writes share it. */
@@ -45,10 +45,11 @@ export interface EvaluateRulesResult {
  * the trigger transaction, recurse on the events those actions produce (loop-
  * guarded), and accumulate the post-commit deferred effects.
  *
- * Runs INSIDE the trigger transaction. success/skipped/halted rows are logged
- * in-tx (they commit with the trigger). A failing action throws
- * {@link RuleExecutionError} — its error row is written post-rollback by the
- * caller, never in-tx.
+ * Runs INSIDE the trigger transaction. success/partially_failed/failed/
+ * skipped/halted rows are logged in-tx (they commit with the trigger). Since
+ * decision 0030, only UNEXPECTED errors escape the executor — the evaluator
+ * wraps them in {@link RuleExecutionError} and the caller writes the error row
+ * post-rollback, never in-tx.
  */
 export async function evaluateRules(
   params: EvaluateRulesParams,
@@ -144,12 +145,15 @@ export async function evaluateRules(
     }
 
     // --- claim-first mode (Tier 1 dedup for scheduled rules) ---
-    // Write the success row BEFORE executing so concurrent ticks can't double-apply.
-    // The claim row is inserted INSIDE the tx, so if a later action throws, the tx
-    // (claim included) rolls back and the next tick retries.
+    // Write the claim row BEFORE executing so concurrent ticks can't double-apply.
+    // The claim row is inserted INSIDE the tx, so if an UNEXPECTED error later
+    // aborts the tx, the claim rolls back too and the next tick retries
+    // (decision 0030 invariant #6). Isolated per-step failures do NOT abort, so
+    // the claim commits and the row is finalized (status + per-step audit) below.
+    let claimLogId: string | null = null;
     if (dedupKey) {
       try {
-        await client.ruleExecutionLog.create({
+        const claimRow = await client.ruleExecutionLog.create({
           data: {
             workspaceId,
             ruleId: rule.id,
@@ -163,13 +167,14 @@ export async function evaluateRules(
             status: "success",
           },
         });
+        claimLogId = claimRow.id;
       } catch (e) {
         if ((e as { code?: string })?.code === "P2002") continue; // already applied — skip rule
         throw e;
       }
     }
 
-    // --- execute (a failing step throws → aborts the whole tx) ---
+    // --- execute (decision 0030: isolated per-step; unexpected errors abort) ---
     try {
       const result = await executeRuleActions({
         client,
@@ -188,21 +193,58 @@ export async function evaluateRules(
       });
       effects.push(...result.effects);
 
-      // In scheduled claim-first mode the success row was already written above.
-      // Only write a post-execute success row when NOT in claim-first mode.
-      if (!dedupKey) {
+      // Overall status from per-step outcomes (decision 0030):
+      //   success           — no step failed
+      //   partially_failed  — ≥1 step failed AND ≥1 succeeded
+      //   failed            — every step failed (best-effort ran, all isolated)
+      const failedSteps = result.stepOutcomes.filter((o) => o.status === "failed");
+      const status: ExecutionStatus =
+        failedSteps.length === 0
+          ? "success"
+          : failedSteps.length === result.stepOutcomes.length
+            ? "failed"
+            : "partially_failed";
+
+      // Per-step audit: structured codes + stale target ids (decision 0030,
+      // AC3). Written only when something failed; success rows stay lean.
+      const metadata: { steps: StepOutcome[] } | undefined =
+        failedSteps.length > 0 ? { steps: result.stepOutcomes } : undefined;
+      const errorSummary =
+        failedSteps.length > 0
+          ? `${failedSteps.length} of ${result.stepOutcomes.length} action steps failed`
+          : undefined;
+
+      if (dedupKey && claimLogId) {
+        // Invariant #6: the claim row is KEPT for any execution that reached
+        // the executor (isolated failures included) — no retry can double-apply
+        // successful steps. Finalize its status + per-step audit in place.
+        if (failedSteps.length > 0) {
+          await client.ruleExecutionLog.update({
+            where: { id: claimLogId },
+            data: {
+              status,
+              error: errorSummary ?? null,
+              metadata,
+            },
+          });
+        }
+      } else {
         await logExecution(client, {
           workspaceId,
           rule,
           chain,
           cardId,
           triggerType,
-          status: "success",
+          status,
+          error: errorSummary,
+          metadata,
         });
       }
 
       // Cascade: each produced event may match other rules. Recurse one level
       // deeper (shared chainId + dedup set; the depth cap halts runaways).
+      // Invariant #7: producedEvents only ever come from SUCCEEDED steps (a
+      // failed step pushes none), so cascades never fan out from a failed step.
       for (const produced of result.producedEvents) {
         const sub = await evaluateRules({
           client,
@@ -250,6 +292,8 @@ async function logExecution(
     triggerType: TriggerType;
     status: ExecutionStatus;
     error?: string;
+    /** Per-step audit (decision 0030): structured codes + stale target ids. */
+    metadata?: { steps: StepOutcome[] };
   },
 ): Promise<void> {
   await client.ruleExecutionLog.create({
@@ -264,6 +308,7 @@ async function logExecution(
       triggerType: args.triggerType,
       status: args.status,
       error: args.error ?? null,
+      ...(args.metadata ? { metadata: args.metadata } : {}),
     },
   });
 }

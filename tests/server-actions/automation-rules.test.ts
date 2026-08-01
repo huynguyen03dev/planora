@@ -201,7 +201,9 @@ describe("createRuleAction (admin-only)", () => {
   it("allow + advisory: self-cycle rule still saves but returns a warning", async () => {
     signInAs("u", WS_A, "admin");
     // The move target is a WS-A list → passes the action-target isolation check.
-    h.db.list.findMany.mockResolvedValue([{ id: LIST_ID, board: { workspaceId: WS_A } }]);
+    h.db.list.findMany.mockResolvedValue([
+      { id: LIST_ID, board: { workspaceId: WS_A }, archivedAt: null },
+    ]);
     const r = await createRuleAction(
       createInput({
         triggerType: "card-moved-to-list",
@@ -251,7 +253,9 @@ describe("createRuleAction (admin-only)", () => {
   it("allow: same-workspace board scope + list target → success", async () => {
     signInAs("u", WS_A, "admin");
     h.getBoardById.mockResolvedValue({ id: BOARD_A, workspaceId: WS_A, archivedAt: null });
-    h.db.list.findMany.mockResolvedValue([{ id: LIST_ID, board: { workspaceId: WS_A } }]);
+    h.db.list.findMany.mockResolvedValue([
+      { id: LIST_ID, board: { workspaceId: WS_A }, archivedAt: null },
+    ]);
     const r = await createRuleAction(
       createInput({
         boardId: BOARD_A,
@@ -261,6 +265,18 @@ describe("createRuleAction (admin-only)", () => {
     );
     expect(r).toMatchObject({ success: true, ruleId: RULE_A });
     expect(h.db.rule.create).toHaveBeenCalledOnce();
+  });
+
+  it("US-074 minor: an ARCHIVED list target is rejected at save time (UX guard)", async () => {
+    signInAs("u", WS_A, "admin");
+    h.db.list.findMany.mockResolvedValue([
+      { id: LIST_ID, board: { workspaceId: WS_A }, archivedAt: new Date("2026-07-01") },
+    ]);
+    const r = await createRuleAction(
+      createInput({ actions: [{ type: "move-card-to-list", targetListId: LIST_ID }] }),
+    );
+    expect(r).toEqual({ success: false, error: "Cannot target an archived list" });
+    expectNoWrites(...writeSeams);
   });
 
   it("validation: rejects an empty action list", async () => {

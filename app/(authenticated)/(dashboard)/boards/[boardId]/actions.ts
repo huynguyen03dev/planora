@@ -662,10 +662,13 @@ export async function createCardAction(
     return { success: true, cardId: card.card.id };
   } catch (error) {
     if (error instanceof RuleExecutionError) {
+      // Decision 0030: only UNEXPECTED errors reach here (stale-target failures
+      // are isolated in-tx and the action succeeds). This message is accurate
+      // solely for the unexpected-abort class.
       await logRuleExecutionError(error);
       return {
         success: false,
-        error: `Automation rule "${error.context.ruleName}" failed; no changes were applied.`,
+        error: `Automation rule "${error.context.ruleName}" hit an unexpected error; no changes were applied.`,
       };
     }
     return { success: false, error: "Failed to create card. Please try again." };
@@ -1141,10 +1144,12 @@ export async function toggleCardCompletionAction(
     };
   } catch (error) {
     if (error instanceof RuleExecutionError) {
+      // Decision 0030: only UNEXPECTED errors reach here (stale-target failures
+      // are isolated in-tx and the action succeeds).
       await logRuleExecutionError(error);
       return {
         success: false,
-        error: `Automation rule "${error.context.ruleName}" failed; no changes were applied.`,
+        error: `Automation rule "${error.context.ruleName}" hit an unexpected error; no changes were applied.`,
       };
     }
     return { success: false, error: "Failed to update completion. Please try again." };
@@ -1661,10 +1666,12 @@ export async function moveCardAction(
     return { success: true };
   } catch (error) {
     if (error instanceof RuleExecutionError) {
+      // Decision 0030: only UNEXPECTED errors reach here (stale-target failures
+      // are isolated in-tx and the action succeeds).
       await logRuleExecutionError(error);
       return {
         success: false,
-        error: `Automation rule "${error.context.ruleName}" failed; no changes were applied.`,
+        error: `Automation rule "${error.context.ruleName}" hit an unexpected error; no changes were applied.`,
       };
     }
     return { success: false, error: "Failed to move card. Please try again." };
@@ -2072,10 +2079,12 @@ export async function assignCardMemberAction(
     };
   } catch (error) {
     if (error instanceof RuleExecutionError) {
+      // Decision 0030: only UNEXPECTED errors reach here (stale-target failures
+      // are isolated in-tx and the action succeeds).
       await logRuleExecutionError(error);
       return {
         success: false,
-        error: `Automation rule "${error.context.ruleName}" failed; no changes were applied.`,
+        error: `Automation rule "${error.context.ruleName}" hit an unexpected error; no changes were applied.`,
       };
     }
     console.error("Failed to assign member to card:", error);
@@ -2546,10 +2555,12 @@ export async function addCardLabelAction(
     return { success: true, changed };
   } catch (error) {
     if (error instanceof RuleExecutionError) {
+      // Decision 0030: only UNEXPECTED errors reach here (stale-target failures
+      // are isolated in-tx and the action succeeds).
       await logRuleExecutionError(error);
       return {
         success: false,
-        error: `Automation rule "${error.context.ruleName}" failed; no changes were applied.`,
+        error: `Automation rule "${error.context.ruleName}" hit an unexpected error; no changes were applied.`,
       };
     }
     console.error("Failed to add label to card:", error);

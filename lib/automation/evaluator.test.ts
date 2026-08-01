@@ -27,11 +27,12 @@ function makeClient(rules: RuleRow[]) {
     void args;
     return { id: "log" };
   });
+  const update = vi.fn(async () => ({ id: "log" }));
   const client = {
     rule: { findMany: vi.fn(async () => rules) },
-    ruleExecutionLog: { create },
+    ruleExecutionLog: { create, update },
   };
-  return { client: client as never, logCreate: create };
+  return { client: client as never, logCreate: create, logUpdate: update };
 }
 
 const VALID_ACTIONS = [{ type: "set-priority", priority: "HIGH" }];
@@ -51,7 +52,7 @@ const baseEvent: RuleEventPayload = { cardId: "c0", boardId: "b1", listId: "l1" 
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockExecute.mockResolvedValue({ effects: [], producedEvents: [] });
+  mockExecute.mockResolvedValue({ effects: [], producedEvents: [], stepOutcomes: [] });
 });
 
 describe("evaluateRules — matching + logging", () => {
@@ -72,6 +73,7 @@ describe("evaluateRules — matching + logging", () => {
     mockExecute.mockResolvedValue({
       effects: [{ kind: "card-updated", boardId: "b1", cardId: "c0" }],
       producedEvents: [],
+      stepOutcomes: [{ stepIndex: 0, actionType: "set-priority", status: "success" }],
     });
     const { client, logCreate } = makeClient([rule()]);
     const result = await evaluateRules({
@@ -126,6 +128,7 @@ describe("evaluateRules — loop prevention", () => {
     mockExecute.mockResolvedValue({
       effects: [],
       producedEvents: [{ triggerType: "card-created", payload: { cardId: "c0", boardId: "b1" } }],
+      stepOutcomes: [{ stepIndex: 0, actionType: "set-priority", status: "success" }],
     });
     const { client, logCreate } = makeClient([rule()]);
     await evaluateRules({
@@ -151,6 +154,7 @@ describe("evaluateRules — loop prevention", () => {
       return {
         effects: [],
         producedEvents: [{ triggerType: "card-created", payload: { cardId: `c${counter}`, boardId: "b1" } }],
+        stepOutcomes: [{ stepIndex: 0, actionType: "set-priority", status: "success" }],
       };
     });
     const { client, logCreate } = makeClient([rule()]);
@@ -202,6 +206,125 @@ describe("evaluateRules — error semantics", () => {
       expect(ctx.triggerType).toBe("card-created");
     });
     expect.assertions(4);
+  });
+});
+
+describe("evaluateRules — failure isolation status + audit (decision 0030)", () => {
+  it("some steps failed → logs partially_failed with per-step metadata (codes + stale target ids)", async () => {
+    mockExecute.mockResolvedValue({
+      effects: [{ kind: "card-updated", boardId: "b1", cardId: "c0" }],
+      producedEvents: [],
+      stepOutcomes: [
+        { stepIndex: 0, actionType: "set-priority", status: "success" },
+        {
+          stepIndex: 1,
+          actionType: "move-card-to-list",
+          status: "failed",
+          code: "TARGET_LIST_ARCHIVED",
+          targetId: "stale-list",
+          message: "move-card-to-list: target list \"stale-list\" is archived",
+        },
+        { stepIndex: 2, actionType: "set-completion", status: "success" },
+      ],
+    });
+    const { client, logCreate } = makeClient([rule()]);
+
+    await evaluateRules({
+      client,
+      workspaceId: "ws",
+      triggerType: "card-created",
+      event: baseEvent,
+    });
+
+    // The rule ran to completion (best-effort) — effects from succeeded steps
+    // still propagate (invariant #5: no effect for the isolated-failed step).
+    expect(mockExecute).toHaveBeenCalledTimes(1);
+    expect(logCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "partially_failed",
+          error: "1 of 3 action steps failed",
+          metadata: {
+            steps: expect.arrayContaining([
+              expect.objectContaining({
+                stepIndex: 1,
+                status: "failed",
+                code: "TARGET_LIST_ARCHIVED",
+                targetId: "stale-list",
+              }),
+            ]),
+          },
+        }),
+      }),
+    );
+  });
+
+  it("ALL steps failed → status failed, metadata carries every failure, no throw", async () => {
+    mockExecute.mockResolvedValue({
+      effects: [],
+      producedEvents: [],
+      stepOutcomes: [
+        {
+          stepIndex: 0,
+          actionType: "move-card-to-list",
+          status: "failed",
+          code: "TARGET_LIST_NOT_FOUND",
+          targetId: "gone",
+          message: "not found",
+        },
+        {
+          stepIndex: 1,
+          actionType: "add-label",
+          status: "failed",
+          code: "LABEL_NOT_FOUND",
+          targetId: "gone-label",
+          message: "not found",
+        },
+      ],
+    });
+    const { client, logCreate } = makeClient([rule()]);
+
+    // Invariant #1: no RuleExecutionError escapes — the primary mutation commits.
+    await expect(
+      evaluateRules({ client, workspaceId: "ws", triggerType: "card-created", event: baseEvent }),
+    ).resolves.toBeDefined();
+
+    const log = logCreate.mock.calls[0][0] as { data: Record<string, unknown> };
+    expect(log.data.status).toBe("failed");
+    expect(log.data.error).toBe("2 of 2 action steps failed");
+    expect(log.data.metadata).toEqual({
+      steps: [
+        expect.objectContaining({ code: "TARGET_LIST_NOT_FOUND", targetId: "gone" }),
+        expect.objectContaining({ code: "LABEL_NOT_FOUND", targetId: "gone-label" }),
+      ],
+    });
+  });
+
+  it("no step failed → plain success log, no metadata, no error", async () => {
+    mockExecute.mockResolvedValue({
+      effects: [],
+      producedEvents: [],
+      stepOutcomes: [
+        { stepIndex: 0, actionType: "set-priority", status: "success" },
+        { stepIndex: 1, actionType: "notify-member", status: "success" },
+      ],
+    });
+    const { client, logCreate } = makeClient([rule()]);
+
+    await evaluateRules({
+      client,
+      workspaceId: "ws",
+      triggerType: "card-created",
+      event: baseEvent,
+    });
+
+    expect(logCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "success", error: null }),
+      }),
+    );
+    const log = logCreate.mock.calls[0][0] as { data: Record<string, unknown> };
+    expect(log.data).not.toHaveProperty("metadata");
   });
 });
 
@@ -283,8 +406,9 @@ describe("evaluateRules — dedupKey claim-first mode", () => {
     mockExecute.mockResolvedValue({
       effects: [{ kind: "card-updated", boardId: "b1", cardId: "c0" }],
       producedEvents: [],
+      stepOutcomes: [{ stepIndex: 0, actionType: "set-priority", status: "success" }],
     });
-    const { client, logCreate } = makeClient([rule()]);
+    const { client, logCreate, logUpdate } = makeClient([rule()]);
 
     await evaluateRules({
       client,
@@ -306,5 +430,56 @@ describe("evaluateRules — dedupKey claim-first mode", () => {
         }),
       }),
     );
+    // All steps succeeded → nothing to finalize, no claim-row update.
+    expect(logUpdate).not.toHaveBeenCalled();
+  });
+
+  it("claim-first + PARTIAL failure → the claim row is KEPT and updated to partially_failed with per-step metadata (invariant #6)", async () => {
+    mockExecute.mockResolvedValue({
+      effects: [],
+      producedEvents: [],
+      stepOutcomes: [
+        { stepIndex: 0, actionType: "set-priority", status: "success" },
+        {
+          stepIndex: 1,
+          actionType: "move-card-to-list",
+          status: "failed",
+          code: "TARGET_LIST_NOT_FOUND",
+          targetId: "stale-list",
+          message: "target list not found",
+        },
+      ],
+    });
+    const { client, logCreate, logUpdate } = makeClient([rule()]);
+
+    await evaluateRules({
+      client,
+      workspaceId: "ws",
+      triggerType: "card-created",
+      event: baseEvent,
+      dedupKey: "card-1:DUE_SOON",
+    });
+
+    // Exactly one row (the claim) — it survives, so no retry can double-apply
+    // the succeeded step 0 (invariant #6).
+    expect(logCreate).toHaveBeenCalledTimes(1);
+    // …and its status + per-step audit are finalized in place.
+    expect(logUpdate).toHaveBeenCalledWith({
+      where: { id: "log" },
+      data: expect.objectContaining({
+        status: "partially_failed",
+        error: "1 of 2 action steps failed",
+        metadata: {
+          steps: expect.arrayContaining([
+            expect.objectContaining({
+              stepIndex: 1,
+              status: "failed",
+              code: "TARGET_LIST_NOT_FOUND",
+              targetId: "stale-list",
+            }),
+          ]),
+        },
+      }),
+    });
   });
 });

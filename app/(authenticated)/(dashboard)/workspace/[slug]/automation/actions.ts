@@ -126,13 +126,16 @@ function canManageRules(workspaceId: string): Promise<boolean> {
  * A list/label's board→workspace binding is immutable in this data model (a
  * board never changes workspace), so validating at SAVE time fully closes the
  * hole — unlike recipient targets, which are workspace-membership-dependent and
- * therefore guarded at RUNTIME in resolver.ts. Returns `true` iff every
- * referenced list/label exists and belongs to `workspaceId`.
+ * therefore guarded at RUNTIME in resolver.ts. Returns `null` iff every
+ * referenced list/label exists, is not archived, and belongs to `workspaceId`;
+ * otherwise a human-readable reason for the rejection (US-074 minor: an
+ * archived target list is rejected at save time as a UX guard — the runtime
+ * isolation in decision 0030 is the real safety).
  */
 async function actionTargetsInWorkspace(
   workspaceId: string,
   actions: ActionStep[],
-): Promise<boolean> {
+): Promise<string | null> {
   const listIds = new Set<string>();
   const labelIds = new Set<string>();
   for (const step of actions) {
@@ -143,12 +146,14 @@ async function actionTargetsInWorkspace(
   if (listIds.size > 0) {
     const lists = await db.list.findMany({
       where: { id: { in: [...listIds] } },
-      select: { id: true, board: { select: { workspaceId: true } } },
+      select: { id: true, archivedAt: true, board: { select: { workspaceId: true } } },
     });
-    const inWs = new Set(
-      lists.filter((l) => l.board.workspaceId === workspaceId).map((l) => l.id),
-    );
-    for (const id of listIds) if (!inWs.has(id)) return false;
+    const found = new Map(lists.map((l) => [l.id, l]));
+    for (const id of listIds) {
+      const list = found.get(id);
+      if (!list || list.board.workspaceId !== workspaceId) return "Invalid action target";
+      if (list.archivedAt !== null) return "Cannot target an archived list";
+    }
   }
 
   if (labelIds.size > 0) {
@@ -159,10 +164,10 @@ async function actionTargetsInWorkspace(
     const inWs = new Set(
       labels.filter((l) => l.board.workspaceId === workspaceId).map((l) => l.id),
     );
-    for (const id of labelIds) if (!inWs.has(id)) return false;
+    for (const id of labelIds) if (!inWs.has(id)) return "Invalid action target";
   }
 
-  return true;
+  return null;
 }
 
 function serializeRule(rule: {
@@ -213,8 +218,9 @@ export async function createRuleAction(input: unknown): Promise<CreateRuleResult
     }
   }
 
-  if (!(await actionTargetsInWorkspace(workspaceId, actions))) {
-    return { success: false, error: "Invalid action target" };
+  const targetError = await actionTargetsInWorkspace(workspaceId, actions);
+  if (targetError) {
+    return { success: false, error: targetError };
   }
 
   const workspaceRules = await db.rule.findMany({
@@ -290,8 +296,9 @@ export async function updateRuleAction(input: unknown): Promise<UpdateRuleResult
     }
   }
 
-  if (!(await actionTargetsInWorkspace(existing.workspaceId, actions))) {
-    return { success: false, error: "Invalid action target" };
+  const targetError = await actionTargetsInWorkspace(existing.workspaceId, actions);
+  if (targetError) {
+    return { success: false, error: targetError };
   }
 
   const workspaceRules = await db.rule.findMany({

@@ -9,10 +9,17 @@
  * trigger events its actions produced so a later Phase-6 evaluator can recurse.
  *
  * The executor itself does NOT recurse, does NOT touch ChainTracker, and does
- * NOT fire socket emits or notifications directly.  First failing step throws
- * → aborts the tx.
+ * NOT fire socket emits or notifications directly.
+ *
+ * Failure isolation (decision 0030, US-075): each action step runs inside its
+ * own try/catch. A structured stale-target `RuleExecutionError` (code set) is
+ * ISOLATED — recorded in the result's per-step outcomes (status/code/target id)
+ * for the evaluator to audit into RuleExecutionLog.metadata — and the next
+ * independent step still runs (best-effort). Any OTHER error is unexpected and
+ * propagates → aborts the shared tx (retained pre-0030 behavior).
  *
  * See: docs/decisions/0022-automation-rules-engine.md
+ *      docs/decisions/0030-automation-rule-failure-isolation-semantics.md
  *      docs/stories/epics/E06-automation/US-066-automation-rules-engine/design.md
  */
 
@@ -20,7 +27,13 @@ import type { Prisma } from "@/app/generated/prisma/client";
 
 import type { ActionStep } from "@/lib/schemas/automation";
 import type { TriggerType } from "@/lib/schemas/automation";
-import { RuleExecutionError, type RuleEventPayload } from "./types";
+import {
+  RuleExecutionError,
+  STALE_TARGET_CODES,
+  type ActionType,
+  type StaleTargetCode,
+  type RuleEventPayload,
+} from "./types";
 import { updateCardPriority } from "@/lib/card";
 import { setCardCompletion } from "@/lib/card";
 import { addCardLabel, removeCardLabel } from "@/lib/label";
@@ -36,7 +49,7 @@ import {
 } from "@/lib/card-history";
 import { CARD_POSITION_GAP, LIVE_CARD_SCOPE } from "@/lib/ordering";
 
-import { resolveRecipient, resolveRemoveScope } from "./resolver";
+import { resolveRecipient, resolveRemoveScope, CrossWorkspaceTargetError } from "./resolver";
 
 // ─── Public types ────────────────────────────────────────────────────
 
@@ -86,6 +99,108 @@ export interface ExecuteRuleParams {
 export interface ExecuteRuleResult {
   effects: DeferredEffect[];
   producedEvents: ProducedEvent[];
+  /** Per-step outcomes, one entry per action step in order (decision 0030).
+   *  Failed entries carry the structured stale-target code + target id so the
+   *  evaluator can derive the overall status and audit them into
+   *  RuleExecutionLog.metadata. */
+  stepOutcomes: StepOutcome[];
+}
+
+/** Outcome of one action step (decision 0030 two-class taxonomy). */
+export type StepOutcome =
+  | { stepIndex: number; actionType: ActionType; status: "success" }
+  | {
+      stepIndex: number;
+      actionType: ActionType;
+      status: "failed";
+      code: StaleTargetCode;
+      targetId: string | null;
+      message: string;
+    };
+
+/** The entity id a step targets — the stale-target id an admin must clean up. */
+function stepTargetId(step: ActionStep): string | null {
+  switch (step.type) {
+    case "move-card-to-list":
+      return step.targetListId;
+    case "add-label":
+    case "remove-label":
+      return step.labelId;
+    case "assign-member":
+    case "notify-member":
+      return step.recipient;
+    default:
+      return null;
+  }
+}
+
+/** Build the RuleExecutionError context shared by every executor throw. */
+function staleTargetContext(
+  params: ExecuteRuleParams,
+  cause: unknown,
+): RuleExecutionError["context"] {
+  return {
+    workspaceId: params.rule.workspaceId,
+    ruleId: params.rule.id,
+    ruleName: params.rule.name,
+    chainId: params.chainId,
+    chainDepth: params.chainDepth,
+    cardId: params.event.cardId ?? null,
+    triggerType: params.triggerType,
+    cause,
+  };
+}
+
+/**
+ * Guard: an add/remove-label step must reference a label that exists in the
+ * rule's workspace. A deleted label (or one outside the workspace) is a stale
+ * target → structured RuleExecutionError (LABEL_NOT_FOUND), isolated per-step
+ * by the executor (decision 0030).
+ */
+async function assertLabelTarget(
+  client: Prisma.TransactionClient,
+  labelId: string,
+  workspaceId: string,
+  params: ExecuteRuleParams,
+): Promise<void> {
+  const label = await client.label.findUnique({
+    where: { id: labelId },
+    select: { board: { select: { workspaceId: true } } },
+  });
+  if (!label || label.board.workspaceId !== workspaceId) {
+    throw new RuleExecutionError(
+      `label "${labelId}" not found in the rule workspace`,
+      staleTargetContext(params, new Error(`label "${labelId}" not found in the rule workspace`)),
+      STALE_TARGET_CODES.LABEL_NOT_FOUND,
+    );
+  }
+}
+
+/**
+ * resolveRecipient with the decision-0030 member-stale-target mapping: a
+ * CrossWorkspaceTargetError (uuid literal resolves to a departed / non-member
+ * user) becomes a structured RuleExecutionError (MEMBER_NOT_IN_WORKSPACE), so
+ * the per-step isolation catches it as expected instead of aborting the tx.
+ */
+async function resolveMemberRecipient(
+  client: Prisma.TransactionClient,
+  token: string,
+  ctx: { cardId: string; workspaceId: string },
+  params: ExecuteRuleParams,
+  stepLabel: string,
+): Promise<string[]> {
+  try {
+    return await resolveRecipient(client, token, ctx);
+  } catch (error) {
+    if (error instanceof CrossWorkspaceTargetError) {
+      throw new RuleExecutionError(
+        `${stepLabel}: ${error.message}`,
+        staleTargetContext(params, error),
+        STALE_TARGET_CODES.MEMBER_NOT_IN_WORKSPACE,
+      );
+    }
+    throw error;
+  }
 }
 
 // ─── Executor ────────────────────────────────────────────────────────
@@ -108,9 +223,11 @@ export async function executeRuleActions(
 
   const effects: DeferredEffect[] = [];
   const producedEvents: ProducedEvent[] = [];
+  const stepOutcomes: StepOutcome[] = [];
 
-  for (const step of rule.actions) {
-    switch (step.type) {
+  for (const [stepIndex, step] of rule.actions.entries()) {
+    try {
+      switch (step.type) {
       case "set-priority": {
         await updateCardPriority(cardId, step.priority, client);
         effects.push({ kind: "card-updated", boardId, cardId });
@@ -124,10 +241,11 @@ export async function executeRuleActions(
         });
         const fromListId = card.listId;
 
-        // US-074 Slice B2: validate target list exists, is not archived, and
-        // belongs to the rule's workspace before mutating. A stale/missing/foreign
-        // target throws RuleExecutionError → atomic rollback (US-075 owns
-        // failure-isolation follow-up; we do NOT invent best-effort here).
+        // US-074 Slice B2 + decision 0030: validate target list exists, is not
+        // archived, and belongs to the rule's workspace before mutating. A
+        // stale/missing/foreign target throws a structured RuleExecutionError
+        // with a code — the executor's per-step isolation audits it and
+        // continues (best-effort), never aborting the primary card mutation.
         const targetList = await client.list.findUnique({
           where: { id: step.targetListId },
           select: {
@@ -149,6 +267,7 @@ export async function executeRuleActions(
               triggerType: params.triggerType,
               cause: new Error(`target list "${step.targetListId}" not found`),
             },
+            STALE_TARGET_CODES.TARGET_LIST_NOT_FOUND,
           );
         }
 
@@ -165,6 +284,7 @@ export async function executeRuleActions(
               triggerType: params.triggerType,
               cause: new Error(`target list "${step.targetListId}" is archived`),
             },
+            STALE_TARGET_CODES.TARGET_LIST_ARCHIVED,
           );
         }
 
@@ -181,6 +301,7 @@ export async function executeRuleActions(
               triggerType: params.triggerType,
               cause: new Error(`target list "${step.targetListId}" is outside the rule workspace`),
             },
+            STALE_TARGET_CODES.TARGET_LIST_FOREIGN_WORKSPACE,
           );
         }
 
@@ -227,6 +348,10 @@ export async function executeRuleActions(
       }
 
       case "add-label": {
+        // Stale-target guard (decision 0030): a deleted/foreign label is a
+        // structured LABEL_NOT_FOUND failure, isolated per-step — never a raw
+        // FK violation that would abort the whole tx.
+        await assertLabelTarget(client, step.labelId, workspaceId, params);
         const { changed } = await addCardLabel(cardId, step.labelId, client);
         if (changed) {
           effects.push({ kind: "labels-updated", boardId, cardId });
@@ -239,6 +364,7 @@ export async function executeRuleActions(
       }
 
       case "remove-label": {
+        await assertLabelTarget(client, step.labelId, workspaceId, params);
         const { changed } = await removeCardLabel(cardId, step.labelId, client);
         if (changed) {
           effects.push({ kind: "labels-updated", boardId, cardId });
@@ -247,7 +373,10 @@ export async function executeRuleActions(
       }
 
       case "assign-member": {
-        const ids = await resolveRecipient(client, step.recipient, { cardId, workspaceId });
+        const ids = await resolveMemberRecipient(client, step.recipient, {
+          cardId,
+          workspaceId,
+        }, params, "assign-member");
         let anyChanged = false;
         for (const id of ids) {
           const { changed } = await assignMemberToCard({ cardId, userId: id }, client);
@@ -376,7 +505,10 @@ export async function executeRuleActions(
       }
 
       case "notify-member": {
-        const ids = await resolveRecipient(client, step.recipient, { cardId, workspaceId });
+        const ids = await resolveMemberRecipient(client, step.recipient, {
+          cardId,
+          workspaceId,
+        }, params, "notify-member");
         for (const id of ids) {
           effects.push({
             kind: "notify-member",
@@ -389,7 +521,31 @@ export async function executeRuleActions(
         break;
       }
     }
+
+      stepOutcomes.push({ stepIndex, actionType: step.type, status: "success" });
+    } catch (error) {
+      // Decision 0030 two-class taxonomy — HARDENED predicate (review finding):
+      // the isolation class is a RuleExecutionError WITH a stale-target code.
+      // A code-less RuleExecutionError is the unexpected class: it re-throws
+      // and aborts the shared tx exactly like any other non-structured error,
+      // so a future guard/step that forgets its code can never silently invert
+      // invariant #4 (isolated when it should abort). All executor throw sites
+      // currently carry codes; this predicate stays correct even when that is
+      // no longer true by construction.
+      if (error instanceof RuleExecutionError && error.code != null) {
+        stepOutcomes.push({
+          stepIndex,
+          actionType: step.type,
+          status: "failed",
+          code: error.code,
+          targetId: stepTargetId(step),
+          message: error.message,
+        });
+        continue;
+      }
+      throw error;
+    }
   }
 
-  return { effects, producedEvents };
+  return { effects, producedEvents, stepOutcomes };
 }
