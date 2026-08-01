@@ -263,12 +263,22 @@ export async function renameBoardLabel(
 
 /**
  * Delete a board label via the "Manage labels" dialog. Resolves once the label
- * row is gone (the delete resolved), i.e. the fan-out has been emitted.
+ * row is gone (the delete resolved and router.refresh reseeded the list),
+ * i.e. the fan-out has been emitted.
  */
 export async function deleteBoardLabel(page: Page, name: string): Promise<void> {
   const dialog = await openManageLabelsDialog(page);
   const row = dialog.locator("li").filter({ hasText: name });
   await row.getByRole("button", { name: /^delete$/i }).click();
+  // Confirm inside the alert dialog (scoped so it can't match the row's Delete
+  // button). The row wait alone passes spuriously: the modal alert hides the
+  // parent dialog with aria-hidden, so the role-based row locator matches
+  // nothing the instant the alert opens — before any delete has run.
+  const confirmDialog = page.getByRole("alertdialog", { name: `delete "${name}"` });
+  await confirmDialog.getByRole("button", { name: "Delete" }).click();
+  // Only once the alert has closed (the action resolved) can row count 0 mean
+  // the refresh removed the row — i.e. the label is actually deleted.
+  await expect(confirmDialog).toHaveCount(0);
   await expect(row).toHaveCount(0);
 }
 
