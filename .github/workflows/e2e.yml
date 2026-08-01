@@ -23,6 +23,9 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/planora_e2e?schema=public
       BETTER_AUTH_SECRET: e2e-ci-secret-not-for-production
       BETTER_AUTH_URL: http://localhost:3000
+      SMTP_HOST: localhost
+      SMTP_PORT: 1025
+      MAILPIT_API: http://localhost:8025
     services:
       postgres:
         image: postgres:16-alpine
@@ -34,6 +37,16 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U postgres -d planora_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      mailpit:
+        image: axllent/mailpit:latest
+        ports:
+          - 1025:1025
+          - 8025:8025
+        options: >-
+          --health-cmd "/mailpit readyz"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
