@@ -20,6 +20,7 @@ import {
   archiveList,
   getArchivedListWithBoard,
   getArchivedLists,
+  getListsByBoardId,
   getListWithBoard,
   reorderListByNeighbors,
   resolveListPosition,
@@ -357,6 +358,66 @@ describe("archiveList (US-074 Slice A)", () => {
       select: expect.objectContaining({ archivedAt: true }),
     });
     expect(res.archivedAt).toBeInstanceOf(Date);
+  });
+});
+
+describe("getListsByBoardId — active-board visibility (US-074 Slice A)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("queries with boardId + archivedAt: null so archived lists never enter the board result set", async () => {
+    mockDb.list.findMany.mockResolvedValueOnce([]);
+
+    const res = await getListsByBoardId(B);
+
+    // Pins the exact where-shape: both the board scope AND the archivedAt: null
+    // filter. Dropping either from getListsByBoardId fails this assertion.
+    expect(mockDb.list.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { boardId: B, archivedAt: null },
+        orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+      }),
+    );
+    expect(res).toEqual([]);
+  });
+
+  it("returns only live lists of the passed board, dropping archived and foreign-board rows", async () => {
+    const now = new Date();
+    const row = (id: string, boardId: string, position: number, archivedAt: Date | null) => ({
+      id,
+      boardId,
+      title: id,
+      position,
+      archivedAt,
+      createdAt: now,
+      updatedAt: now,
+      cards: [],
+    });
+
+    // Where-aware fake: honours the where clause exactly like Prisma would, so
+    // archived rows are dropped ONLY when the query itself asks for live lists.
+    // Removing `archivedAt: null` from getListsByBoardId therefore leaks
+    // "l-archived" into the returned set and fails the assertion below.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockDb.list.findMany.mockImplementation(
+      async ({ where }: { where: Record<string, unknown> }): Promise<any[]> =>
+        [
+          row("l-1", B, GAP, null),
+          row("l-archived", B, GAP * 2, new Date()),
+          row("l-other-board", "board-2", GAP, null),
+        ].filter((r) => {
+          if (where.boardId && r.boardId !== where.boardId) return false;
+          if ("archivedAt" in where && where.archivedAt === null && Boolean(r.archivedAt)) {
+            return false;
+          }
+          return true;
+        }),
+    );
+
+    const res = await getListsByBoardId(B);
+
+    expect(res.map((l) => l.id)).toEqual(["l-1"]);
   });
 });
 
