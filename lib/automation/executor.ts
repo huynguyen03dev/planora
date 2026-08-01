@@ -113,7 +113,7 @@ export type StepOutcome =
       stepIndex: number;
       actionType: ActionType;
       status: "failed";
-      code: StaleTargetCode | "UNKNOWN";
+      code: StaleTargetCode;
       targetId: string | null;
       message: string;
     };
@@ -524,16 +524,20 @@ export async function executeRuleActions(
 
       stepOutcomes.push({ stepIndex, actionType: step.type, status: "success" });
     } catch (error) {
-      // Decision 0030 two-class taxonomy: a structured stale-target error is
-      // ISOLATED — audited per-step, then the next independent action step
-      // still runs (best-effort). Any other error is unexpected; it propagates
-      // and aborts the shared tx (pre-0030 behavior retained).
-      if (error instanceof RuleExecutionError) {
+      // Decision 0030 two-class taxonomy — HARDENED predicate (review finding):
+      // the isolation class is a RuleExecutionError WITH a stale-target code.
+      // A code-less RuleExecutionError is the unexpected class: it re-throws
+      // and aborts the shared tx exactly like any other non-structured error,
+      // so a future guard/step that forgets its code can never silently invert
+      // invariant #4 (isolated when it should abort). All executor throw sites
+      // currently carry codes; this predicate stays correct even when that is
+      // no longer true by construction.
+      if (error instanceof RuleExecutionError && error.code != null) {
         stepOutcomes.push({
           stepIndex,
           actionType: step.type,
           status: "failed",
-          code: error.code ?? "UNKNOWN",
+          code: error.code,
           targetId: stepTargetId(step),
           message: error.message,
         });

@@ -5,6 +5,7 @@ import type { Prisma } from "@/app/generated/prisma/client";
 import type { ActionStep } from "@/lib/schemas/automation";
 
 import type { RuleEventPayload } from "./types";
+import { RuleExecutionError } from "./types";
 import { CARD_POSITION_GAP } from "@/lib/ordering";
 
 // ─── Mocks ───────────────────────────────────────────────────────────
@@ -111,7 +112,23 @@ function makeClient(targetListOverrides?: {
   const target = targetListOverrides ?? { archivedAt: null, workspaceId: "ws-1" };
   return {
     card: {
-      findUniqueOrThrow: vi.fn(),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({
+        id: "card-1",
+        listId: "list-1",
+        title: "Card",
+        description: null,
+        position: 1,
+        priority: null,
+        dueDate: null,
+        estimateHours: null,
+        completedAt: null,
+        deletedAt: null,
+        coverImage: null,
+        archivedAt: null,
+        createdById: "user-1",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
       findFirst: vi.fn(),
       update: vi.fn().mockResolvedValue({}),
     },
@@ -647,6 +664,50 @@ describe("executeRuleActions", () => {
           chainDepth: 0,
         }),
       ).rejects.toThrow("db exploded");
+    });
+
+    it("a CODE-LESS RuleExecutionError is the unexpected class: ABORTS (re-thrown unchanged), no isolation, no continuation", async () => {
+      // Review hardening: the isolation predicate is `instanceof
+      // RuleExecutionError && code != null`. A structured error WITHOUT a code
+      // (e.g. a future guard that forgets its code) must NOT be isolated — it
+      // aborts the shared tx like any unexpected error, preserving invariant
+      // #4 by construction.
+      const client = makeClient();
+      vi.mocked(updateCardPriority).mockRejectedValueOnce(
+        new RuleExecutionError("code-less boom", {
+          workspaceId: "ws-1",
+          ruleId: "rule-1",
+          ruleName: "Test Rule",
+          chainId: "",
+          chainDepth: 0,
+          cardId: "card-1",
+          triggerType: "card-created",
+          cause: new Error("code-less boom"),
+        }),
+      );
+
+      const actions: ActionStep[] = [
+        { type: "set-priority", priority: "HIGH" },
+        { type: "set-completion", completed: true },
+      ];
+
+      const err = await executeRuleActions({
+        client,
+        rule: { ...baseRule, actions },
+        event: baseEvent,
+        actorId: ACTOR,
+        triggerType: "card-created",
+        chainId: "",
+        chainDepth: 0,
+      }).catch((e: unknown) => e);
+
+      // The code-less error propagates unchanged → the tx aborts (the action
+      // layer logs it post-rollback via the unexpected path).
+      expect(err).toBeInstanceOf(RuleExecutionError);
+      expect((err as RuleExecutionError).code).toBeUndefined();
+      expect((err as RuleExecutionError).message).toBe("code-less boom");
+      // No best-effort continuation: the independent sibling step never ran.
+      expect(setCardCompletion).not.toHaveBeenCalled();
     });
 
     it("ISOLATES a departed-member assign target as MEMBER_NOT_IN_WORKSPACE and continues", async () => {
