@@ -399,9 +399,8 @@ describe("getListsByBoardId — active-board visibility (US-074 Slice A)", () =>
     // archived rows are dropped ONLY when the query itself asks for live lists.
     // Removing `archivedAt: null` from getListsByBoardId therefore leaks
     // "l-archived" into the returned set and fails the assertion below.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockDb.list.findMany.mockImplementation(
-      async ({ where }: { where: Record<string, unknown> }): Promise<any[]> =>
+      async ({ where }: { where: Record<string, unknown> }): Promise<ReturnType<typeof row>[]> =>
         [
           row("l-1", B, GAP, null),
           row("l-archived", B, GAP * 2, new Date()),
