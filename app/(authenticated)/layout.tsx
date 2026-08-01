@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { AuthenticatedHeaderActions } from "@/components/authenticated-header-actions";
 import { verifySession } from "@/lib/dal";
-import { listReceivedPendingInvitationsByEmail } from "@/lib/invitation";
+import { getPendingInvitationCount } from "@/lib/invitation";
 import { getUnreadNotificationCount } from "@/lib/notification";
 import { SocketLifecycleProvider } from "@/lib/realtime/socket-lifecycle-provider";
 
@@ -10,9 +10,9 @@ export default async function AuthenticatedLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   const { userId, user } = await verifySession();
-  const [unreadCount, pendingInvitations] = await Promise.all([
+  const [unreadCount, invitationCount] = await Promise.all([
     getUnreadNotificationCount(userId),
-    listReceivedPendingInvitationsByEmail(user.email),
+    getPendingInvitationCount(user.email),
   ]);
 
   return (
@@ -24,7 +24,7 @@ export default async function AuthenticatedLayout({
           </Link>
           <AuthenticatedHeaderActions
             initialUnreadCount={unreadCount}
-            initialInvitationCount={pendingInvitations.length}
+            initialInvitationCount={invitationCount}
           />
         </header>
         {children}

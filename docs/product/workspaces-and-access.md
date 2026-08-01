@@ -91,6 +91,13 @@ match.)
   `/invitations` page is retained as the accept landing and full-list view but
   is no longer a standalone nav entry. Accepting makes the user a
   `WorkspaceMember`.
+- **Live arrival (US-083 W2):** when the invited email belongs to an already-
+  registered user, `inviteMemberAction` pushes the typed `invitation:new`
+  socket event to that user's own room, so the header badge increments without
+  a reload; the inbox lists the invitation when opened; accepting clears the
+  badge. An unregistered email gets no realtime signal (persisted invitation +
+  email flow unchanged). Proven end-to-end by
+  `e2e/invitation-live-badge.spec.ts` (three real users, sabotage-verified).
 
 ## Workspace settings (admin)
 

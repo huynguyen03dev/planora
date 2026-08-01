@@ -138,6 +138,32 @@ export async function getWorkspaceSlug(workspaceId: string): Promise<string> {
   return rows[0].slug;
 }
 
+/** True when the user holds a membership row in the workspace (W2 accept proof — DB source of truth). */
+export async function isWorkspaceMember(
+  organizationId: string,
+  userId: string,
+): Promise<boolean> {
+  const { rows } = await pool().query<{ id: string }>(
+    `SELECT id FROM "workspaceMember" WHERE "organizationId" = $1 AND "userId" = $2 LIMIT 1`,
+    [organizationId, userId],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * The stored email of a user. Records Better Auth's actual email-casing/
+ * storage behavior for the W2 invitee-resolution contract (verified at
+ * sign-up.mjs: BA lowercases user emails at sign-up, so the stored value is
+ * always the lowercase form).
+ */
+export async function getStoredEmail(userId: string): Promise<string | null> {
+  const { rows } = await pool().query<{ email: string }>(
+    `SELECT email FROM "user" WHERE id = $1 LIMIT 1`,
+    [userId],
+  );
+  return rows[0]?.email ?? null;
+}
+
 /**
  * Best-effort teardown: delete the workspace (cascades members, boards, lists,
  * cards) and the listed users (cascades sessions/accounts). Swallows errors so a

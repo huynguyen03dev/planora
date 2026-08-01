@@ -12,7 +12,7 @@ import { inviteMemberSchema } from "@/lib/schemas";
 import { isValidTimezone } from "@/lib/timezone";
 import { auth } from "@/lib/auth";
 import { notifyInvited } from "@/lib/notification";
-import { emitAnalyticsRefresh } from "@/lib/realtime/server";
+import { emitAnalyticsRefresh, emitInvitationNew } from "@/lib/realtime/server";
 
 type InviteMemberResult =
   | { success: true; invitationId: string }
@@ -128,6 +128,27 @@ export async function inviteMemberAction(
       });
     } catch (notificationError) {
       console.error("Failed to send invite notification:", notificationError);
+    }
+
+    // Best-effort live arrival signal (US-083 W2): resolve an already-
+    // registered invitee by normalized email and push `invitation:new` to their
+    // user room only. Better Auth stores BOTH user emails and invitation
+    // emails lowercase (sign-up.mjs normalizes at sign-up; createInvitation
+    // lowercases on create), so the insensitive match is a defensive superset.
+    // An unregistered email gets no realtime signal — the persisted invitation
+    // and email flow still succeed. A lookup/emit failure never fails the
+    // invite.
+    try {
+      const invitee = await db.user.findFirst({
+        where: { email: { equals: normalizedEmail, mode: "insensitive" } },
+        select: { id: true },
+      });
+
+      if (invitee) {
+        emitInvitationNew(invitee.id, { invitationId: invitation.id });
+      }
+    } catch (emitError) {
+      console.error("Failed to emit invitation:new:", emitError);
     }
 
     return { success: true, invitationId: invitation.id };

@@ -58,14 +58,28 @@ notifications instead of living in a separate boards-only sidebar entry.
 - **Badge:** `computeInboxBadgeCount` = unread notifications + pending
   invitations, so a standing decision signals on every page. The count is owned
   by `authenticated-header-actions.tsx`; `notification-bell.tsx` is presentational.
+- **Live arrival (US-083 W2):** `inviteMemberAction` resolves an already-
+  registered invitee by normalized email (Better Auth lowercases user and
+  invitation emails — verified at sign-up.mjs / createInvitation) and pushes
+  the typed `invitation:new` event (payload: `{ invitationId }` — minimal,
+  non-sensitive) to the invitee's own `user:${userId}` socket room
+  (`emitInvitationNew`, `lib/realtime/server.ts`). The header's `invitation:new`
+  handler increments the invitation portion of the badge live — no reload, no
+  polling. The socket is the session-long one auto-joined to the user room
+  (`server.ts`); no client-controlled room join is involved. An unregistered
+  email gets no realtime signal — the persisted invitation + email flow still
+  succeeds. On socket (re)connect the header resyncs BOTH badge halves
+  (unread + invitations) from the DB in one Server Action
+  (`getInboxBadgeCountsAction`, `app/(authenticated)/actions.ts`), so a
+  reconnect heals drift rather than trusting increment-only counters (extends
+  US-062 mn8). The inbox itself always re-reads the `invitation` table when
+  opened, so its content is DB-truth.
 - **Inline actions:** each invitation card renders Accept / Decline wired to the
   existing `acceptInvitationAction` / `declineInvitationAction` Server Actions
   (Better Auth `acceptInvitation` / `rejectInvitation`, email-match guarded).
   Accept navigates to `/boards?workspace=…`; decline removes the card and
   decrements the badge. The `/invitations` page remains the accept landing.
-- **Known limitation:** a newly-arrived invitation does not push a live badge
-  increment (no socket event for invitations); the count refreshes on the next
-  load/navigation. Accepted/declined cards update optimistically.
+  Accepted/declined cards update optimistically.
 
 ## Scheduler
 

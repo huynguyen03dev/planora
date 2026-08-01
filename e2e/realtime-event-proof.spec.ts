@@ -142,7 +142,7 @@ type TripwireCounts = {
  * - `load`: full page reload (fresh SSR from DB, fresh socket connect).
  * - socket.io websocket open/close: a socket disconnect/reconnect runs the
  *   production onConnect fallbacks — the header unread-count Server Action
- *   (`getUnreadNotificationCountAction`) and the board provider's reconnect
+ *   (`getInboxBadgeCountsAction` — US-083 W2 combined unread+invitation resync) and the board provider's reconnect
  *   `router.refresh()` (board-store-provider.tsx) — both of which re-render
  *   from the DB.
  * - POST to the current route: the observable form of any soft route re-render
@@ -211,7 +211,7 @@ function armProofTripwire(page: Page, routePathname?: string) {
  * act. Alice's avatar count is asserted first so Bob's join is confirmed from
  * the server's own broadcast, not just Bob's self-render.
  *
- * Also awaits Bob's connect-time unread resync (`getUnreadNotificationCountAction`
+ * Also awaits Bob's connect-time badge resync (`getInboxBadgeCountsAction`
  * from the header, US-062 mn8): that Server Action re-renders the CURRENT route
  * server-side and returns a fresh RSC payload, so if it committed AFTER an
  * observer assertion it would revert the store-applied change and mask a
@@ -393,7 +393,7 @@ test("analytics:refresh — a card created by Alice refreshes Bob's dashboard me
   );
   await bobPage.goto(dashboardPath);
   // Masking barrier: the header's connect-time unread resync
-  // (getUnreadNotificationCountAction, US-062 mn8) is a Server Action that
+  // (getInboxBadgeCountsAction, US-062 mn8 extended by US-083 W2) is a Server Action that
   // re-renders the CURRENT route server-side and returns a fresh RSC payload
   // (observed: the full dashboard, incl. getWorkspaceAnalyticsAction). If it
   // landed after Alice's card create it would refresh the metric and mask a

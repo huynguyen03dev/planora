@@ -84,13 +84,15 @@ Realtime events (existing, typed in `lib/realtime/types.ts`, emitted in
 | `list:deleted` | board | W1 proof (deferred/structural) |
 | `notification:new` | user | W1 proof + W2 reuse |
 | `analytics:refresh` | workspace | W1 proof (signal) |
-| `invitation:new` (candidate, W2) | user | new typed event OR reuse of the pending-inbox fetch with a wake signal — implementation decision inside W2 |
+| `invitation:new` (W2 — implemented) | user | typed event, payload `{ invitationId }` only (minimal, non-sensitive); emitted via `emitInvitationNew(inviteeId, …)` to the invitee's own user room; header increments the badge, inbox re-reads the invitation table on open |
 
 Server Actions (existing, reused — no new action signatures):
 
 - `createCardAction` (W7), `archiveCardAction` / `restoreCardAction` (W8),
   `archiveListAction` / `restoreListAction` (W8), `inviteMemberAction` (W2
-  flow), `getUnreadNotificationCountAction` (W2 badge resync — existing).
+  flow), `getInboxBadgeCountsAction` (W2 badge resync — replaces
+  `getUnreadNotificationCountAction`; one action returns both badge halves so
+  the connect-time route re-render stays a single POST).
 
 Route: `/today` (W6, new, authenticated). No public API, no webhooks, no
 queue.

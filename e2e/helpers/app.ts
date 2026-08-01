@@ -395,6 +395,20 @@ export async function removeFirstMemberInOpenCard(page: Page): Promise<void> {
   await assignedMemberRemoveButtons(page).first().click();
 }
 
+/**
+ * Invite an email into the workspace through the REAL members-page dialog
+ * (US-083 W2). The role select keeps its default (editor). Resolves once the
+ * dialog closes — the inviteMemberAction succeeded (a failure keeps the dialog
+ * open with an inline error).
+ */
+export async function inviteMember(page: Page, slug: string, email: string): Promise<void> {
+  await page.goto(`/workspace/${slug}/members`);
+  await page.getByRole("button", { name: /^invite$/i }).click();
+  await page.locator("#invite-email").fill(email);
+  await page.getByRole("button", { name: /^send invite$/i }).click();
+  await expect(page.getByRole("dialog", { name: "Invite to workspace" })).toHaveCount(0);
+}
+
 // ── List/card scoping locators (strict, id-based) ─────────────────────────
 
 /** A list column root, scoped by list id (the column is draggable under that id). */

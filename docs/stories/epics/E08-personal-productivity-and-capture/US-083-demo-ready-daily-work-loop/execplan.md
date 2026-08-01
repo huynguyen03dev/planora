@@ -95,6 +95,7 @@ features, so every feature demo is backed by the Stage 1 harness.
 | --- | --- | --- | --- |
 | W1 E2E spec/helpers and focused validation | `w1-realtime-impl` | Handback | Stable handback delivered: hardened tripwire green, analytics sabotage RED at the observer assertion, final six-event GREEN (run log rows 15–17) |
 | Playwright server, PostgreSQL fixture data, Mailpit | `w1-realtime-impl` | **Released** | Final correction handback — the E2E seat is free for the next owner |
+| W2 E2E spec/helpers and focused validation (incl. all W2 Playwright runs and their fixture data) | `w2-invitation-live-badge` | **Handback — released** | W2 handback: live-badge proof green, sabotage RED at the observer assertion (run log rows 8–12), sabotage fully restored, seat free for W4/W5 |
 
 Read-only discovery for W2 and W4/W5 may continue, but implementation stays
 sequenced W1 → W2 → W4/W5. Protected inherited artifacts
@@ -114,7 +115,9 @@ FlowChart summary figure (the DOM otherwise offers no stable locator for that
 metric — the "Created" label text appears twice on the card).
 
 Masking discovery (recorded because it shapes the barriers): the header's
-connect-time unread resync (`getUnreadNotificationCountAction`, US-062 mn8) is
+connect-time unread resync (`getUnreadNotificationCountAction`, US-062 mn8 —
+since renamed `getInboxBadgeCountsAction` by US-083 W2, which folds the
+invitation count into the same single-POST action) is
 a Server Action that re-renders the CURRENT route and returns a fresh RSC
 payload. A first analytics sabotage run passed green because the resync landed
 after the trigger card and re-rendered the dashboard with the new card's data
@@ -208,6 +211,78 @@ Exact run log (all personally observed; focused command per row:
 Typecheck, changed-file ESLint, srcwalk review, and `git diff --check` all
 clean after every pass. `lib/realtime/server.ts` fully restored (`git diff`
 empty) after each sabotage/demo run and at handback.
+
+### W2 implementation progress (handback evidence)
+
+**Design decisions (locked with evidence):**
+
+- `invitation:new` is a typed user-room event with payload `{ invitationId }`
+  ONLY — minimal and non-sensitive. `emitInvitationNew(inviteeId, payload)`
+  targets `ROOMS.user(inviteeId)` exclusively (unit-pinned: never a
+  board/workspace/global target). The header increments the invitation half of
+  the badge; the inbox keeps reading the `invitation` table on open (DB-truth),
+  so no invitation data ever rides the wire.
+- `inviteMemberAction` resolves the registered invitee by normalized email
+  (`mode: "insensitive"` — a defensive superset) and emits best-effort in its
+  own try/catch: an unregistered email gets no signal; a lookup/emit failure
+  never fails the invite.
+- **BA email-casing verified at source + empirically:** better-auth 1.5.5
+  LOWERCASES user emails at sign-up (`sign-up.mjs:165`,
+  `const normalizedEmail = email.toLowerCase()`) and invitation emails on
+  create (`crud-invites.mjs:75`); acceptance compares case-insensitively. The
+  E2E signs Bob up mixed-case (`BoB-…@E2e.Test`) and asserts the stored email
+  is the lowercase form — the flow works from mixed-case input at the invite
+  boundary. (Initial as-typed hypothesis was disproven by the run log: the
+  verify-email token carried the lowercased address.)
+- **Resync is atomic and single-POST:** the header's connect-time resync now
+  reads BOTH badge halves in one Server Action
+  (`getInboxBadgeCountsAction`, replacing `getUnreadNotificationCountAction` —
+  its only caller was the header). Rationale: two separate resync actions
+  would fire two route POSTs at connect and break the W1 barrier/tripwire
+  single-POST contract. W1's six proofs still pass unchanged (re-verified).
+- **Masking guards for this proof:** (1) the W1-style tripwire on BOTH
+  observer pages (reload / socket.io websocket open-close / route POST), armed
+  before load, baselined after the connect-resync settle, checked after the
+  observer assertions; (2) ordering — the live badge assertion happens BEFORE
+  the dropdown is ever opened, because the dropdown's open-time
+  `/api/invitations/pending` fetch writes the badge count from DB and would
+  mask a removed emit; (3) the settle barrier awaits the connect-time badge
+  resync before Alice acts.
+
+**RED → GREEN → sabotage RED (all personally observed):**
+
+| # | Code state | Run | Result |
+| --- | --- | --- | --- |
+| 1 | tests only (no production code yet) | `npx vitest run lib/realtime/server.test.ts lib/invitation.test.ts` | **RED** — 7 failed (`emitInvitationNew` / `getPendingInvitationCount` missing) |
+| 2 | tests only | `npx vitest run tests/server-actions/workspace.test.ts` | **RED** — W2 case fails at the `findFirst` query-shape assertion (action not implemented) |
+| 3 | tests only | `npx vitest run components/authenticated-header-actions.test.tsx` | **RED** — 3 failed (no `invitation:new` subscription; old action name imported) |
+| 4 | production implemented | focused vitest (4 files) | **GREEN** — 30/30 |
+| 5 | production implemented | `npm test` | **GREEN** — 75 files, 1221 tests |
+| 6 | production implemented | `npx tsc --noEmit` / eslint changed files / `git diff --check` | clean |
+| 7 | production implemented | `npm run test:e2e -- e2e/invitation-live-badge.spec.ts` | **GREEN** — live badge, inbox, accept, Carol denial all pass (37.8s) |
+| 8 | `emitInvitationNew` call commented in `workspace/actions.ts` (sabotage) | same focused spec | **RED at the intended observer assertion**: `expect(bell(bobPage)).toHaveAccessibleName("Notifications (1 unread)")` — Received `"Notifications"`; tripwire clean (no reload/reconnect/route-POST masking) |
+| 9 | sabotage restored | `git diff` shows only the real W2 change; no SABOTAGE marker | restored |
+| 10 | restored | `npm run test:e2e -- e2e/invitation-live-badge.spec.ts e2e/realtime-event-proof.spec.ts` | **GREEN** — 7/7 (W2 + all six W1 proofs; combined resync preserves the single-POST connect barrier) |
+| 11 | restored | `npm run test:e2e` (full suite) | **GREEN** — 18/18 (6.6m) |
+| 12 | restored | `npm test` (re-run after doc/comment edits) | **GREEN** — 1221/1221 |
+
+**Environment finding (pre-existing, not caused by W2, fixed reversibly):**
+`node_modules/node_modules/` (created 2026-07-28) shadowed the root package
+tree for anything imported from inside `node_modules/@radix-ui/*` (Node's
+resolution walk hits `node_modules/node_modules` before the root), so every
+component test rendering a Radix Popover failed with
+`TypeError: Cannot read properties of null (reading 'useMemo')` —
+reproduced with a minimal radix-only probe and on committed, untouched tests
+(`board-filter.test.tsx`, 5 failed). All 665 nested entries have identical
+root twins. Fix: `mv node_modules/node_modules /tmp/planora-node_modules-shadow-20260802`
+(reversible move, nothing deleted) — probe, board-filter, and the full
+components project then pass. Root cause recorded; the shadow dir stays in
+`/tmp` for the next owner to delete or inspect.
+
+**No temporary instrumentation:** the only production hooks are the W2 code
+itself (`invitation:new` type+emitter, action emit, combined resync action,
+header subscription) plus the pre-existing W1 `flow-chart-created-total`
+testid. No debug logs, no forced delays, no test-only branches.
 
 1. **W3 — Demo determinism (foundation first).** Wrap existing seeds into a
    repeatable `demo:seed` / `demo:reset` workflow: fixed logical fixture
