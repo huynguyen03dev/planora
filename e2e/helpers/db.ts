@@ -125,6 +125,20 @@ export async function addWorkspaceMember(
 }
 
 /**
+ * A workspace's slug — the dashboard route is `/workspace/{slug}/dashboard`,
+ * and the create-workspace UI only surfaces the id (createWorkspace returns
+ * the id from the URL).
+ */
+export async function getWorkspaceSlug(workspaceId: string): Promise<string> {
+  const { rows } = await pool().query<{ slug: string }>(
+    `SELECT slug FROM "workspace" WHERE id = $1`,
+    [workspaceId],
+  );
+  if (!rows[0]) throw new Error(`No workspace found for ${workspaceId}`);
+  return rows[0].slug;
+}
+
+/**
  * Best-effort teardown: delete the workspace (cascades members, boards, lists,
  * cards) and the listed users (cascades sessions/accounts). Swallows errors so a
  * cleanup hiccup never masks a real test result.

@@ -89,6 +89,126 @@ features, so every feature demo is backed by the Stage 1 harness.
   default; reuse requires the explicit local-only `test:e2e:reuse` command.
   `docs/DEMO_RUNBOOK.md` records the restart and port-collision protocol.
 
+### Live execution ownership and locks
+
+| Scope/resource | Owner | State | Release condition |
+| --- | --- | --- | --- |
+| W1 E2E spec/helpers and focused validation | `w1-realtime-impl` | Handback | Stable handback delivered: hardened tripwire green, analytics sabotage RED at the observer assertion, final six-event GREEN (run log rows 15–17) |
+| Playwright server, PostgreSQL fixture data, Mailpit | `w1-realtime-impl` | **Released** | Final correction handback — the E2E seat is free for the next owner |
+
+Read-only discovery for W2 and W4/W5 may continue, but implementation stays
+sequenced W1 → W2 → W4/W5. Protected inherited artifacts
+`harness.db.bak-20260714-105049` and `tmp/` remain out of scope.
+
+### W1 implementation progress (handback evidence)
+
+`e2e/realtime-event-proof.spec.ts` — one dedicated spec, six isolated
+two-client tests (one per event), each: presence barrier (two avatars on both
+sides → Bob's socket joined the board room) → connect-resync settle barrier →
+real Server Action from A → live observer assertion on B with no navigation,
+reload, or reconnect in the assertion path. Two narrowly scoped helpers added
+(`renameList`, `archiveList` in `e2e/helpers/app.ts`; `getWorkspaceSlug` in
+`e2e/helpers/db.ts`); `postComment` gained an optional mention-listbox dismiss.
+One minimal production hook: `data-testid="flow-chart-created-total"` on the
+FlowChart summary figure (the DOM otherwise offers no stable locator for that
+metric — the "Created" label text appears twice on the card).
+
+Masking discovery (recorded because it shapes the barriers): the header's
+connect-time unread resync (`getUnreadNotificationCountAction`, US-062 mn8) is
+a Server Action that re-renders the CURRENT route and returns a fresh RSC
+payload. A first analytics sabotage run passed green because the resync landed
+after the trigger card and re-rendered the dashboard with the new card's data
+— masking the removed emit. The barriers therefore await Bob's first route
+POST (the resync) before Alice acts.
+
+Correction pass — residual reconnect masking closed with a tripwire. An
+independent audit identified the remaining gap: after the connect barrier, a
+mid-proof socket.io reconnect runs the production onConnect fallbacks (header
+unread-resync Server Action + board provider `router.refresh()` on reconnect),
+re-rendering from persisted DB state and masking a removed emit without any
+browser reload. Demonstrated (Demo A, pre-tripwire): with `notification:new`'s
+emit removed and a forced mid-window reload (the deterministic harness-level
+trigger for the same connect→resync chain; short offline emulation does NOT
+drop the established socket.io WS — the client only detects loss via its 20s+
+ping timeout), the observer assertion PASSED from DB state and the test went
+GREEN once the old load-only guard was disabled — the exact gap. The fix is a
+harness-level masking tripwire (`armProofTripwire` in the spec): for every
+proof window it counts full page loads, socket.io websocket opens/closes, and
+POST re-renders of the current route; armed before the page loads, baseline
+after the connect/resync barrier, checked after the observer assertion. Any
+delta fails the test. Demo B: same sabotage + forced reload with the tripwire
+armed → RED at `notification:new proof window: full reload during the proof
+window` (Expected 1, Received 2) — the tripwire detects the masking mechanism.
+The reconnect case is covered structurally: a socket.io reconnect necessarily
+opens a new websocket or closes the old one, and the onConnect fallbacks
+additionally produce a route POST. No production behavior was added for the
+tripwire; the only production hook remains the FlowChart data-testid.
+
+Final correction — route-POST tripwire armed for analytics too. An audit
+flagged the one remaining theoretical transport hole: a socket.io reconnect
+over the POLLING transport produces no websocket events at all (the WS
+counters are inert), yet the onConnect header unread-resync still POSTs to the
+current route and re-renders from DB. Also corrected: the earlier rationale
+claimed the debounce `router.refresh()` was a legit route POST — on the wire
+it is an RSC GET (observed: `GET /workspace/{slug}/dashboard` at ~250-300ms
+after the action, while the only dashboard-route POST is the connect-time
+resync), so a dashboard proof window has zero legitimate route POSTs. The
+tripwire now arms `routePosts` with the dashboard pathname in the analytics
+test as well: any POST to the dashboard route inside the window is a
+masking-capable resync, closing the polling-transport hole.
+
+Same-pass finding — rename-autosave race (not a masking path, but a real
+flake it replaced): a full-suite run exposed `card:updated` failing
+intermittently with the emit payload titled "Original cardRenamed card".
+`fill()` sets a controlled input's native value in one shot and can race
+React's state commit; Enter→blur then saved the STALE draft with the caret
+append. Fixed by driving renames through real keystrokes (select-all + type,
+`ControlOrMeta+A` + `pressSequentially` in `renameOpenCard`/`renameList`),
+which commits each keystroke through React's onChange. After the fix:
+`card:updated` 5/5 and `list:updated` 3/3 isolated passes (previously ~2/5
+failures).
+
+Sabotage evidence — every run with the emit body commented out in
+`lib/realtime/server.ts`, restored immediately after, `git diff` empty at the
+end. Focused command per event:
+`npm run test:e2e -- e2e/realtime-event-proof.spec.ts -g "<event>"`.
+
+| Event (emit removed) | Observed failing assertion |
+| --- | --- |
+| `card:updated` | `expect(cardInListById(bobPage, todo, "Renamed card")).toBeVisible()` — element(s) not found (old title stays) |
+| `list:created` | `expect(bobPage.getByText(newListTitle, { exact: true })).toBeVisible()` — element(s) not found |
+| `list:updated` | `expect(bobPage.getByText("In Progress", { exact: true })).toBeVisible()` — element(s) not found |
+| `list:deleted` | `expect(listColumnById(bobPage, lists["To Go"])).toHaveCount(0)` — received 1 |
+| `notification:new` | `expect(bobPage.getByRole("button", { name: "Notifications (1 unread)" })).toBeVisible()` — element(s) not found |
+| `analytics:refresh` | `expect(flowChartCreatedTotal(bobPage)).toHaveText("1")` — element(s) not found (FlowChart stays in empty state) |
+
+Exact run log (all personally observed; focused command per row:
+`npm run test:e2e -- e2e/realtime-event-proof.spec.ts [-g "<event>"]`):
+
+| # | Code state | Run | Result |
+| --- | --- | --- | --- |
+| 1 | initial spec | full suite | 6 passed |
+| 2 | post analytics-masking fix, pre-barrier | full suite | 5 passed, 1 failed (card:updated flake) |
+| 3 | post connect-resync barrier | full suite | 6 passed |
+| 4 | post connect-resync barrier | full suite | 6 passed |
+| 5 | post connect-resync barrier | 6× emitter sabotage (`card:updated`→`analytics:refresh`) | 6× 1 failed — observer assertions red (table above) |
+| 6 | post barrier, post sabotage restore | full suite | 6 passed |
+| 7 | Demo A (gap): `notification:new` emit removed + forced mid-window reload, old load guard disabled | focused `-g notification:new` | **1 passed — observer assertion green from DB state (the gap)**; with the load guard enabled the observer assertion still passed and only the guard failed |
+| 8 | Demo B (tripwire): same sabotage + reload, tripwire armed | focused `-g notification:new` | **1 failed — RED at the tripwire**: `notification:new proof window: full reload during the proof window` (Expected 1, Received 2) |
+| 9 | tripwire wired into all six tests | full suite | 5 passed, 1 failed — exposed the rename-autosave race (see above; ws tripwire counts clean — not socket-related) |
+| 10 | rename helpers race-fixed | focused `card:updated` ×5 | 5× 1 passed |
+| 11 | rename helpers race-fixed | focused `list:updated` ×3 | 3× 1 passed |
+| 12 | final tripwire code | full suite | 6 passed |
+| 13 | final tripwire code | 6× emitter sabotage | 6× 1 failed — observer assertions red (table above, re-verified) |
+| 14 | post sabotage restore | full suite | 6 passed |
+| 15 | hardened tripwire (route-POST armed on dashboard) | focused `-g analytics:refresh` | 1 passed — wire: initial GET → barrier-awaited resync POST → debounce delivery is an RSC GET (no route POST in window) |
+| 16 | hardened tripwire | focused `-g analytics:refresh`, `emitAnalyticsRefresh` removed | 1 failed — RED at the observer assertion (`flowChartCreatedTotal` toHaveText "1", element not found), tripwire clean |
+| 17 | post sabotage restore | full suite | 6 passed |
+
+Typecheck, changed-file ESLint, srcwalk review, and `git diff --check` all
+clean after every pass. `lib/realtime/server.ts` fully restored (`git diff`
+empty) after each sabotage/demo run and at handback.
+
 1. **W3 — Demo determinism (foundation first).** Wrap existing seeds into a
    repeatable `demo:seed` / `demo:reset` workflow: fixed logical fixture
    (users, workspace, board payload, card counts, relative due dates) with a

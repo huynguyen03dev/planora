@@ -165,9 +165,25 @@ export async function listColumnX(page: Page, listId: string): Promise<number> {
 
 // ── Comments (composer in the open card detail sheet) ─────────────────────
 
-/** Post a comment in the open card detail sheet; resolves once the composer clears. */
-export async function postComment(page: Page, text: string): Promise<void> {
+/**
+ * Post a comment in the open card detail sheet; resolves once the composer clears.
+ *
+ * A text containing "@" opens the mention-autocomplete listbox (portaled to
+ * <body>, floating over the composer). `dismissMentionListbox` blurs the
+ * textarea (clicking the "Comments and activity" heading) to dismiss it —
+ * Escape would also close the card-detail dialog (US-043) and remove the Post
+ * button. The raw text still carries the mention; resolution happens
+ * server-side (lib/mention.ts), so no listbox selection is needed.
+ */
+export async function postComment(
+  page: Page,
+  text: string,
+  options?: { dismissMentionListbox?: boolean },
+): Promise<void> {
   await page.getByPlaceholder("Write a comment...").fill(text);
+  if (options?.dismissMentionListbox) {
+    await page.getByRole("heading", { name: "Comments and activity" }).click();
+  }
   await page.getByRole("button", { name: /post comment/i }).click();
   await expect(page.getByPlaceholder("Write a comment...")).toHaveValue("");
 }
@@ -194,6 +210,51 @@ export async function archiveCard(page: Page, cardId: string): Promise<void> {
     .click();
 }
 
+// ── List rename / archive (real list-column UI, US-074) ───────────────────
+
+/**
+ * Rename a list via its inline title editor: click the title button (scoped by
+ * list id), replace the autofocused input with real keystrokes (select-all +
+ * type — see renameOpenCard for why not fill()), press Enter (which saves).
+ * Resolves once the title button shows the new title on the acting page. The
+ * title button is the only role=button in the column whose accessible name
+ * equals the title — the dnd drag handle names itself "Reorder list <title>"
+ * and the actions button "List actions" (see list-column.tsx).
+ */
+export async function renameList(
+  page: Page,
+  listId: string,
+  currentTitle: string,
+  newTitle: string,
+): Promise<void> {
+  const column = listColumnById(page, listId);
+  await column.getByRole("button", { name: currentTitle, exact: true }).click();
+  const input = column.locator("input");
+  await input.press("ControlOrMeta+A");
+  await input.pressSequentially(newTitle);
+  await input.press("Enter");
+  await expect(column.getByRole("button", { name: newTitle, exact: true })).toBeVisible();
+}
+
+/**
+ * Archive a list via its actions menu (real UI, US-074 — the soft-archive
+ * path, never permanent purge): List actions → "Archive list" → confirm in the
+ * alert dialog. The menu items and dialog portal to <body>, so they are
+ * page-scoped like archiveCard. Resolves once the column is gone from the
+ * acting page (the action resolved; the actor's own view updates via
+ * revalidatePath even if the emit were removed).
+ */
+export async function archiveList(page: Page, listId: string): Promise<void> {
+  const column = listColumnById(page, listId);
+  await column.getByRole("button", { name: "List actions" }).click();
+  await page.getByRole("menuitem", { name: "Archive list" }).click();
+  await page
+    .getByRole("alertdialog", { name: "Archive list?" })
+    .getByRole("button", { name: "Archive list" })
+    .click();
+  await expect(listColumnById(page, listId)).toHaveCount(0);
+}
+
 // ── Card detail / rename ──────────────────────────────────────────────────
 
 /**
@@ -210,15 +271,23 @@ export async function openCardDetail(page: Page, title: string): Promise<void> {
 }
 
 /**
- * Rename the card whose detail sheet is open and save. US-032 removed the
- * "Save changes" button — every field now autosaves on blur. So: fill the
- * title, press Enter (which blurs → triggers the autosave transition), then
- * wait for the inline "Saving…" status to clear, i.e. the `card:updated` emit
- * has fired and the action resolved.
+ * Rename a card whose detail sheet is open and save. US-032 removed the
+ * "Save changes" button — every field now autosaves on blur. So: replace the
+ * title with real keystrokes (select-all + type, not fill()), press Enter
+ * (which blurs → triggers the autosave transition), then wait for the inline
+ * "Saving…" status to clear, i.e. the `card:updated` emit has fired and the
+ * action resolved.
+ *
+ * Why not fill(): fill() sets the native value in one shot and can race the
+ * controlled component's state commit — Enter/blur then saves the STALE draft
+ * (observed: autosave persisted "Original cardRenamed card", caret-append of
+ * the old draft). Typing drives every keystroke through React's onChange, so
+ * the draft is committed before Enter.
  */
 export async function renameOpenCard(page: Page, newTitle: string): Promise<void> {
   const title = page.locator("#card-detail-title");
-  await title.fill(newTitle);
+  await title.press("ControlOrMeta+A");
+  await title.pressSequentially(newTitle);
   await title.press("Enter");
   await expect(page.getByText(/saving/i)).toHaveCount(0);
 }
@@ -333,9 +402,32 @@ export function listColumnById(page: Page, listId: string) {
   return page.locator(`[data-rfd-draggable-id="${listId}"]`);
 }
 
+/**
+ * The "Viewing now" presence-avatar count — the board-room join barrier. Each
+ * watcher renders one `[data-slot="avatar"]` inside the AvatarGroup
+ * (`aria-label="Viewing now"`); two avatars on BOTH sides means Bob's socket
+ * joined the board room before Alice acts (see realtime-presence.spec.ts).
+ */
+export function watcherAvatars(page: Page) {
+  return page.locator('[aria-label="Viewing now"] [data-slot="avatar"]');
+}
+
 /** A card by title, scoped to a specific list's droppable (by list id). */
 export function cardInListById(page: Page, listId: string, cardTitle: string) {
   return page.locator(`[data-rfd-droppable-id="${listId}"]`).getByText(cardTitle, { exact: true });
+}
+
+/**
+ * The FlowChart's "Created" summary figure on the workspace analytics
+ * dashboard — the `analytics:refresh` observer observable. Exposed by a
+ * data-testid on the created-total value div (flow-chart.tsx) because the DOM
+ * otherwise offers no stable hook for that figure: the "Created" label text
+ * appears twice on the card (legend + summary) and the value div has no
+ * distinguishing attribute. Assertions on it are sabotage-sensitive — with the
+ * emit removed, Bob's dashboard never refreshes and the figure stays stale.
+ */
+export function flowChartCreatedTotal(page: Page) {
+  return page.locator('[data-testid="flow-chart-created-total"]');
 }
 
 /**

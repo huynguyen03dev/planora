@@ -247,7 +247,12 @@ export function FlowChart({ data, createdTotal, completedTotal }: FlowChartProps
       <div className="mt-4 grid grid-cols-3 gap-4 border-t pt-4 text-sm">
         <div>
           <span className="text-muted-foreground">Created</span>
-          <div className="font-medium">{createdTotal}</div>
+          {/* Stable observer hook for the analytics:refresh E2E proof (US-083
+              W1): the DOM otherwise offers no distinguishing attribute for this
+              figure, and the "Created" label text appears twice on the card. */}
+          <div className="font-medium" data-testid="flow-chart-created-total">
+            {createdTotal}
+          </div>
         </div>
         <div>
           <span className="text-muted-foreground">Completed</span>
