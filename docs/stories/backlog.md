@@ -22,7 +22,7 @@ This backlog records active, planned, and candidate epics and stories across Pla
 
 | ID | Title | Epic | Lane | Status |
 | --- | --- | --- | --- | --- |
-| US-074 | Safe list lifecycle — archive/restore plus guarded permanent deletion | E03-trust-and-safety | high-risk | in_progress (Slice A & B implemented) |
+| US-074 | Safe list lifecycle — archive/restore plus guarded permanent deletion | E03-trust-and-safety | high-risk | done (Slices A/B/B2/C verified — PR #90) |
 | US-075 | Automation rule failure isolation and stale-target handling | E06-automation | normal | planned (unstarted) |
 | US-076 | First-party product-usage measurement baseline for the roadmap | E01-analytics | high-risk | planned (unstarted) |
 | US-077 | Today / My Work read-only cross-board view | E08-personal-productivity-and-capture | normal | planned (unstarted) |

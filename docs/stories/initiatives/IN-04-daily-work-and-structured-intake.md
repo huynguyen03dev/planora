@@ -71,7 +71,7 @@ Phase 4: Advanced Workflows
 
 | Decision | Status | Title | Gated Story |
 | --- | --- | --- | --- |
-| 0026 | Proposed | Safe list lifecycle and permanent deletion semantics | US-074 |
+| 0026 | Accepted | Safe list lifecycle and permanent deletion semantics | US-074 |
 | 0027 | Proposed | First-party product-usage measurement privacy & retention boundary | US-076 |
 | 0028 | Accepted | Defer external email/form intake until safety & operational prerequisites exist | External Intake Scope |
 | Gate in US-075 | Future | Strict rollback vs Best-effort error isolation for automation rules | US-075 |
@@ -91,7 +91,7 @@ Phase 4: Advanced Workflows
 
 | ID | Title | Lane | Epic | Status |
 | --- | --- | --- | --- | --- |
-| US-074 | Safe list lifecycle — archive/restore plus guarded permanent deletion | high-risk | E03-trust-and-safety | planned (unstarted) |
+| US-074 | Safe list lifecycle — archive/restore plus guarded permanent deletion | high-risk | E03-trust-and-safety | done (PR #90) |
 | US-075 | Automation rule failure isolation and stale-target handling | normal | E06-automation | planned (unstarted) |
 | US-076 | First-party product-usage measurement baseline for the roadmap | high-risk | E01-analytics | planned (unstarted) |
 | US-077 | Today / My Work read-only cross-board view | normal | E08-personal-productivity-and-capture | planned (unstarted) |
