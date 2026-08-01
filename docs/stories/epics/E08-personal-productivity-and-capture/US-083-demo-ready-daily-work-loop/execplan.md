@@ -85,8 +85,9 @@ features, so every feature demo is backed by the Stage 1 harness.
 - W3 demo fixture: implemented on the feature branch with safe `demo:seed` /
   `demo:reset`, verified-user preflight, strict workspace ownership marker, and
   generated current-run manifest. Operator contract: `docs/DEMO_RUNBOOK.md`.
-- W3 stale-server Playwright policy: still pending; W3 remains open until that
-  independent gate is implemented and reviewed.
+- W3 stale-server Playwright policy: local and CI E2E runs now start fresh by
+  default; reuse requires the explicit local-only `test:e2e:reuse` command.
+  `docs/DEMO_RUNBOOK.md` records the restart and port-collision protocol.
 
 1. **W3 — Demo determinism (foundation first).** Wrap existing seeds into a
    repeatable `demo:seed` / `demo:reset` workflow: fixed logical fixture

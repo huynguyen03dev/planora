@@ -55,4 +55,14 @@ rehearsal is:
 5. compare `logicalShape` and the logical titles, not UUID values
 
 The stale-server policy for Playwright is tracked separately in US-083 W3 and
-must be completed before W3 closes.
+is enforced as follows:
+
+- `npm run test:e2e` starts the repository's real `server.ts` itself and refuses
+  to silently reuse whatever process already owns port 3000. Stop an existing
+  dev server before the run; a port collision is an intentional loud failure.
+- `npm run test:e2e:reuse` is the explicit local-only escape hatch when the
+  operator has deliberately restarted `npm run dev` from the current checkout.
+- CI always starts a fresh server even if the reuse environment variable is set.
+
+Before a committee rehearsal, stop the old process, run `npm run test:e2e`, and
+only use the reuse command for interactive debugging after a deliberate restart.

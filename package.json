@@ -12,7 +12,8 @@
     "demo:reset": "tsx --require dotenv/config scripts/demo-fixture.ts reset",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:reuse": "PLAYWRIGHT_REUSE_EXISTING_SERVER=1 playwright test"
   },
   "dependencies": {
     "@floating-ui/react-dom": "^2.1.8",
