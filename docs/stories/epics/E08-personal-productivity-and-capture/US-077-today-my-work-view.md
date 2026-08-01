@@ -2,7 +2,7 @@
 
 ## Status
 
-planned — implementation unstarted.
+**retired — absorbed by US-083 (W6).** Owner locked the roadmap combination into a single high-risk story, US-083 "Demo-ready daily work loop" (delivery Stage 1: foundation/demo reliability; Stage 2: daily-work UX). This packet is retained as the **authoritative home of the full acceptance criteria below**; US-083 workstream W6 incorporates them **by exact reference** (same route, same queries, same rules, same no-new-table constraint) and cannot close until every referenced AC maps to explicit evidence (self-audit table in the US-083 packet). Harness row: `retired`. The `docs/TEST_MATRIX.md` row for US-077 is marked retired and points at US-083.
 
 ## Lane
 
@@ -52,7 +52,7 @@ US-077 is strictly a **read model** constructed dynamically from existing `Card`
 
 ## Harness Delta
 
-Update `docs/TEST_MATRIX.md` row for Today / My Work view.
+Superseded as separate work: US-083 W6 incorporates the acceptance criteria above by exact reference; update `docs/TEST_MATRIX.md` US-083 row (Today / My Work) instead of this one.
 
 ## Evidence
 

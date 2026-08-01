@@ -4,9 +4,11 @@
 
 planned — implementation unstarted. Roadmap accepted; backlog and intake artifacts materialized.
 
+**Update (2026-08-01):** owner locked the roadmap combination as a **single high-risk story, US-083 "Demo-ready daily work loop"** (not an IN-05 initiative), delivered as the owner's **Stage 1 (foundation/demo reliability)** then **Stage 2 (daily-work UX)** — delivery stages distinct from IN-04's numbered phase diagram below (US-083 spans the Phase 2/3 areas). US-083 fully absorbs the planned behavior of US-077 (Today / My Work → W6) and US-078 (Global Quick Capture → W7); those child stories are **retired as separate work** — the full acceptance criteria remain authoritative in the retained packets and are incorporated by exact reference, so W6/W7 cannot close until every referenced AC maps to evidence. US-074/075/076/079–082 remain unchanged. Decision 0031 (bounded reversible undo) gates US-083 W8.
+
 ## Type
 
-Initiative (umbrella). Decomposes into candidate child stories US-074 through US-082; each child enters `docs/FEATURE_INTAKE.md` on its own and gets its own lane assignment.
+Initiative (umbrella). Decomposes into candidate child stories US-074 through US-083; each child enters `docs/FEATURE_INTAKE.md` on its own and gets its own lane assignment. US-083 is the single-story combination of the roadmap's foundation/demo-reliability and daily-work-UX delivery stages.
 
 ## Target ICP
 
@@ -44,11 +46,13 @@ Phase 1: Foundation & Data Safety
       │
       v
 Phase 2: Personal Focus
-  └─ US-077 (Normal): Today / My Work read-only cross-board view (no new domain table)
-      │
+  └─ US-083 (High-Risk) W6: Today / My Work cross-board view (no new domain table)
+      │  (absorbs retired US-077; ACs incorporated by exact reference)
       v
 Phase 3: Fast Intake & Triage
-  ├─ US-078 (Normal): Global quick capture using standard Card creation (no new capture entity)
+  ├─ US-083 W7: Global quick capture using standard Card creation (no new capture entity)
+  │   (absorbs retired US-078; ACs incorporated by exact reference)
+  ├─ US-083 W8: Bounded undo snackbar — archive card/list only, via real restore actions (decision 0031)
   └─ US-079 (Normal): Per-board Capture / Triage lists using first-class Cards [escalation gate inside]
       │
       v
@@ -74,6 +78,7 @@ Phase 4: Advanced Workflows
 | 0026 | Accepted | Safe list lifecycle and permanent deletion semantics | US-074 |
 | 0027 | Proposed | First-party product-usage measurement privacy & retention boundary | US-076 |
 | 0028 | Accepted | Defer external email/form intake until safety & operational prerequisites exist | External Intake Scope |
+| 0031 | Accepted | Bounded reversible undo semantics (archive card/list only, via real restore actions) | US-083 W8 |
 | Gate in US-075 | Future | Strict rollback vs Best-effort error isolation for automation rules | US-075 |
 | Gate in US-079 | Escalation | If per-board triage requires schema addition (`listType`), escalate to high-risk | US-079 |
 | Gate in US-081 | Future | Dedicated `CardTemplate` table vs designated ordinary card (`isTemplate: true`) | US-081 |
@@ -94,8 +99,9 @@ Phase 4: Advanced Workflows
 | US-074 | Safe list lifecycle — archive/restore plus guarded permanent deletion | high-risk | E03-trust-and-safety | done (PR #90) |
 | US-075 | Automation rule failure isolation and stale-target handling | normal | E06-automation | planned (unstarted) |
 | US-076 | First-party product-usage measurement baseline for the roadmap | high-risk | E01-analytics | planned (unstarted) |
-| US-077 | Today / My Work read-only cross-board view | normal | E08-personal-productivity-and-capture | planned (unstarted) |
-| US-078 | Global quick capture using standard Card creation | normal | E08-personal-productivity-and-capture | planned (unstarted) |
+| US-077 | Today / My Work read-only cross-board view | normal | E08-personal-productivity-and-capture | **retired — absorbed by US-083 (W6)**; ACs retained in this packet, incorporated by exact reference |
+| US-078 | Global quick capture using standard Card creation | normal | E08-personal-productivity-and-capture | **retired — absorbed by US-083 (W7)**; ACs retained in this packet, incorporated by exact reference |
+| US-083 | Demo-ready daily work loop (W1–W8) | high-risk | E08-personal-productivity-and-capture | planned (unstarted) |
 | US-079 | Per-board Capture/Triage using first-class Cards | normal | E08-personal-productivity-and-capture | planned (unstarted) |
 | US-080 | Automation trigger expansion for card attribute changes | normal | E06-automation | planned (unstarted) |
 | US-081 | Card templates as a standalone vertical slice | high-risk | E09-reusable-workflows | planned (unstarted) |

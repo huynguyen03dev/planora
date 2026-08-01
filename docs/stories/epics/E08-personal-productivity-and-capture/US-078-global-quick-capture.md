@@ -2,7 +2,7 @@
 
 ## Status
 
-planned — implementation unstarted.
+**retired — absorbed by US-083 (W7).** Owner locked the roadmap combination into a single high-risk story, US-083 "Demo-ready daily work loop" (delivery Stage 1: foundation/demo reliability; Stage 2: daily-work UX). This packet is retained as the **authoritative home of the full acceptance criteria below**; US-083 workstream W7 incorporates them **by exact reference** (global quick capture via existing `createCardAction`, `C` + `Cmd/Ctrl+K`, same no-new-capture-entity constraint) and cannot close until every referenced AC maps to explicit evidence (self-audit table in the US-083 packet). Harness row: `retired`. The `docs/TEST_MATRIX.md` row for US-078 is marked retired and points at US-083.
 
 ## Lane
 
@@ -48,7 +48,7 @@ US-078 MVP wraps the existing standard card creation logic (`createCardAction`).
 
 ## Harness Delta
 
-Update `docs/TEST_MATRIX.md` row for Global Quick Capture.
+Superseded as separate work: US-083 W7 incorporates the acceptance criteria above by exact reference; update `docs/TEST_MATRIX.md` US-083 row (Global Quick Capture) instead of this one.
 
 ## Evidence
 
