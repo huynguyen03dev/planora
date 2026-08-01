@@ -80,6 +80,14 @@ Hard gates:
 Ordered foundation-first: proof and repeatable demo state precede visible
 features, so every feature demo is backed by the Stage 1 harness.
 
+### Implementation progress
+
+- W3 demo fixture: implemented on the feature branch with safe `demo:seed` /
+  `demo:reset`, verified-user preflight, strict workspace ownership marker, and
+  generated current-run manifest. Operator contract: `docs/DEMO_RUNBOOK.md`.
+- W3 stale-server Playwright policy: still pending; W3 remains open until that
+  independent gate is implemented and reviewed.
+
 1. **W3 — Demo determinism (foundation first).** Wrap existing seeds into a
    repeatable `demo:seed` / `demo:reset` workflow: fixed logical fixture
    (users, workspace, board payload, card counts, relative due dates) with a

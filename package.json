@@ -8,6 +8,8 @@
     "start": "NODE_ENV=production tsx --require dotenv/config server.ts",
     "lint": "eslint",
     "backfill:analytics": "tsx --require dotenv/config scripts/backfill-card-history.ts",
+    "demo:seed": "tsx --require dotenv/config scripts/demo-fixture.ts seed",
+    "demo:reset": "tsx --require dotenv/config scripts/demo-fixture.ts reset",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test"

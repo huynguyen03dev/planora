@@ -83,3 +83,6 @@ scripts/bin/harness-cli.exe
 
 # Local UI-review screenshots (scratch, not tracked)
 .ui-review/
+
+# Generated demo-fixture manifest (current local database ids)
+/.demo/
