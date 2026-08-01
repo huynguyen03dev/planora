@@ -56,11 +56,31 @@ export interface RuleEventPayload {
 
 // ─── RuleExecutionError ───────────────────────────────────────────
 // Shared error class thrown when a rule action fails inside the trigger
-// transaction. The evaluator does NOT log an error row inside the tx (it
-// would roll back with it); it throws this so the Server Action can roll
-// the tx back and then write the error RuleExecutionLog row post-rollback.
+// transaction. Two-class taxonomy (decision 0030):
+//
+//  1. Expected/stale-target class — carries a structured `code`
+//     (STALE_TARGET_CODES). The executor catches these per-step INSIDE the
+//     shared tx, records them in RuleExecutionLog.metadata, and continues
+//     with the next independent action step (best-effort). The primary
+//     mutation commits.
+//  2. Unexpected/systemic class — no `code` (or non-RuleExecutionError).
+//     These propagate and abort the shared tx; the Server Action rolls back
+//     and writes the error RuleExecutionLog row post-rollback via
+//     logRuleExecutionError.
+//
 // Defined here (not in evaluator.ts) so both evaluator.ts and executor.ts
 // can throw/catch it without a circular dependency.
+
+/** Structured stale-target codes (decision 0030, US-075). */
+export const STALE_TARGET_CODES = {
+  TARGET_LIST_NOT_FOUND: "TARGET_LIST_NOT_FOUND",
+  TARGET_LIST_ARCHIVED: "TARGET_LIST_ARCHIVED",
+  TARGET_LIST_FOREIGN_WORKSPACE: "TARGET_LIST_FOREIGN_WORKSPACE",
+  MEMBER_NOT_IN_WORKSPACE: "MEMBER_NOT_IN_WORKSPACE",
+  LABEL_NOT_FOUND: "LABEL_NOT_FOUND",
+} as const;
+
+export type StaleTargetCode = (typeof STALE_TARGET_CODES)[keyof typeof STALE_TARGET_CODES];
 
 export class RuleExecutionError extends Error {
   readonly context: {
@@ -74,10 +94,14 @@ export class RuleExecutionError extends Error {
     cause: unknown;
   };
 
-  constructor(message: string, context: RuleExecutionError["context"]) {
+  /** Structured stale-target code (decision 0030); absent for unexpected errors. */
+  readonly code?: StaleTargetCode;
+
+  constructor(message: string, context: RuleExecutionError["context"], code?: StaleTargetCode) {
     super(message);
     this.name = "RuleExecutionError";
     this.context = context;
+    this.code = code;
   }
 }
 
