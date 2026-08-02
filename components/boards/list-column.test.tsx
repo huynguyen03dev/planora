@@ -6,6 +6,7 @@ import { DragDropContext, Droppable } from "@hello-pangea/dnd";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
 
 import { ListColumn } from "./list-column";
+import { UndoHost } from "@/components/undo/undo-snackbar";
 
 // ListColumn + its card children reach these Server Actions; stub them all.
 const actions = vi.hoisted(() => ({
@@ -14,6 +15,10 @@ const actions = vi.hoisted(() => ({
   deleteListAction: vi.fn(async () => ({ success: true })),
   archiveCardAction: vi.fn(async () => ({ success: true })),
   toggleCardCompletionAction: vi.fn(async () => ({ success: true })),
+  restoreListAction: vi.fn(async (fd: FormData) => {
+    void fd;
+    return { success: true };
+  }),
 }));
 vi.mock(
   "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions",
@@ -41,28 +46,30 @@ function renderList(
 ) {
   const onOpenCard = vi.fn();
   render(
-    <DragDropContext onDragEnd={() => {}}>
-      <Droppable droppableId="board" type="list" direction="horizontal">
-        {(provided) => (
-          <div ref={provided.innerRef} {...provided.droppableProps}>
-            <ListColumn
-              list={baseList}
-              index={0}
-              canEdit
-              canDelete
-              canCreateCard
-              canEditCard
-              canArchiveCard
-              canSortList
-              canSortCards
-              onOpenCard={onOpenCard}
-              {...props}
-            />
-            {provided.placeholder}
-          </div>
-        )}
-      </Droppable>
-    </DragDropContext>,
+    <UndoHost>
+      <DragDropContext onDragEnd={() => {}}>
+        <Droppable droppableId="board" type="list" direction="horizontal">
+          {(provided) => (
+            <div ref={provided.innerRef} {...provided.droppableProps}>
+              <ListColumn
+                list={baseList}
+                index={0}
+                canEdit
+                canDelete
+                canCreateCard
+                canEditCard
+                canArchiveCard
+                canSortList
+                canSortCards
+                onOpenCard={onOpenCard}
+                {...props}
+              />
+              {provided.placeholder}
+            </div>
+          )}
+        </Droppable>
+      </DragDropContext>
+    </UndoHost>,
   );
   return { onOpenCard };
 }
@@ -146,5 +153,23 @@ describe("ListColumn — safe list archive (US-074 Slice A)", () => {
 
     await user.click(screen.getByRole("button", { name: "Archive list" }));
     expect(actions.deleteListAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("archive success offers undo with the call-site list id; Undo calls restoreListAction (W8 seam)", async () => {
+    renderList();
+    await user.click(screen.getByRole("button", { name: "List actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Archive list" }));
+    await user.click(screen.getByRole("button", { name: "Archive list" }));
+
+    // deleteListAction is the legacy soft-archive alias; eligibility follows
+    // this intended archive UI call site (decision 0031).
+    expect(actions.deleteListAction).toHaveBeenCalledTimes(1);
+    const snackbar = await screen.findByRole("status");
+    expect(snackbar).toHaveTextContent("List archived");
+
+    await user.click(screen.getByRole("button", { name: /^Undo archive of/ }));
+    expect(actions.restoreListAction).toHaveBeenCalledTimes(1);
+    const fd = actions.restoreListAction.mock.calls[0][0] as FormData;
+    expect(fd.get("listId")).toBe("list-1");
   });
 });

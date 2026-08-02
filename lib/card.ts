@@ -81,6 +81,19 @@ export type CardWithListBoardRecord = {
   };
 };
 
+/**
+ * W8 shape of `getArchivedCardWithListAndBoard`: the existing record plus the
+ * parent-list discriminator. `parentListArchived: true` means the card exists
+ * and remains archived but its parent list is archived — restoring it would
+ * create a live card inside an invisible list. The resolver deliberately does
+ * NOT hide this case behind null: the action needs the workspace/board scope
+ * to run the permission gate BEFORE surfacing the dedicated message, so the
+ * discrimination can never leak existence to unauthorized callers.
+ */
+export type ArchivedCardWithListBoardResult = CardWithListBoardRecord & {
+  parentListArchived: boolean;
+};
+
 export async function createCard(data: {
   listId: string;
   title: string;
@@ -616,7 +629,7 @@ export async function getArchivedCards(
  */
 export async function getArchivedCardWithListAndBoard(
   cardId: string,
-): Promise<CardWithListBoardRecord | null> {
+): Promise<ArchivedCardWithListBoardResult | null> {
   const card = await db.card.findFirst({
     where: {
       id: cardId,
@@ -659,13 +672,13 @@ export async function getArchivedCardWithListAndBoard(
     return null;
   }
 
-  // US-074 Slice B2: a card can only be restored if its parent list is active.
-  // Block restoreCardAction when the parent list is archived — the user must
-  // restore the list first.
-  if (card.list.archivedAt !== null) {
-    return null;
-  }
-
+  // US-074 Slice B2 + US-083 W8: a card can only be restored if its parent
+  // list is active. Instead of collapsing the archived-parent case to null
+  // (which would lose the workspace/board scope needed to gate the dedicated
+  // "restore the list first" outcome), flag it: restoreCardAction checks the
+  // permission first, then discriminates. The in-transaction FOR UPDATE
+  // revalidation (restoreCardAction) re-checks the same condition against the
+  // true race where the list is archived between this read and the commit.
   const { list, ...cardData } = card;
   return {
     card: cardData,
@@ -674,6 +687,7 @@ export async function getArchivedCardWithListAndBoard(
       boardId: list.boardId,
     },
     board: list.board,
+    parentListArchived: card.list.archivedAt !== null,
   };
 }
 

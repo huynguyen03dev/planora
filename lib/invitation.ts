@@ -159,6 +159,32 @@ export async function listReceivedPendingInvitationsByEmail(
   }));
 }
 
+/**
+ * Pending-invitation count for an email (US-083 W2 badge resync). The header's
+ * connect-time resync reads this from the DB so a reconnect heals drift rather
+ * than trusting an increment-only counter. Better Auth stores both user and
+ * invitation emails lowercase (sign-up.mjs normalizes at sign-up;
+ * createInvitation lowercases on create), so the input is normalized before
+ * the query — mirroring `listReceivedPendingInvitationsByEmail`.
+ */
+export async function getPendingInvitationCount(email: string): Promise<number> {
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (normalizedEmail.length === 0) {
+    return 0;
+  }
+
+  return db.invitation.count({
+    where: {
+      email: normalizedEmail,
+      status: PENDING_INVITATION_STATUS,
+      expiresAt: {
+        gt: new Date(),
+      },
+    },
+  });
+}
+
 export async function getInvitationSummary(
   invitationId: string,
 ): Promise<InvitationSummaryRecord> {

@@ -1,10 +1,11 @@
 /**
  * US-012 — two-client realtime: comment propagation + list reorder. Closes the
  * two slices the test matrix listed as pending (see docs/product/realtime-sync.md).
- * Several events still lack dedicated cross-client proof (card:updated,
- * list:created/updated/deleted, notification:new, analytics:refresh) — tracked
- * in the backlog, lower-risk (none carry the drag-corruption risk this campaign
- * targeted).
+ * The six events that once lacked dedicated cross-client proof (card:updated,
+ * list:created/updated/deleted, notification:new, analytics:refresh) are now
+ * proven by US-083 W1 in e2e/realtime-event-proof.spec.ts (committed 937e75f),
+ * with per-event emit-removal sabotage runs and a masking tripwire. This spec
+ * covers the two remaining event families: comment:created + list:moved.
  *
  *  1. comment:created (in-place / live) — Alice posts a comment on a card; it
  *     appears live in Bob's already-open detail sheet (no reload).

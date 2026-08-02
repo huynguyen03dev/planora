@@ -2,7 +2,7 @@
 
 ## Status
 
-planned — implementation unstarted.
+**retired — absorbed by US-083 (W7).** Owner locked the roadmap combination into a single high-risk story, US-083 "Demo-ready daily work loop" (delivery Stage 1: foundation/demo reliability; Stage 2: daily-work UX). This packet is retained as the **authoritative home of the full acceptance criteria below**; US-083 workstream W7 incorporates them **by exact reference** (global quick capture via existing `createCardAction`, `C` + `Cmd/Ctrl+K`, same no-new-capture-entity constraint) and cannot close until every referenced AC maps to explicit evidence (self-audit table in the US-083 packet). Harness row: `retired`. The `docs/TEST_MATRIX.md` row for US-078 is marked retired and points at US-083.
 
 ## Lane
 
@@ -48,8 +48,26 @@ US-078 MVP wraps the existing standard card creation logic (`createCardAction`).
 
 ## Harness Delta
 
-Update `docs/TEST_MATRIX.md` row for Global Quick Capture.
+Superseded as separate work: US-083 W7 incorporates the acceptance criteria above by exact reference; update `docs/TEST_MATRIX.md` US-083 row (Global Quick Capture) instead of this one.
 
 ## Evidence
 
-Implementation unstarted. Commands and proof will be added after development.
+Implemented inside US-083 W7 (landed 2026-08-02, committed in this W7 commit; focused-test checkpoint + final E2E gate): `lib/quick-capture.test.ts` (33 — default resolution,
+shortcut guard matrix, storage contract), `tests/server-actions/quick-capture.test.ts`
+(18 — options action membership/role isolation + one-create optional persistence +
+automation-evaluation preservation + emit/history fidelity + restore emit
+fidelity + position/revalidate), RTL `components/quick-capture/` (36 — immediate
+open, lazy first-open options + mid-flight-close refetch (late resolve/reject of
+a stale fetch never overwrites the new request), controlled selects
+(zero uncontrolled↔controlled warnings), defaults/fallbacks, list reset, required
+title, optional payload, success toast/deep link, error, 375px-safe classes,
+shortcut guards with preventDefault exactly-once/zero), header chrome + board-store
+fidelity + null-fallback cases. Focused gate 146/146 green (final
+post-correction run; the baseline was already 141, not 140), affected-area
+regression 229/229 green, `tsc --noEmit` / ESLint / `git diff --check`
+clean. Final E2E: `e2e/quick-capture.spec.ts` **5/5 green** (2026-08-02 fresh
+shared-server run, ≈1.3–1.4m; the hydration-readiness marker + US-043
+two-Escape fixes landed before the run — see the US-083 validation.md W7
+section for the run log). Full-suite gate at the stable checkpoint: `npm test`
+1351 green (85 files). RED/GREEN commands in the US-083 execplan/validation W7
+sections.

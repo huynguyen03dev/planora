@@ -1,6 +1,6 @@
 import { Server } from "socket.io";
 
-import type { CardLabelSnapshot, CardMemberSnapshot, CardSnapshot, ListSnapshot, NotificationNewPayload, ServerToClientEvents, ClientToServerEvents, Watcher } from "./types";
+import type { CardLabelSnapshot, CardMemberSnapshot, CardSnapshot, InvitationNewPayload, ListSnapshot, NotificationNewPayload, ServerToClientEvents, ClientToServerEvents, Watcher } from "./types";
 import { ROOMS } from "./events";
 
 declare global {
@@ -342,6 +342,25 @@ export function emitNotificationNew(userId: string, payload: NotificationNewPayl
     io.to(ROOMS.user(userId)).emit("notification:new", payload);
   } catch (error) {
     console.error("[realtime] Failed to emit notification:new:", error);
+  }
+}
+
+// Live workspace-invitation arrival (US-083 W2): pushed to the invitee's own
+// user room only — the same room every authenticated socket auto-joins on
+// connect (server.ts), so no client-controlled join is involved. The payload is
+// the invitation's public id only; the recipient's header increments the badge
+// and the inbox re-reads the invitation table on open (DB stays the truth).
+export function emitInvitationNew(inviteeId: string, payload: InvitationNewPayload) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.user(inviteeId)).emit("invitation:new", payload);
+  } catch (error) {
+    console.error("[realtime] Failed to emit invitation:new:", error);
   }
 }
 

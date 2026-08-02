@@ -193,7 +193,22 @@ type ArchiveCardResult =
 
 type RestoreCardResult =
   | { success: true }
-  | { success: false; error: string };
+  | { success: false; error: string; code?: RestoreCardErrorCode };
+
+/**
+ * US-083 W8: the dedicated parent-list-archived outcome. Surfaced ONLY when
+ * the card exists, remains archived, its parent list is archived, the board
+ * is active, and the caller is authorized — missing/foreign/already-restored/
+ * permanently-removed/archived-board cases keep the generic not-found/failure
+ * contract (no existence leak).
+ *
+ * NOTE: deliberately NOT exported — this file is a "use server" module, which
+ * only allows async function exports. The constant is module-private; the
+ * public contract is the result shape (error string + code value) that
+ * callers receive at runtime.
+ */
+const PARENT_LIST_ARCHIVED_MESSAGE = "Restore the list first.";
+type RestoreCardErrorCode = "PARENT_LIST_ARCHIVED";
 
 type ReorderListResult =
   | { success: true }
@@ -569,7 +584,7 @@ export async function createCardAction(
 
   const { userId } = await verifySession();
 
-  const { listId, title } = parsed.data;
+  const { listId, title, description, dueDate, priority } = parsed.data;
 
   const result = await getListWithBoard(listId);
   if (!result || result.board.archivedAt) {
@@ -599,12 +614,18 @@ export async function createCardAction(
         : CARD_POSITION_GAP;
       // A newly created card is never complete: completion is card-owned and set
       // only by the explicit toggle, never derived from the list (decision 0020).
+      // US-083 W7: the quick-capture optional fields (description, due date,
+      // priority) persist HERE in the same atomic create — no chained update
+      // actions, no wrapper mutation.
       const createdCard = await tx.card.create({
         data: {
           listId,
           title,
           createdById: userId,
           position,
+          description: description ?? null,
+          dueDate: dueDate ?? null,
+          priority: priority ?? null,
         },
         select: {
           id: true,
@@ -613,6 +634,7 @@ export async function createCardAction(
           position: true,
           estimateHours: true,
           dueDate: true,
+          priority: true,
           archivedAt: true,
           deletedAt: true,
         },
@@ -655,6 +677,11 @@ export async function createCardAction(
         listId: card.card.listId,
         title: card.card.title,
         position: card.card.position,
+        // US-083 W7 fidelity: observer clients receive due date + priority
+        // for quick-captured cards (the reducer applies them; description is
+        // not part of the board-card snapshot).
+        dueDate: toIsoOrNull(card.card.dueDate),
+        priority: card.card.priority,
       },
     });
     emitAnalyticsRefresh(result.board.workspaceId);
@@ -758,7 +785,8 @@ export async function restoreCardAction(
   const { cardId } = parsed.data;
 
   // Archived-aware resolver: getCardWithListAndBoard filters archivedAt:null and
-  // could never find a card to restore.
+  // could never find a card to restore. W8: the resolver now flags (rather than
+  // nulls) the parent-list-archived case so the action can gate it below.
   const result = await getArchivedCardWithListAndBoard(cardId);
   if (!result || result.board.archivedAt) {
     return { success: false, error: "Card not found" };
@@ -772,8 +800,40 @@ export async function restoreCardAction(
     return { success: false, error: "Card not found" };
   }
 
+  // US-083 W8: the parent-list-archived case is distinguished ONLY after the
+  // card exists, remains archived, the board is active, and the caller is
+  // authorized — every other case keeps the generic not-found above. The
+  // in-transaction FOR UPDATE revalidation below re-checks the same condition
+  // against the true race (list archived between this read and the commit).
+  if (result.parentListArchived) {
+    return {
+      success: false,
+      error: PARENT_LIST_ARCHIVED_MESSAGE,
+      code: "PARENT_LIST_ARCHIVED",
+    };
+  }
+
   try {
     await db.$transaction(async (tx) => {
+      // US-083 W8 race guard: the sequential pre-read above can pass while the
+      // parent list is archived by a concurrent action before this transaction
+      // runs. Lock the parent list row and revalidate archivedAt under the lock
+      // (same pattern as permanentlyDeleteListAction / uploadAttachmentAction)
+      // so a restore can never commit a live card into an archived (invisible)
+      // list.
+      const locked = await tx.$queryRaw<
+        Array<{ id: string; archivedAt: Date | null }>
+      >`SELECT id, "archivedAt" FROM "list" WHERE id = ${result.list.id} FOR UPDATE`;
+
+      if (locked.length === 0) {
+        // Parent list permanently deleted between pre-read and tx: the card
+        // cascade-deleted with it. Generic failure — no existence leak.
+        throw new Error("RESTORE_TARGET_GONE");
+      }
+      if (locked[0].archivedAt !== null) {
+        throw new Error("PARENT_LIST_ARCHIVED");
+      }
+
       const card = await tx.card.update({
         where: {
           id: cardId,
@@ -805,18 +865,29 @@ export async function restoreCardAction(
       ]);
     });
     revalidatePath(`/boards/${result.list.boardId}`);
-    // Reappear on other viewers' boards — reuses the tested card:created reducer.
+    // Reappear on other viewers' boards — reuses the tested card:created
+    // reducer. US-083 W7 fidelity: like createCardAction, the payload carries
+    // the card's due date + priority so restored cards keep their meta.
     emitCardCreated(result.list.boardId, {
       card: {
         id: result.card.id,
         listId: result.card.listId,
         title: result.card.title,
         position: result.card.position,
+        dueDate: toIsoOrNull(result.card.dueDate),
+        priority: result.card.priority,
       },
     });
     emitAnalyticsRefresh(result.board.workspaceId);
     return { success: true };
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === "PARENT_LIST_ARCHIVED") {
+      return {
+        success: false,
+        error: PARENT_LIST_ARCHIVED_MESSAGE,
+        code: "PARENT_LIST_ARCHIVED",
+      };
+    }
     return { success: false, error: "Failed to restore card. Please try again." };
   }
 }

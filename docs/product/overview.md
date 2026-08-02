@@ -32,7 +32,7 @@ Workspace
 | `/sign-in`, `/sign-up` | Email + password auth |
 | `/boards` | All workspaces and their boards for the current user |
 | `/boards/[boardId]` | The kanban board: drag-and-drop lists and cards |
-| `/today` | Personal focus dashboard: cross-board read-only view of assigned work (US-077) |
+| `/today` | Personal focus dashboard: cross-workspace read-only view of the user's assigned work across every membership (US-083 W6; formerly US-077) |
 | `/workspace` | Member management and invitations |
 | `/workspace/[slug]/dashboard` | Analytics dashboard (burndown, lead time, KPIs) |
 | `/notifications` | The user's notifications |
@@ -60,6 +60,8 @@ Workspace
 
 Planora's accepted roadmap focuses on daily-use retention for small product and engineering teams (3–20 members):
 1. **Foundation & Data Safety:** Safe list lifecycle (US-074), automation rule failure isolation (US-075), and first-party usage telemetry (US-076).
-2. **Personal Focus:** Today / My Work read-only cross-board view (US-077).
-3. **Structured Intake & Triage:** Global quick capture (US-078) and per-board capture/triage lists (US-079) using first-class cards.
+2. **Personal Focus:** Today / My Work read-only **cross-workspace** view (delivered by US-083 W6; US-077 retired into it).
+3. **Structured Intake & Triage:** Global quick capture (delivered by US-083 W7; US-078 retired into it) and per-board capture/triage lists (US-079) using first-class cards.
 4. **Advanced Workflows:** Automation trigger expansion (US-080), standalone card templates (US-081), and recurring cards (US-082).
+
+> US-083 (high-risk, in progress) delivers the demo-ready daily work loop: Stage 1 (W1–W5) landed 2026-08-02 (W1–W7 committed through 5c0a5f2; realtime proof, live invitation badge, deterministic demo seed/reset, automation retention/tracker reconciliation); Stage 2 (W6–W8) landed — Today / My Work (committed dcc481b), global quick capture (committed with W7, E2E 5/5 green), bounded undo (lands in this commit; focused gates + real-Postgres race proof green, `e2e/undo-snackbar.spec.ts` 5/5 green on the Root-granted shared-server run). See `docs/stories/epics/E08-personal-productivity-and-capture/US-083-demo-ready-daily-work-loop/`.

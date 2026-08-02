@@ -68,11 +68,27 @@ carry rich metadata. All mutations are Server Actions under
   default `getCardWithListAndBoard` filters archived cards out. The board header
   exposes an **Archived cards** view (editor/admin only) listing the board's
   archived cards with their original list and a Restore button (US-016).
-  Cards-only for now — list and board (closed-boards) restore are deferred
-  follow-ups. Permanent delete from the archive view is implemented for
-  archived lists (Slice C: `permanentlyDeleteListAction`, admin-only via
+  Permanent delete from the archive view is implemented for archived lists
+  (Slice C: `permanentlyDeleteListAction`, admin-only via
   `organization:["update"]`, with exact title confirmation, Cloudinary attachment
   guard (decision 0029), and active-cards force option).
+- **Bounded undo (US-083 W8, decision 0031):** after **card archive** and
+  **list archive** succeed, a transient snackbar offers Undo (8s, dismissible,
+  navigation-dismissed; DESIGN.md Transient Feedback). Undo calls the real
+  `restoreCardAction` / `restoreListAction` — same-row restore, existing
+  permission/isolation gates; the action result is the source of truth (no
+  optimistic pseudo-restore). Success is a polite status; failure is an
+  assertive alert with the action's own message. **Parent-list-archived race:**
+  if the archived card's parent list is archived before Undo, the restore
+  fails safely with the dedicated "Restore the list first." outcome — the card
+  is never restored into an invisible list. The check runs BOTH in the
+  archived-aware resolver (sequential case, discriminated only for authorized
+  callers — no existence leak) and inside the restore transaction under
+  `SELECT ... FOR UPDATE` (true race, same pattern as US-074), so a concurrent
+  list archival between pre-read and commit can never slip a restore through.
+  Undo is exactly two surfaces: permanent list deletion, member removal, rule/
+  label deletion, and board/workspace deletion offer no undo (non-goal
+  matrix, decision 0031).
 
 ## Card metadata
 
@@ -213,8 +229,8 @@ their history events, so they never inflate a real user's counts. See
 
 ## Personal Productivity & Capture (Roadmap IN-04)
 
-- **Today / My Work View (US-077):** A unified personal dashboard (`/today`) aggregating cards assigned to the current user across authorized workspace boards, grouped into Overdue, Today, Upcoming, and Unscheduled sections. This is strictly a **read model** over existing `Card`, `CardMember`, `dueDate`, `priority`, and `archivedAt` data; no new domain table is introduced.
-- **Global Quick Capture (US-078):** A low-friction modal accessible via header button or global keyboard shortcut (`C` / `Cmd+K`) from any page. Wraps existing `createCardAction` to create standard `Card` entities on a selected board and list. No separate capture entity.
+- **Today / My Work View (US-083 W6, formerly US-077):** A unified personal dashboard (`/today`) aggregating cards assigned to the current user across **every workspace the user is a member of**, grouped into the locked sections **Overdue, Due Today, Due This Week, and Later** (exact calendar-day predicates, viewer-local time; the older "Today/Upcoming/Unscheduled" naming is retired). Workspace scope is derived server-side from the user's memberships — never client-supplied. This is strictly a **read model** over existing `Card`, `CardMember`, `dueDate`, `priority`, and `archivedAt` data; no new domain table is introduced. The US-077 packet's acceptance criteria are retained there and incorporated by exact reference.
+- **Global Quick Capture (US-083 W7, formerly US-078):** A low-friction modal accessible from any page via a global authenticated chrome button or the keyboard shortcuts `C` (bare — the reliable demo path) and `Cmd/Ctrl+K` (implemented and tested, but browser chrome reserves this chord in some browsers — portability is not claimed). The dialog opens immediately and lazily loads its scope on first open through one read-only authenticated Server Action (`getQuickCaptureOptionsAction`): only **editor/admin-creatable workspaces** (membership-derived server-side, never client-supplied), active boards, and active lists, in a deterministic membership/board order. Defaults: current `/boards/{boardId}` route if creatable → last successful capture destination (localStorage, per-field validity — a still-creatable saved board is kept even when its saved list was archived) → first creatable board; the list defaults to the saved valid list for that board or its left-most live list, and a board with no lists stays selected with an honestly disabled submit (never silently jumps). Workspaces are implied via the board selector's group labels. The dialog submits through the existing `createCardAction` — title (required, trimmed 1..160) plus optional description / due date / priority persist atomically in the same transaction; `card:created` carries dueDate/priority fidelity for observer clients. Success shows a self-contained accessible status toast with a direct "View Card on Board" deep link (`/boards/{boardId}?cardId={cardId}`); errors are inline alerts. No new capture entity, no Notification row, no app-wide toast framework. The US-078 packet's acceptance criteria are retained there and incorporated by exact reference.
 - **Per-Board Capture & Triage (US-079):** Kanbans designate an inbox list (defaults to left-most column) for receiving quick-captured cards. Includes a triage toolbar for rapid one-click moves, assignments, and due-date settings. Uses standard cards. Escalate to high-risk if schema additions are required.
 - **External Intake Deferral (Decision 0028 Accepted):** External email (`support@`) and public web form intake are explicitly deferred and out of scope. Intake is strictly first-party via authenticated workspace sessions.
 

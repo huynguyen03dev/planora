@@ -2,7 +2,9 @@
 
 ## Status
 
-planned (high-risk) — new feature intake, no prior design. Design resolved in
+implemented (high-risk) — landed via PR #78 (feat/us-066-automation-rules-engine,
+merged 6bf5c5a) + dc1fd0a (log-retention fix, US-067 modal); status reconciled
+2026-08-02 (US-083 W5). Design resolved in
 decision 0022.
 
 ## Current Behavior

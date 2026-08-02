@@ -39,11 +39,18 @@ export interface ListDeletedPayload extends BoardEventPayload {
   listId: string;
 }
 
+export type CardPriority = "URGENT" | "HIGH" | "MEDIUM" | "LOW";
+
 export interface CardSnapshot {
   id: string;
   listId: string;
   title: string;
   position: number;
+  // US-083 W7: quick-captured cards carry due date + priority fidelity to
+  // observer clients. Optional so pre-W7 emitters/payloads stay valid — the
+  // receiver falls back to null when absent.
+  dueDate?: string | null;
+  priority?: CardPriority | null;
 }
 
 export interface CardCreatedPayload extends BoardEventPayload {
@@ -126,6 +133,14 @@ export interface NotificationNewPayload {
   createdAt: string;
 }
 
+// Minimal, non-sensitive live-arrival signal (US-083 W2): the invitee's own
+// user-room event carries only the invitation's public id — the header bumps
+// the badge; the inbox re-fetches authoritative state from the invitation
+// table when opened. No workspace/inviter details ride the wire.
+export interface InvitationNewPayload {
+  invitationId: string;
+}
+
 // Board-independent display fields, resolved once per socket connection.
 export interface UserProfile {
   id: string;
@@ -170,6 +185,7 @@ export type ServerToClientEvents = {
   "comment:created": (payload: CommentCreatedPayload) => void;
   "board:presence": (payload: BoardPresencePayload) => void;
   "notification:new": (payload: NotificationNewPayload) => void;
+  "invitation:new": (payload: InvitationNewPayload) => void;
   "analytics:refresh": (payload: AnalyticsRefreshPayload) => void;
   "board:error": (payload: { message: string }) => void;
 };

@@ -14,6 +14,7 @@ import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId
 import { ListCardItem } from "@/components/boards/list-card-item";
 import { useClickOutside } from "@/components/boards/use-click-outside";
 import { useInlineTitleEditor } from "@/components/boards/use-inline-title-editor";
+import { useUndo } from "@/components/undo/undo-snackbar";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -146,6 +147,7 @@ function ListColumnComponent({
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isDeleting, startDeleteTransition] = useTransition();
+  const { offerUndo } = useUndo();
 
   const titleEditor = useInlineTitleEditor({
     initialTitle: list.title,
@@ -183,6 +185,11 @@ function ListColumnComponent({
         setError(result.error);
         return;
       }
+      // US-083 W8: list archive is the second of exactly two undo offer points
+      // (decision 0031). deleteListAction is the legacy alias for the soft
+      // archive (US-074 Slice A) — eligibility follows this intended archive
+      // UI call site, not the action's name.
+      offerUndo({ kind: "list", id: list.id, label: list.title });
       setDeleteDialogOpen(false);
     });
   }

@@ -45,6 +45,7 @@ Typed via `ServerToClientEvents` / `ClientToServerEvents` in
 | `comment:created` | board | comment + activity + author | live (in-place); cross-client propagation to an open detail sheet proven (US-012) |
 | `board:presence` | board | watchers[] ({id,name,image}) | live (in-place); who currently has the board open — ephemeral live presence (US-041) |
 | `notification:new` | user | notification | live |
+| `invitation:new` | user | invitationId (US-083 W2 — live workspace-invitation arrival; emitted by `inviteMemberAction` via `emitInvitationNew(inviteeId, …)` to the invitee's own `user:` room only; minimal non-sensitive payload — the header increments the badge, the inbox re-reads the invitation table on open) | live |
 | `analytics:refresh` | workspace | (signal only) | live |
 | `board:error` | board | error | live |
 
@@ -177,6 +178,11 @@ unit proof only.
 
 - `emitNotificationNew(userId, payload)` pushes to the user's room — the bell
   updates without polling.
+- `emitInvitationNew(inviteeId, payload)` (US-083 W2) pushes the typed
+  `invitation:new` event to the invitee's user room only — the header's badge
+  increments live when a registered user is invited to a workspace. Reconnect
+  resync is authoritative: the header re-reads both badge halves from the DB on
+  socket connect (`getInboxBadgeCountsAction`).
 - `emitAnalyticsRefresh(workspaceId)` signals dashboard clients to refetch;
   no data rides the event, the client re-runs the analytics query.
 

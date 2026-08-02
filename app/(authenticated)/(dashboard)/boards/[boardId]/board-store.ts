@@ -533,8 +533,11 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
             {
               ...payload.card,
               coverImage: null,
-              priority: null,
-              dueDate: null,
+              // US-083 W7 fidelity: a quick-captured card's due date + priority
+              // arrive on the wire; older payloads without the fields fall back
+              // to null.
+              priority: payload.card.priority ?? null,
+              dueDate: payload.card.dueDate ? new Date(payload.card.dueDate) : null,
               completedAt: null,
               // A socket-created card was just made, so it is "active now" for the
               // activity filter (US-065). The snapshot carries no timestamp; the

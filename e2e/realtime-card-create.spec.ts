@@ -12,7 +12,14 @@
  */
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 
-import { signUp, createWorkspace, createBoard, addList, addCard } from "./helpers/app";
+import {
+  signUp,
+  createWorkspace,
+  createBoard,
+  addList,
+  addCard,
+  watcherAvatars,
+} from "./helpers/app";
 import { addWorkspaceMember, getUserIdByEmail, cleanup, disconnect } from "./helpers/db";
 
 const PASSWORD = "e2e-password-123";
@@ -50,7 +57,24 @@ test("a card created by one user appears live for another on the same board", as
   await addWorkspaceMember(workspaceId, bobId, "editor");
 
   // ── Bob opens the board and is confirmed present (joined the room) ─────
+  // Presence barrier (W1 discipline): BOTH sides must see two avatars — i.e.
+  // Bob's socket CONNECTED AND JOINED the board room — before Alice acts. A
+  // bare "list title visible" check only proves the page loaded; under load
+  // the room join can land after Alice's emit, and the card:created broadcast
+  // misses Bob with no fallback (observed RED on the 2026-08-02 full-suite
+  // run). The connect-time badge resync (the one Server Action that POSTs to
+  // the route on socket connect) is awaited the same way as the W1 specs, so
+  // it can neither mask nor race the delivery.
+  const resyncSettled = bobPage.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === `/boards/${boardId}`,
+    { timeout: 20_000 },
+  );
   await bobPage.goto(`/boards/${boardId}`);
+  await resyncSettled;
+  await expect(watcherAvatars(alicePage)).toHaveCount(2);
+  await expect(watcherAvatars(bobPage)).toHaveCount(2);
   await expect(bobPage.getByText("To Do", { exact: true })).toBeVisible();
 
   const cardTitle = `Realtime card ${stamp}`;

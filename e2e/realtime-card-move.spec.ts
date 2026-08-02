@@ -38,6 +38,7 @@ import {
   openCardDetail,
   renameOpenCard,
   cardInListById,
+  watcherAvatars,
 } from "./helpers/app";
 import {
   addWorkspaceMember,
@@ -120,7 +121,22 @@ test("a card moved across lists by one user relocates live for another (no reloa
   const cardId = await getCardIdByTitle(boardId, "Card X");
 
   // Bob opens the board; the card starts in "To Do" and is NOT in "Doing".
+  // Presence barrier (W1 discipline): BOTH sides see two avatars — Bob's
+  // socket joined the board room — before Alice acts, or the card:moved
+  // broadcast can miss Bob under full-suite load (observed RED on the
+  // 2026-08-02 full-suite run; same fix as realtime-card-create). The
+  // connect-time badge resync (the one route POST on socket connect) is
+  // awaited so it can neither mask nor race the delivery.
+  const resyncSettled = bobPage.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === `/boards/${boardId}`,
+    { timeout: 20_000 },
+  );
   await bobPage.goto(`/boards/${boardId}`);
+  await resyncSettled;
+  await expect(watcherAvatars(alicePage)).toHaveCount(2);
+  await expect(watcherAvatars(bobPage)).toHaveCount(2);
   await expect(cardInListById(bobPage, todo, "Card X")).toBeVisible();
   await expect(cardInListById(bobPage, doing, "Card X")).toHaveCount(0);
 

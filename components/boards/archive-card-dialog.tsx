@@ -3,6 +3,7 @@
 import { useTransition } from "react";
 
 import { archiveCardAction } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
+import { useUndo } from "@/components/undo/undo-snackbar";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -42,6 +43,7 @@ export function ArchiveCardDialog({
   onError,
 }: ArchiveCardDialogProps) {
   const [isArchiving, startArchiveTransition] = useTransition();
+  const { offerUndo } = useUndo();
 
   function handleArchive() {
     onError?.("");
@@ -54,6 +56,10 @@ export function ArchiveCardDialog({
         onError?.(result.error);
         return;
       }
+      // US-083 W8: this shared card-archive seam is one of exactly two undo
+      // offer points (decision 0031); ids come from this call site. The offer
+      // survives the dialog close because the host lives at board level.
+      offerUndo({ kind: "card", id: cardId, label: cardTitle });
       onOpenChange(false);
     });
   }

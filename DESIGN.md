@@ -366,6 +366,57 @@ Reserve `{rounded.full}` for avatars, dots, and pill tabs.
 - **`top-nav`** — quiet bar on `{colors.background}`, brand mark left, actions
   right, `{typography.body-sm}`, 56px, 1px `{colors.border}` bottom rule.
 
+## Keyboard Shortcuts
+
+Planora's first global shortcut owner is **Global Quick Capture** (US-083 W7).
+Conventions for any future global shortcut:
+
+- **Ownership & discovery:** each global shortcut is owned by exactly one
+  component; there is no central hotkey registry. The owning control exposes
+  the shortcut via `aria-keyshortcuts` (e.g. `c Control+K`) and a `title`
+  tooltip, so users and AT can discover it.
+- **Guard before fire:** a global shortcut must never fire while the user is
+  typing (input / textarea / select / contenteditable targets), while any
+  dialog/menu/listbox is open, on key repeat or IME composition, or when the
+  shortcut's own surface is already open. Guarding is a pure predicate
+  (`lib/quick-capture.ts` `matchQuickCaptureShortcut`) — unit-testable
+  without DOM.
+- **`preventDefault` only when handled:** call `preventDefault()` only when
+  the predicate matched (the event is actually handled). Guards never touch
+  the event, so copy (Ctrl/Cmd+C), typing, and browser-reserved chords keep
+  their native behavior.
+- **Reserved-chord honesty:** browser chrome reserves some chords
+  (Cmd/Ctrl+K = address bar/find). Implement and test them, but never
+  overclaim portability in docs — label the primary demo path (bare `C`) as
+  the reliable one.
+- **Shortcut language:** bare letters match the unmodified, lowercase key
+  (Shift+C arrives as `C` and never fires). Modifier chords are explicit
+  (`Ctrl`/`Cmd` + letter), exclude Alt and Shift unless the feature owns
+  them.
+
+## Transient Feedback
+
+Transient feedback (toasts/snackbars) follows the Quick Capture success toast
+(US-083 W7) and the bounded undo snackbar (US-083 W8) conventions:
+
+- **Surface:** fixed bottom-right, `{colors.card}` surface, 1px `{colors.border}`,
+  `{rounded.lg}`, `{shadow.lg}`, `px-4 py-3`, `{typography.body-sm}` text,
+  `z-50` above dialogs.
+- **Semantics by outcome:** polite outcomes (offer, success) use
+  `role="status"`; failures use `role="alert"` with the action's own error
+  message — never string-swapped at the UI layer. The two roles must not be
+  mixed on one surface.
+- **Never steal focus:** a transient surface appears without moving focus;
+  interactive affordances inside it (e.g. an Undo button) are reachable by tab,
+  never autofocused.
+- **Ownership & lifecycle:** each transient surface is owned by exactly one
+  component/state machine — no app-wide toast framework. Offers are bounded:
+  they expire (8s for undo offers), dismiss manually (X), dismiss on
+  navigation, and in-flight states are reflected in the affordance
+  ("Restoring…", disabled) so the UI never sticks.
+- **No persistence:** transient feedback is never persisted — no entity, no
+  Notification row, no route state.
+
 ## Do's and Don'ts
 
 ### Do

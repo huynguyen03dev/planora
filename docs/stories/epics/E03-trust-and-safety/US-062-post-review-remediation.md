@@ -248,6 +248,10 @@ Each: `[id]` validated-severity · per-item-lane · `file:line` — change → p
   **DONE:** on socket `"connect"` the header now calls a new
   `getUnreadNotificationCountAction` (`app/(authenticated)/actions.ts`) and resets the
   authoritative unread count (best-effort; keeps current count on failure).
+  **US-083 W2:** the resync now reads BOTH badge halves (unread + pending
+  invitations) in one action — `getInboxBadgeCountsAction`
+  (`app/(authenticated)/actions.ts`) — so the badge resyncs atomically and the
+  connect-time route re-render stays a single POST.
 
 - [x] **[fyi2] hygiene** · normal · `lib/prisma.ts:4` — `PrismaPg` constructed with only
   `connectionString`, no pool bounds. **Change:** set `max`/`idleTimeoutMillis` before
@@ -382,7 +386,7 @@ gated on the deferred `vitest 2→4` major; moderates include the prod `better-a
   Auth org id; see correction note above).
 - **mn3** — NaN-date guard in `metadataNullableDate` + regression test.
 - **mn1** — deleted dead `softDeleteCard` (removes the `deletedAt` resolver trap).
-- **mn8** — unread-count resync on socket `"connect"` + `getUnreadNotificationCountAction`.
+- **mn8** — badge resync on socket `"connect"` + `getInboxBadgeCountsAction` (unread + pending invitations; extended by US-083 W2).
 - **fyi2** — pg pool bounds (`max` / `idleTimeoutMillis`, env-overridable).
 - **mn12 (session half)** — explicit `session.expiresIn`/`updateAge`; decision **0018**.
 
