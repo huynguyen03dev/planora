@@ -82,3 +82,27 @@ Tradeoffs:
   board/workspace-deletion flows.
 - If a retention window for `RuleExecutionLog` is ever adopted (US-083 W4
   documents actual behavior first), record it as its own decision.
+
+## Implementation Note (US-083 W8, 2026-08-02)
+
+The parent-list-archived race is enforced in TWO layers (the sequential
+pre-read alone was proven insufficient on real Postgres — a list archived
+between pre-read and commit slipped a restore through):
+
+1. `getArchivedCardWithListAndBoard` now FLAGS (`parentListArchived`) the
+   archived-parent case instead of returning null, so the action can run the
+   permission gate first and then surface the dedicated "Restore the list
+   first." outcome (`code: PARENT_LIST_ARCHIVED`) only when the card exists,
+   remains archived, its parent list is archived, the board is active, and the
+   caller is authorized — missing/foreign/already-restored/archived-board
+   cases keep the generic not-found (no existence leak).
+2. `restoreCardAction` re-checks the parent list INSIDE its transaction under
+   `SELECT ... FOR UPDATE` + `archivedAt IS NULL` revalidation (the US-074
+   pattern), aborting the restore if the list was archived concurrently — a
+   restore can never commit a live card into an invisible list.
+
+Real-Postgres interleaving proof: `tests/db-undo-race-proof.test.ts`
+(lock_timeout-deterministic; the guard's removal turns the invariant test
+red). Action wiring pinned by `tests/server-actions/undo-restore.test.ts`.
+Double-undo retains the existing generic failure contract (residual,
+documented).

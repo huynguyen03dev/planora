@@ -701,22 +701,120 @@ stable checkpoint after these edits: `npm test` 1351 green (85 files).
    *Exit gate:* W7 unit/integration/RTL green + E2E (capture from `/today`
    lands on the target board and appears live); self-audit rows for US-078
    AC1–AC7 all cited.
-8. **W8 — Bounded undo.** Snackbar after archive-card/archive-list; Undo →
+8. **W8 — Bounded undo (landed 2026-08-02 — focused gates + E2E gate green — see the W8 implementation progress section below).** Snackbar after archive-card/archive-list; Undo →
    real restore actions; failure toast path; non-goal matrix (undo absent for
    permanent delete, member removal, rule/label/board/workspace deletion).
    **Race guard:** if the parent list of an archived card is archived before
-   Undo, Undo must not restore an invisible card — the existing
-   active-parent guard (`getArchivedCardWithListAndBoard` rejects when the
-   parent list is archived) must surface a graceful failure (e.g. "restore
-   the list first") and keep the card archived; covered by a focused
-   integration test and a two-client E2E (A archives card, B archives the
-   list, A hits Undo → no invisible restore, failure surfaced).
+   Undo, Undo must not restore an invisible card — enforced in TWO layers
+   (sequential discriminator + in-transaction `SELECT ... FOR UPDATE`
+   revalidation, real-Postgres-proven), surfacing the dedicated
+   "Restore the list first." outcome for the authorized predicate only and
+   keeping the card archived; covered by a focused integration test and a
+   two-client E2E (A archives card, B archives the list, A hits Undo → no
+   invisible restore, failure surfaced).
    *Exit gate:* W8 E2E green (archive→undo restores in place, no reload
    dependency); race-guard integration + two-client test green; absence
    assertions for non-goal undo surfaces.
 9. **Demo rehearsal + rollout notes.** Run the full locked demo path from W3
    state; record rollout/rollback notes (see below) and the final single-story
    status.
+
+### W8 implementation progress (landed 2026-08-02 — focused gates + E2E gate green)
+
+W8 (bounded undo) landed its focused gates and its E2E gate. RED-first TDD
+was recorded for all four proof areas, then GREEN; both guard-removal
+sabotage runs are recorded as RED (see the run log). **E2E gate closed
+2026-08-02 under the Root-granted shared-server lock: `e2e/undo-snackbar.spec.ts`
+5/5 GREEN (1.5m)** — full run log incl. the one product defect the gate
+caught (a `"use server"` export violation) and its minimal fix in the
+validation.md W8 E2E section.
+
+**Locked design realized (decision 0031 + owner locks):**
+
+- **Concurrency safety (the core invariant):** `restoreCardAction` can no
+  longer commit a live card into an archived (invisible) parent list. Two
+  layers: (1) `getArchivedCardWithListAndBoard` now FLAGS
+  (`parentListArchived`) the archived-parent case instead of nulling it, so
+  the action runs the permission gate first and surfaces the dedicated
+  `"Restore the list first."` outcome (`code: PARENT_LIST_ARCHIVED`) only
+  when the card exists, remains archived, its parent list is archived, the
+  board is active, and the caller is authorized — missing/foreign/
+  already-restored/archived-board cases keep the generic not-found (no
+  existence leak); (2) inside the restore transaction, the parent list is
+  re-checked under `SELECT ... FOR UPDATE` + `archivedAt IS NULL`
+  revalidation (the US-074 lock pattern), aborting the restore when a
+  concurrent list archival committed between the pre-read and the
+  transaction. Real-Postgres interleaving proof:
+  `tests/db-undo-race-proof.test.ts` (lock_timeout-deterministic, db-index-
+  proof style) — guarded protocol aborts the archiver-commits-first
+  interleaving; unguarded control commits the invisible card (the harness
+  detects the exact violation); the FOR UPDATE lock blocks the archiver and
+  archive-after-restore remains the legitimate path. Guard-removal sabotage:
+  flipping the guard off turns the invariant test RED (recorded).
+- **Undo host/state machine:** one narrow W8-owned host
+  (`components/undo/undo-snackbar.tsx` `UndoHost`) mounted in the board page
+  inside `BoardStoreProvider` — survives archived-entity unmount and
+  realtime/RSC updates. Pure eligibility map + reducer in `lib/undo.ts`
+  (exactly card/list; every non-goal ✗; latest-offer-wins; dismiss/expire/
+  undo lifecycle). Exactly two offer seams: the shared `ArchiveCardDialog`
+  and the list-column archive menu — ids come from the call sites, never
+  from expanding archive result types.
+- **Interaction:** Undo calls the real restore actions (pessimistic — the
+  action result is the source of truth, never an optimistic restore);
+  in-flight `Restoring…` disabled state; manual dismiss; navigation
+  dismissal; 8s offer TTL; polite `role="status"` success vs assertive
+  `role="alert"` failure carrying the action's own error; thrown actions
+  caught so the UI never sticks; no focus steal. No app-wide toast
+  framework, no new persistence/entity/migration; no new realtime event
+  (`card:created` / `list:restored` remain authoritative).
+- **E2E (5/5 GREEN, 2026-08-02 Root-granted shared-server run):** `e2e/undo-snackbar.spec.ts` — card
+  archive→Undo restores in place (reload/socket tripwire, DB assertion);
+  list archive→Undo restores the list with cards; two-client race (A
+  archives card, B archives the parent list, A's snackbar survives the
+  realtime update, Undo fails truthfully with `Restore the list first.` and
+  never restores invisibly — DB + UI); non-goal absence assertions for
+  member removal, label deletion, and permanent list deletion.
+- **Correction pass (proof-audit findings, same day, no commit):** the undo
+  state machine's outcome actions are generation-tagged so a stale outcome
+  from a replaced offer can never overwrite a newer one (RED→GREEN reducer
+  2 failed→16, RTL 2 failed→14 — A starts restore, B offered, A resolves
+  success/failure, B stays offered with its own Undo intact; in-flight is
+  now reducer state, not a ref); the E2E non-goal absence assertions are
+  non-vacuous (modals closed before every no-snackbar/no-alert assertion,
+  decisive completion observations added), the race baseline settles A's
+  post-archive refresh (`networkidle`) with immediate snackbar reasserts,
+  the list-undo test gained its own tripwire, `getCardArchivedAt` fails
+  loud on row-count mismatch, the DB-proof's lock test is wired through the
+  guard switch (sabotage now reddens tests 1 AND 3 — re-observed 2 failed),
+  and the evidence counts were corrected (lib/undo 13 not 15, resolver 3
+  not 2). Final gates: full `npm test` 1400 passed (90 files); W8 E2E 5/5 GREEN (run log row 13).
+
+**Docs:** DESIGN.md gained the citeable **Transient Feedback** convention;
+  `docs/product/boards-and-cards.md` documents the undo contract + race
+  guard; decision 0031 carries the implementation note; TEST_MATRIX rows
+  updated. E2E run status: 5/5 GREEN on the Root-granted shared-server lock
+  (run log row 13).
+
+**Run log (all personally observed, 2026-08-02):**
+
+| # | Code state | Run | Result |
+| --- | --- | --- | --- |
+| 1 | tests only (no production code) | `npx vitest run lib/undo.test.ts` | **RED** — module missing (`@/lib/undo` unresolved), 0 tests ran |
+| 2 | tests only | `npx vitest run tests/server-actions/undo-restore.test.ts` | **RED** — 4 failed (sequential discrimination, true-race abort, list-row-gone, FOR UPDATE call-shape) |
+| 3 | tests only | `npx vitest run components/undo/undo-snackbar.test.tsx components/boards/archive-card-dialog.test.tsx components/boards/list-column.test.tsx` | **RED** — 3 suites failed to load (`@/components/undo/undo-snackbar` unresolved) |
+| 4 | proof with guard flipped OFF (mirrors pre-W8 production protocol) | `npx vitest run tests/db-undo-race-proof.test.ts` | **RED** — invariant test failed on real Postgres (unguarded interleaving commits the invisible card) |
+| 5 | production implemented | focused gates (`lib/undo` 13, `lib/card` 18 incl. 3 resolver discrimination cases, `undo-restore` 13, undo-snackbar RTL 12, archive-card-dialog RTL 2, list-column RTL seam 7, real-DB proof 3) | **GREEN** — 44 + 21 + 3 = 68 focused |
+| 6 | production implemented | affected-area regressions (list-card, list-lifecycle, card-priority-cover, quick-capture, automation-failure-isolation, card-detail-sheet, archived-cards-dialog, list-card-item, board-filter, board-store-provider, board-store) | **GREEN** — 198 + 43 + 57 |
+| 7 | production implemented | `npm test` (pre-correction checkpoint) | **GREEN** — 1395 tests, 90 files — final post-correction full run: **1400 tests, 90 files** |
+| 8 | production implemented | `npx tsc --noEmit` / changed-file ESLint / `git diff --check` | clean |
+| 9 | **sabotage:** in-tx revalidation branch disabled in `restoreCardAction` | `npx vitest run tests/server-actions/undo-restore.test.ts` | **RED** — 1 failed at the race case (`card.update` ran); restored, re-run GREEN 13/13 |
+| 10 | **sabotage:** proof guard flipped OFF | `npx vitest run tests/db-undo-race-proof.test.ts` | **RED** — 2 failed (tests 1 AND 3: no lock → the archiver's UPDATE no longer hits lock_timeout either); the initial probe reddened only test 1 because test 3's lock was hardcoded — wired through the WITH_GUARD switch in the correction pass (validation.md C6); restored, re-run GREEN 3/3 |
+| 11 | final code state | `git diff` — only the real W8 change; no SABOTAGE marker | restored |
+| 12 | correction pass (proof-audit findings C1–C6, see validation.md) | reducer/RTL race tests RED first → fix → focused re-runs | **RED** 2 + 2 failed → **GREEN** 16 + 14; DB-proof sabotage re-observed **2 failed** (tests 1+3) → restored 3/3; tsc/ESLint/`git diff --check` clean; no SABOTAGE marker |
+| 13 | **E2E gate (Root-granted lock)** | run 1: full spec → 5 failed (product defect: `"use server"` const export) → fix → run 2 focused 1/1 → run 3 full 3/5 (2 test defects: announcer alert locator, same-page 2nd sign-up) → fixes → run 4 focused race 1/1 + non-goal still red (swallowed click) → +settle → run 5 trace: Escape focus-dependence → overlay-close fix → run 6 focused 1/1 → run 7 full | **5/5 GREEN (1.5m)** — full diagnosis chain in validation.md W8 E2E section |
+
+E2E: `e2e/undo-snackbar.spec.ts` **AUTHORED — NOT RUN** (5 tests; shared-server
+lock required per the W3 policy — request the seat from Root after review).
 
 ## Rollout / Rollback / Demo Rehearsal
 

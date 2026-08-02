@@ -68,11 +68,27 @@ carry rich metadata. All mutations are Server Actions under
   default `getCardWithListAndBoard` filters archived cards out. The board header
   exposes an **Archived cards** view (editor/admin only) listing the board's
   archived cards with their original list and a Restore button (US-016).
-  Cards-only for now — list and board (closed-boards) restore are deferred
-  follow-ups. Permanent delete from the archive view is implemented for
-  archived lists (Slice C: `permanentlyDeleteListAction`, admin-only via
+  Permanent delete from the archive view is implemented for archived lists
+  (Slice C: `permanentlyDeleteListAction`, admin-only via
   `organization:["update"]`, with exact title confirmation, Cloudinary attachment
   guard (decision 0029), and active-cards force option).
+- **Bounded undo (US-083 W8, decision 0031):** after **card archive** and
+  **list archive** succeed, a transient snackbar offers Undo (8s, dismissible,
+  navigation-dismissed; DESIGN.md Transient Feedback). Undo calls the real
+  `restoreCardAction` / `restoreListAction` — same-row restore, existing
+  permission/isolation gates; the action result is the source of truth (no
+  optimistic pseudo-restore). Success is a polite status; failure is an
+  assertive alert with the action's own message. **Parent-list-archived race:**
+  if the archived card's parent list is archived before Undo, the restore
+  fails safely with the dedicated "Restore the list first." outcome — the card
+  is never restored into an invisible list. The check runs BOTH in the
+  archived-aware resolver (sequential case, discriminated only for authorized
+  callers — no existence leak) and inside the restore transaction under
+  `SELECT ... FOR UPDATE` (true race, same pattern as US-074), so a concurrent
+  list archival between pre-read and commit can never slip a restore through.
+  Undo is exactly two surfaces: permanent list deletion, member removal, rule/
+  label deletion, and board/workspace deletion offer no undo (non-goal
+  matrix, decision 0031).
 
 ## Card metadata
 

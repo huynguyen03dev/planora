@@ -584,3 +584,151 @@ Cmd/Ctrl+K remains browser-chrome-reserved in real browsers (documented
 caveat, authoritative proof is the RTL/unit guard suites — bare C is the
 reliable demo path); W8 (bounded undo) is the next workstream. The full
 `npm test` gate and the E2E gate are both closed at this checkpoint.
+
+### W8 — bounded undo (landed 2026-08-02 — focused gates green; E2E 5/5 GREEN, gate below)
+
+**RED first (all personally observed, before any production edit):**
+
+| # | Code state | Run | Result |
+| --- | --- | --- | --- |
+| 1 | tests only (no production code) | `npx vitest run lib/undo.test.ts` | **RED** — `@/lib/undo` unresolved, 0 tests ran |
+| 2 | tests only | `npx vitest run tests/server-actions/undo-restore.test.ts` | **RED** — 4 failed (sequential discrimination, true-race abort, list-row-gone generic failure, FOR UPDATE call-shape) |
+| 3 | tests only | `npx vitest run components/undo/undo-snackbar.test.tsx components/boards/archive-card-dialog.test.tsx components/boards/list-column.test.tsx` | **RED** — 3 suites failed to load (`@/components/undo/undo-snackbar` unresolved) |
+| 4 | real-DB proof, guard flipped OFF (mirrors the pre-W8 production protocol: sequential pre-read only) | `npx vitest run tests/db-undo-race-proof.test.ts` | **RED** — invariant test failed on real Postgres: the archiver-commits-first interleaving committed the invisible card (the concurrency bug demonstrated) |
+
+**GREEN (after production implementation):**
+
+| # | Run | Result |
+| --- | --- | --- |
+| 5 | focused gates: `lib/undo.test.ts` (13) + `lib/card.test.ts` (18, incl. the 3 resolver discrimination cases) + `tests/server-actions/undo-restore.test.ts` (13) | 44 passed (3 files) |
+| 6 | `components/undo/undo-snackbar.test.tsx` (12) + `components/boards/archive-card-dialog.test.tsx` (2) + `components/boards/list-column.test.tsx` (7 incl. the new seam test) | 21 passed |
+| 7 | `tests/db-undo-race-proof.test.ts` (guard ON) | 3 passed (real Postgres, lock_timeout-deterministic) |
+| 8 | affected-area regressions: list-card, list-lifecycle, card-priority-cover, quick-capture, automation-failure-isolation (198) + card-detail-sheet, archived-cards-dialog, list-card-item, board-filter (43) + board-store-provider, board-store (57) | all green |
+| 9 | `npm test` full suite (pre-correction checkpoint) | **1395 passed, 90 files** — final post-correction full run: **1400 passed, 90 files** |
+| 10 | `npx tsc --noEmit` / changed-file ESLint / `git diff --check` | clean |
+
+**Sabotage / disconfirm evidence (both RED, both fully restored, no marker left):**
+
+| # | Sabotage | Run | Result |
+| --- | --- | --- | --- |
+| 11 | in-transaction revalidation branch disabled in `restoreCardAction` (the race case asserts `card.update` never runs) | `npx vitest run tests/server-actions/undo-restore.test.ts` | **RED** — 1 failed at `race: parent list archived between pre-read and tx`; restored → 13/13 GREEN |
+| 12 | real-DB proof guard flipped OFF (WITH_GUARD=false) | `npx vitest run tests/db-undo-race-proof.test.ts` | **RED** — 2 failed: test 1 (the unguarded interleaving commits the invisible card) AND test 3 (no FOR UPDATE lock → the archiver's UPDATE no longer hits lock_timeout); test 2 is the unguarded control and stays green. Corrected after the proof-audit: test 3's lock acquisition was initially hardcoded (only test 1 went red); it is now wired through the same WITH_GUARD switch as the production protocol. Restored → 3/3 GREEN |
+
+`grep -c SABOTAGE` over the working tree at handback: 0.
+
+**Design realized (locked contract):**
+
+- **Concurrency safety:** `restoreCardAction` enforces the parent-list check
+  INSIDE the transaction (`SELECT id, "archivedAt" FROM "list" WHERE id = $1
+  FOR UPDATE` + `archivedAt IS NULL` revalidation — the US-074 pattern;
+  call-shape-pinned). The sequential pre-read now DISCRIMINATES
+  (`getArchivedCardWithListAndBoard` returns `parentListArchived`) instead of
+  nulling, so the dedicated `"Restore the list first."` outcome
+  (`code: "PARENT_LIST_ARCHIVED"`) is surfaced only after the
+  card-exists + remains-archived + parent-list-archived + board-active +
+  caller-authorized predicate — missing/foreign/already-restored/
+  permanently-removed/archived-board keep the generic not-found (no existence
+  leak; viewer/foreign denial pinned even when the parent list is archived).
+  Double-undo keeps the generic failure contract (residual, decision 0031).
+- **Undo host:** `components/undo/undo-snackbar.tsx` `UndoHost` mounted in
+  the board page inside `BoardStoreProvider` (page.tsx, wrapping the board
+  UI) — survives archived-entity unmount and realtime/RSC updates; context
+  reaches both seams; outside a host `useUndo()` is a documented no-op.
+  Pure `lib/undo.ts`: eligibility map (card/list ✓, every non-goal ✗),
+  reducer (OFFER/DISMISS/UNDO_START/UNDO_OK/UNDO_FAIL; latest-offer-wins;
+  late outcomes can't resurrect a dismissed snackbar), 8s offer TTL / 4s
+  success TTL constants.
+- **Exactly two seams:** shared `ArchiveCardDialog` (board face + detail
+  sheet) and the `ListColumn` archive menu — `offerUndo({ kind, id, label })`
+  with call-site ids/titles; `deleteListAction`'s legacy-alias identity is
+  irrelevant to eligibility (the intended archive UI call site decides).
+- **Interaction:** pessimistic restore via the real actions; in-flight
+  `Restoring…` + disabled; manual dismiss; navigation dismissal; thrown
+  actions → generic failure alert (never stuck); polite `role="status"`
+  success, assertive `role="alert"` failure with the action's own error; no
+  focus steal (RTL-pinned). No app-wide toast framework, no entity/migration,
+  no new realtime event.
+- **Real-DB proof scope note:** `tests/db-undo-race-proof.test.ts` proves the
+  production transaction PROTOCOL at the SQL level (db-index-proof style);
+  the action wiring (statements + branches) is pinned by the call-shape tests
+  in `tests/server-actions/undo-restore.test.ts`, whose sabotage (branch
+  removal) goes red. The E2E race test covers the sequential discrimination
+  path end to end; the true in-tx race is covered by the mocked-tx action
+  test + the real-DB proof.
+
+**E2E — 5/5 GREEN (2026-08-02 Root-granted shared-server run; gate section below).** `e2e/undo-snackbar.spec.ts` (5 tests):
+(1) card archive → Undo restores the card in place — tripwire (reload/socket
+counters; the acting page's own action POSTs are excluded by window design)
++ DB `archivedAt IS NULL`; (2) list archive → Undo restores the list with its
+cards (DB assertions); (3) two-client race — A archives the card, B archives
+the parent list, A's snackbar SURVIVES the realtime update (observer window,
+all four tripwire counters clean), A's Undo fails truthfully with
+`Restore the list first.` (assertive alert), card stays archived (DB + UI, no
+invisible restore); (4) non-goal absence: member removal + label deletion
+offer no undo; (5) non-goal absence: permanent list deletion (exact-title
+confirm flow) offers no undo and the row is gone. Run requires the shared
+server (W3 policy); the seat is requested from Root after review. No E2E run
+is claimed in any doc.
+
+**Files changed (W8):** `lib/undo.ts` (+test), `lib/card.ts`
+(`getArchivedCardWithListAndBoard` discrimination, +tests),
+`app/(authenticated)/(dashboard)/boards/[boardId]/actions.ts`
+(`RestoreCardResult` code + PARENT_LIST_ARCHIVED_MESSAGE + pre-read
+discrimination + in-tx FOR UPDATE revalidation),
+`app/(authenticated)/(dashboard)/boards/[boardId]/page.tsx` (UndoHost mount),
+`components/undo/undo-snackbar.tsx` (+12 RTL), `components/boards/
+archive-card-dialog.tsx` (+2 RTL), `components/boards/list-column.tsx`
+(+1 RTL seam), `tests/server-actions/undo-restore.test.ts` (13),
+`tests/db-undo-race-proof.test.ts` (3, real Postgres), `tests/server-actions/
+quick-capture.test.ts` (makeTx gains `$queryRaw` for the new lock seam),
+`e2e/undo-snackbar.spec.ts` (authored), `e2e/helpers/db.ts`
+(`getCardArchivedAt`/`getListArchivedAt`/`listExists`), `DESIGN.md`
+(Transient Feedback convention), `docs/product/boards-and-cards.md`,
+`docs/TEST_MATRIX.md`, decision 0031 (implementation note), this packet's
+overview/execplan/validation.
+
+**Residual / open:** double-undo keeps the generic failure contract
+(documented residual); the failure snackbar persists until dismissed/next
+offer/navigation (no auto-TTL — assertive semantics); E2E unrun pending the
+shared-server lock; `deleteListAction` naming remains a legacy alias
+(pre-existing).
+
+
+### W8 correction pass (2026-08-02 — proof-audit findings; no commit, no Playwright run)
+
+| # | Finding | Fix | RED → GREEN |
+| --- | --- | --- | --- |
+| C1 | Production state-machine race: an outcome from Undo offer A (in flight) could overwrite a newer offer B — `UNDO_OK`/`UNDO_FAIL` only checked that SOME offer exists. | `UndoAction` outcome actions are now tagged with the offer's stable **generation** (`OFFER` bumps it; `UNDO_START`/`OK`/`FAIL` carry it); the reducer drops outcomes whose generation no longer matches, while still clearing the in-flight marker; `inFlightGeneration` in state replaces the host's ref (one undo at a time, self-healing when the stale outcome lands). Latest-offer-wins preserved; no toast framework/idempotency scope added. | RED: 2 reducer tests + 2 RTL tests written first against the old reducer/host — 2 failed + 2 failed (A's success/failure overwrote B). GREEN after the fix: `lib/undo.test.ts` 16/16 (incl. stale-success, stale-failure, and in-flight-blocking-then-honored sequences), `components/undo/undo-snackbar.test.tsx` 14/14 (incl. the RTL race: A starts, B offered with its Undo disabled, A resolves success → B stays offered with its Undo enabled and working; failure variant). |
+| C2 | E2E non-goal absence assertions ran while the Radix detail sheet / archived dialog aria-hid the page — vacuously green. | `e2e/undo-snackbar.spec.ts`: the sheet is now CLOSED (Escape + `#card-detail-title` count 0) before every no-snackbar/no-alert assertion (member removal, label deletion, permanent list deletion — the archived-items dialog is closed the same way), with decisive completion observations (remove-buttons count 0 after removal; `listExists` false after purge). The intermediate vacuous assertions were removed, not just surrounded. | Verified in the W8 E2E gate below (5/5 GREEN) — the vacuous path is structurally removed: every absence assertion is preceded by a modal-close + count-0 assertion, so a hidden snackbar can no longer satisfy it. |
+| C3 | E2E race baseline could capture A's own post-archive route refresh in flight; snackbar reassert after B's archive was not immediate. | `waitForLoadState("networkidle")` settles A's post-archive RSC refresh/sheet-close BEFORE the tripwire baseline; the snackbar is re-asserted visible + text immediately after B's `archiveList` and again before the Undo click. | Same as C2 — verified in the W8 E2E gate below (5/5 GREEN); the baseline/tripwire windows are now quiescent by construction. |
+| C4 | List happy-path E2E had no tripwire — "in place, no reload" was not enforced there. | `armProofTripwire` added to the list-undo test around the Undo window (reload/socket counters; the acting page's own action POSTs are excluded by window design, same as the card test), with a `networkidle` settle before the baseline. | Same as C2 — verified in the W8 E2E gate below (5/5 GREEN). |
+| C5 | `getCardArchivedAt` conflated a missing row with a live card (both null). | Fail-closed: exactly one row required, else throws with the id + count. | Covered by the E2E helper's fail-loud contract; verified in the W8 E2E gate below (5/5 GREEN). |
+| C6 | Evidence typos: lib/undo count was 15 (actual 13), resolver count 2 (actual 3), guard-off DB sabotage reddened only test 1 (test 3's lock was hardcoded). | Counts corrected in the W8 tables (rows 5/12 above); test 3's lock acquisition wired through the WITH_GUARD switch and the sabotage re-run: **2 failed (tests 1 + 3) | 1 passed**, restored → 3/3. | Observed above (real Postgres). |
+
+Re-verified after the pass: `lib/undo.test.ts` 16, `tests/server-actions/undo-restore.test.ts` 13, `lib/card.test.ts` 18 (3 resolver), `components/undo/undo-snackbar.test.tsx` 14, `archive-card-dialog.test.tsx` 2, `list-column.test.tsx` 7, `tests/db-undo-race-proof.test.ts` 3, `quick-capture.test.ts` 18, `list-card.test.ts` 116 — all green (3+3+3 files = 47 + 23 + 137); `tsc --noEmit`, changed-file ESLint, `git diff --check` clean; zero SABOTAGE markers. Final gates: full `npm test` 1400 passed (90 files); W8 E2E 5/5 GREEN (gate section below).
+
+
+### W8 E2E gate — shared-server run (2026-08-02, lock granted by Root; all personally observed)
+
+**Final result: `npm run test:e2e -- e2e/undo-snackbar.spec.ts` → 5/5 GREEN (1.5m).**
+Per-test: card undo 19.0s / list undo 11.5s / two-client race 20.0s / non-goal
+member-removal + label-deletion 21.3s / non-goal permanent-delete 11.3s.
+
+**Run log (first run → diagnosis → fix → final):**
+
+| # | State | Result | Classification |
+| --- | --- | --- | --- |
+| 1 | final tree, first full run | **5 failed** — every test failed in `signUp` (`#name` never rendered) | **PRODUCT DEFECT (W8 scope):** `export const PARENT_LIST_ARCHIVED_MESSAGE` in the `"use server"` file `boards/[boardId]/actions.ts` violates Next's only-async-functions-may-be-exported rule → the whole authenticated module graph (quick-capture → actions.ts) failed to compile, so every page render after the error 500'd. Vitest/tsc cannot see this (no use-server semantics). **Fix (minimal):** de-exported the constant (module-private; verified zero external importers; the runtime contract is the result shape). |
+| 2 | fix applied | focused `-g "card archive offers undo"` → **1 passed (24.2s)** | fix verified |
+| 3 | fix applied | full spec → **3 passed / 2 failed** | **TEST DEFECTS:** (a) race test: `getByRole("alert")` matched Next's permanent `#__next-route-announcer__` (`role="alert"`) instead of the failure snackbar — locator scoped to `[role="alert"]:not(#__next-route-announcer__)`; (b) non-goal test: second `signUp` on the SAME page after the owner is authenticated — `/sign-up` redirects away, `#name` never appears — Carol moved to her own browser context (repo multi-user convention). |
+| 4 | fixes applied | focused `-g "two-client race\|non-goal absence: member removal"` → race **1 passed (25.9s)**; non-goal **failed** at `openCardDetail` #2 | **TEST DEFECT (race):** the card click right after the sheet-close `router.replace` was swallowed by the in-flight transition (two plain GETs settle after the close). Fixed with a `waitForLoadState("networkidle")` settle before re-opening. |
+| 5 | + settle | `--trace on` focused non-goal → **failed** at the manage-labels Escape close | **TEST DEFECT (focus-dependent close):** after `deleteBoardLabel`'s confirm AlertDialog closes, Radix restores focus to the deleted row's button (now removed) → focus falls to `<body>` → the dialog's content-bound Escape listener never fires. Replaced ALL Escape closes in test 4 with deterministic topmost-overlay clicks (`[data-slot="dialog-overlay"]` last, corner position), each gated on the named layer count-0. |
+| 6 | overlay-close fix | focused non-goal → **1 passed (27.7s)** | fix verified |
+| 7 | final tree | full spec → **5 passed (1.5m)** — timings above | final |
+
+No DB assertion, overlay gate, tripwire, realtime-survival, or non-goal
+absence check was weakened at any point. Production change from the gate: the
+de-export of `PARENT_LIST_ARCHIVED_MESSAGE` (module-private) — the 8s TTL and
+all W8 behavior otherwise untouched. Test-only changes: alert locator scoping,
+two-context sign-up, overlay-close helper + settle, and the earlier
+generation-race RTL/reducer fixes (all re-verified below).

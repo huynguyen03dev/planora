@@ -60,11 +60,14 @@ No new entities, no migrations. US-083 composes existing domain objects:
    navigation; no optimistic pseudo-restore — the action result is the source
    of truth; failure surfaces an error toast and keeps the card in the
    archived view. **Race guard:** if the parent list of an archived card is
-   archived before Undo, the existing active-parent guard in
-   `getArchivedCardWithListAndBoard` (rejects when the parent list is
-   archived) makes Undo fail safe — the card is not restored into an
-   archived list, the snackbar surfaces that the list must be restored first,
-   and the card stays in the archived view.
+   archived before Undo, the restore fails safe in TWO layers (implemented
+   W8): the archived-aware resolver discriminates the archived-parent case
+   (permission-gated, no existence leak) and `restoreCardAction` re-checks the
+   parent list INSIDE its transaction under `SELECT ... FOR UPDATE` +
+   `archivedAt IS NULL` revalidation, so a concurrent list archival between
+   the pre-read and the commit can never restore the card into an archived
+   list. The snackbar surfaces "Restore the list first." and the card stays
+   in the archived view.
 7. **Reconciliation (W4/W5):** audit claims in `docs/product/automation.md`,
    US-066 packet, IN-04, `docs/stories/backlog.md`, `docs/TEST_MATRIX.md`,
    `docs/product/overview.md`, `docs/product/notifications.md`, harness rows;

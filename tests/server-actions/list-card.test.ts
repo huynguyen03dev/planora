@@ -1324,9 +1324,13 @@ describe("US-074 Slice B2 — archived list rejection", () => {
     });
   });
 
-  describe("restoreCardAction — getArchivedCardWithListAndBoard returns null when parent list archived",
+  // US-083 W8: the resolver no longer nulls the archived-parent case — it
+  // flags it (see undo-restore.test.ts for the dedicated outcome). A NULL
+  // resolver now means missing/foreign/already-restored: the action must keep
+  // the generic not-found contract for those (no existence leak).
+  describe("restoreCardAction — null resolver (missing/foreign/already-restored) keeps generic not-found",
     () => {
-      it("rejects restore when parent list is archived", async () => {
+      it("rejects restore when the resolver finds nothing", async () => {
         h.getArchivedCardWithListAndBoard.mockResolvedValue(null);
         const r = await restoreCardAction(formCard());
         expect(r).toEqual({ success: false, error: "Card not found" });

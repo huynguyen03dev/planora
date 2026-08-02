@@ -2,7 +2,7 @@
 
 ## Status
 
-planned (high-risk) — implementation in progress: **W1–W7 landed (W4–W6 committed at dcc481b; W7 lands in this commit)**, W8 pending. W7 (global quick capture) closed its focused unit/integration/RTL checkpoint AND its E2E gate (`e2e/quick-capture.spec.ts` 5/5 green, fresh shared-server run 2026-08-02). One story packet with eight
+planned (high-risk) — implementation in progress: **W1–W8 landed (W1–W7 committed through 5c0a5f2; W8 lands in this commit)**. W7 (global quick capture) closed its focused unit/integration/RTL checkpoint AND its E2E gate (`e2e/quick-capture.spec.ts` 5/5 green, fresh shared-server run 2026-08-02). W8 (bounded undo) closed its focused unit/integration/RTL/real-DB gates (real-Postgres interleaving proof + guard-removal sabotage RED) AND its E2E gate (`e2e/undo-snackbar.spec.ts` 5/5 GREEN on the Root-granted shared-server run, 2026-08-02 — one product defect caught and fixed: a `"use server"` const export). One story packet with eight
 independently checkable internal workstreams (W1–W8); one final story status.
 **Absorbs the planned behavior of US-077 (Today / My Work) and US-078 (Global
 Quick Capture); those story packets are retired as separate work. The full

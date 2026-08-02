@@ -394,6 +394,29 @@ Conventions for any future global shortcut:
   (`Ctrl`/`Cmd` + letter), exclude Alt and Shift unless the feature owns
   them.
 
+## Transient Feedback
+
+Transient feedback (toasts/snackbars) follows the Quick Capture success toast
+(US-083 W7) and the bounded undo snackbar (US-083 W8) conventions:
+
+- **Surface:** fixed bottom-right, `{colors.card}` surface, 1px `{colors.border}`,
+  `{rounded.lg}`, `{shadow.lg}`, `px-4 py-3`, `{typography.body-sm}` text,
+  `z-50` above dialogs.
+- **Semantics by outcome:** polite outcomes (offer, success) use
+  `role="status"`; failures use `role="alert"` with the action's own error
+  message — never string-swapped at the UI layer. The two roles must not be
+  mixed on one surface.
+- **Never steal focus:** a transient surface appears without moving focus;
+  interactive affordances inside it (e.g. an Undo button) are reachable by tab,
+  never autofocused.
+- **Ownership & lifecycle:** each transient surface is owned by exactly one
+  component/state machine — no app-wide toast framework. Offers are bounded:
+  they expire (8s for undo offers), dismiss manually (X), dismiss on
+  navigation, and in-flight states are reflected in the affordance
+  ("Restoring…", disabled) so the UI never sticks.
+- **No persistence:** transient feedback is never persisted — no entity, no
+  Notification row, no route state.
+
 ## Do's and Don'ts
 
 ### Do

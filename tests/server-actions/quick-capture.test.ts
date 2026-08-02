@@ -106,6 +106,7 @@ import { revalidatePath } from "next/cache";
  */
 function makeTx() {
   return {
+    $queryRaw: vi.fn(async () => [{ id: LIST_A1, archivedAt: null }]),
     card: {
       findFirst: vi.fn(async (): Promise<{ position: number } | null> => null),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({

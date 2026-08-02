@@ -4,6 +4,7 @@ import { BoardContent } from "@/app/(authenticated)/(dashboard)/boards/[boardId]
 import { BoardStoreProvider } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store-provider";
 import { BoardHeader } from "@/components/boards/board-header";
 import { CardDetailSheet } from "@/components/boards/card-detail-sheet";
+import { UndoHost } from "@/components/undo/undo-snackbar";
 import { getBoardById, getStarredBoardIds } from "@/lib/board";
 import {
   getBoardPagePermissionsForRole,
@@ -262,9 +263,14 @@ export default async function BoardPage({
       canEditCard={canEditCard}
       canArchiveCard={canArchiveCard}
     >
-      {/* Pin the board to the viewport minus the 56px (3.5rem) app header so the
-          page itself never scrolls; lists scroll their cards internally instead. */}
-      <div className="flex h-[calc(100vh-3.5rem)] min-h-0 flex-col overflow-hidden p-3 sm:p-6">
+      {/* US-083 W8: the undo host is mounted at the stable board/provider level
+          (inside BoardStoreProvider, wrapping the board UI) so it survives the
+          archived entity's unmount and realtime/RSC re-renders, and its context
+          reaches both archive seams (card face/detail sheet, list column). */}
+      <UndoHost>
+        {/* Pin the board to the viewport minus the 56px (3.5rem) app header so the
+            page itself never scrolls; lists scroll their cards internally instead. */}
+        <div className="flex h-[calc(100vh-3.5rem)] min-h-0 flex-col overflow-hidden p-3 sm:p-6">
         <BoardHeader
           board={{
             id: board.id,
@@ -324,7 +330,8 @@ export default async function BoardPage({
           canArchive={canArchiveCard}
           canComment={canComment}
         />
-      </div>
+        </div>
+      </UndoHost>
     </BoardStoreProvider>
   );
 }

@@ -421,7 +421,7 @@ describe("US-074 Slice B2 — resolver-level parent-list archive hardening", () 
   });
 
   describe("getArchivedCardWithListAndBoard", () => {
-    it("returns null when parent list is archived (requires active parent list)", async () => {
+    it("flags parentListArchived when the parent list is archived (W8 discrimination)", async () => {
       mockDb.card.findFirst.mockResolvedValueOnce({
         id: "c-1",
         listId: "l-1",
@@ -447,10 +447,15 @@ describe("US-074 Slice B2 — resolver-level parent-list archive hardening", () 
       });
 
       const res = await getArchivedCardWithListAndBoard("c-1");
-      expect(res).toBeNull();
+      // Not null: the record (with its workspace/board scope) is needed to run
+      // the permission gate before the dedicated message can be surfaced.
+      expect(res).not.toBeNull();
+      expect(res!.parentListArchived).toBe(true);
+      expect(res!.card.id).toBe("c-1");
+      expect(res!.board.workspaceId).toBe("ws-1");
     });
 
-    it("returns row when card is archived but parent list is active", async () => {
+    it("returns row with parentListArchived false when card is archived but parent list is active", async () => {
       const now = new Date();
       mockDb.card.findFirst.mockResolvedValueOnce({
         id: "c-1",
@@ -479,6 +484,7 @@ describe("US-074 Slice B2 — resolver-level parent-list archive hardening", () 
       const res = await getArchivedCardWithListAndBoard("c-1");
       expect(res).not.toBeNull();
       expect(res!.card.id).toBe("c-1");
+      expect(res!.parentListArchived).toBe(false);
       expect(mockDb.card.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: "c-1", archivedAt: { not: null } },

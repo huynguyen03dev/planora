@@ -84,6 +84,43 @@ export async function getCardListId(cardId: string): Promise<string | undefined>
 }
 
 /**
+ * A card's current archivedAt (null = live). Used by the W8 undo spec to
+ * assert the restore committed (or, in the race, did NOT commit) server-side.
+ * Fail-closed: a missing row (permanent delete / wrong id) must never be
+ * conflated with a live card — exactly one row is expected.
+ */
+export async function getCardArchivedAt(cardId: string): Promise<Date | null> {
+  const { rows } = await pool().query<{ archivedAt: Date | null }>(
+    `SELECT "archivedAt" FROM "card" WHERE id = $1`,
+    [cardId],
+  );
+  if (rows.length !== 1) {
+    throw new Error(
+      `getCardArchivedAt: expected exactly 1 card row for ${cardId}, got ${rows.length}`,
+    );
+  }
+  return rows[0].archivedAt;
+}
+
+/** A list's current archivedAt (null = active). */
+export async function getListArchivedAt(listId: string): Promise<Date | null> {
+  const { rows } = await pool().query<{ archivedAt: Date | null }>(
+    `SELECT "archivedAt" FROM "list" WHERE id = $1`,
+    [listId],
+  );
+  return rows[0]?.archivedAt ?? null;
+}
+
+/** Whether a list row still exists (false after permanent deletion). */
+export async function listExists(listId: string): Promise<boolean> {
+  const { rows } = await pool().query<{ id: string }>(
+    `SELECT id FROM "list" WHERE id = $1`,
+    [listId],
+  );
+  return rows.length > 0;
+}
+
+/**
  * Seed a board label directly (arrange step, not under test) and return its id.
  * The label-CRUD *realtime* propagation is what the spec proves; getting a label
  * onto the board is a precondition, so we insert it rather than drive the create
