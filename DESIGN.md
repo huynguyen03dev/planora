@@ -366,6 +366,34 @@ Reserve `{rounded.full}` for avatars, dots, and pill tabs.
 - **`top-nav`** — quiet bar on `{colors.background}`, brand mark left, actions
   right, `{typography.body-sm}`, 56px, 1px `{colors.border}` bottom rule.
 
+## Keyboard Shortcuts
+
+Planora's first global shortcut owner is **Global Quick Capture** (US-083 W7).
+Conventions for any future global shortcut:
+
+- **Ownership & discovery:** each global shortcut is owned by exactly one
+  component; there is no central hotkey registry. The owning control exposes
+  the shortcut via `aria-keyshortcuts` (e.g. `c Control+K`) and a `title`
+  tooltip, so users and AT can discover it.
+- **Guard before fire:** a global shortcut must never fire while the user is
+  typing (input / textarea / select / contenteditable targets), while any
+  dialog/menu/listbox is open, on key repeat or IME composition, or when the
+  shortcut's own surface is already open. Guarding is a pure predicate
+  (`lib/quick-capture.ts` `matchQuickCaptureShortcut`) — unit-testable
+  without DOM.
+- **`preventDefault` only when handled:** call `preventDefault()` only when
+  the predicate matched (the event is actually handled). Guards never touch
+  the event, so copy (Ctrl/Cmd+C), typing, and browser-reserved chords keep
+  their native behavior.
+- **Reserved-chord honesty:** browser chrome reserves some chords
+  (Cmd/Ctrl+K = address bar/find). Implement and test them, but never
+  overclaim portability in docs — label the primary demo path (bare `C`) as
+  the reliable one.
+- **Shortcut language:** bare letters match the unmodified, lowercase key
+  (Shift+C arrives as `C` and never fires). Modifier chords are explicit
+  (`Ctrl`/`Cmd` + letter), exclude Alt and Shift unless the feature owns
+  them.
+
 ## Do's and Don'ts
 
 ### Do

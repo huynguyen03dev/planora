@@ -39,6 +39,10 @@ const h = vi.hoisted(() => {
 vi.mock("@/lib/realtime/client", () => ({ initSocket: () => h.socket }));
 vi.mock("@/app/(authenticated)/actions", () => ({
   getInboxBadgeCountsAction: h.getInboxBadgeCountsAction,
+  getQuickCaptureOptionsAction: vi.fn(),
+}));
+vi.mock("@/app/(authenticated)/(dashboard)/boards/[boardId]/actions", () => ({
+  createCardAction: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: h.routerReplace }),
@@ -122,5 +126,15 @@ describe("AuthenticatedHeaderActions — live invitation badge (US-083 W2)", () 
     fire("connect");
 
     await waitFor(() => expect(bell()).toHaveAccessibleName("Notifications (2 unread)"));
+  });
+
+  it("renders the global Quick Capture button in the authenticated chrome (US-083 W7)", () => {
+    render(
+      <AuthenticatedHeaderActions initialUnreadCount={0} initialInvitationCount={0} />,
+    );
+
+    const quickCapture = screen.getByRole("button", { name: "Quick capture" });
+    expect(quickCapture).toBeInTheDocument();
+    expect(quickCapture).toHaveAttribute("aria-keyshortcuts", "c Control+K");
   });
 });

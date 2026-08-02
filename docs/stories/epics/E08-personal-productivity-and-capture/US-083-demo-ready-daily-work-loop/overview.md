@@ -2,7 +2,7 @@
 
 ## Status
 
-planned (high-risk) — implementation in progress: **W1–W6 landed (W4/W5/W6 uncommitted on the feature branch)**, W7–W8 pending. One story packet with eight
+planned (high-risk) — implementation in progress: **W1–W7 landed (W4–W6 committed at dcc481b; W7 lands in this commit)**, W8 pending. W7 (global quick capture) closed its focused unit/integration/RTL checkpoint AND its E2E gate (`e2e/quick-capture.spec.ts` 5/5 green, fresh shared-server run 2026-08-02). One story packet with eight
 independently checkable internal workstreams (W1–W8); one final story status.
 **Absorbs the planned behavior of US-077 (Today / My Work) and US-078 (Global
 Quick Capture); those story packets are retired as separate work. The full
@@ -64,7 +64,7 @@ flagged as documented):
   `docs/TEST_MATRIX.md`). W3 closes this (**closed — W3 landed 2026-08-02,
   committed 827f222 + d127762**: repeatable `demo:seed`/`demo:reset` +
   manifest + enforced stale-server restart protocol in `docs/DEMO_RUNBOOK.md`).
-- **Automation execution-log retention (reconciled — W4 landed, uncommitted on the feature branch).** Schema
+- **Automation execution-log retention (reconciled — W4 landed, committed dc1fd0a).** Schema
   (`prisma/schema.prisma`, `RuleExecutionLog`): rows denormalize `workspaceId`
   + `ruleName`, `ruleId` is nullable with `onDelete: SetNull`,
   `@@unique([ruleId, dedupKey])`, `metadata Json?` + `error String?` (no
@@ -79,8 +79,8 @@ flagged as documented):
   now matches. **Closed by W5 (2026-08-02):** decisions 0029 and 0030 have
   durable rows in `harness.db` (`harness-cli decision add` — doc paths set,
   status accepted; verified via `harness-cli query decisions`).
-- **Today / My Work is built (W6 landed 2026-08-02, uncommitted on the
-  feature branch); Global Quick Capture is planned but unbuilt (W7).** The
+- **Today / My Work is built (W6 landed 2026-08-02, committed dcc481b); Global Quick Capture is built and verified through its
+  focused-test + E2E checkpoints (W7 landed — committed in this W7 commit).** The
   `/today` cross-workspace read model (`lib/today-query.ts`, `lib/today.ts`,
   `app/(authenticated)/(dashboard)/today/page.tsx`, `components/today/`,
   chrome nav entry) is implemented and covered by unit/integration/RTL;
@@ -165,11 +165,12 @@ cross-client realtime → archive card/list → undo → invitation live badge.
 - `docs/product/realtime-sync.md` — event matrix proof status (W1, W2).
 - `docs/product/automation.md` — execution-log retention reconciliation (W4).
 - `docs/product/analytics.md` — `analytics:refresh` cross-client proof (W1).
-- `docs/TEST_MATRIX.md` — US-083 row now `in_progress` (W1–W4 landed — W4 uncommitted on the feature branch; W5
+- `docs/TEST_MATRIX.md` — US-083 row now `in_progress` (W1–W6 landed — W4–W6 committed (dc1fd0a, b1280f8, dcc481b); W5
   evidence recorded; W6 evidence recorded 2026-08-02); US-077/US-078 rows retired with pointers (W5).
-- `DESIGN.md` — future UI validation cites its tokens/surfaces; no UI changes
-  in this recording turn. W6's `/today` surface and chrome nav entry apply
-  existing tokens only (no new design tokens).
+- `DESIGN.md` — future UI validation cites its tokens/surfaces; W7 added the
+  concise **Keyboard Shortcuts** convention (first global shortcut owner;
+  existing tokens only, no new design tokens). W6's `/today` surface and
+  chrome nav entry apply existing tokens only.
 
 ## Workstreams (one story, independent gates)
 
@@ -178,11 +179,11 @@ cross-client realtime → archive card/list → undo → invitation live badge.
 | W1 | Cross-client E2E proof: `card:updated`, `list:created`, `list:updated`, `list:deleted`, `notification:new`, `analytics:refresh` | W1 E2E spec green on two real browser clients, incl. emit-removal sabotage runs turning red |
 | W2 | Invitation arrival updates inbox/bell badge live; real two-account invite flow proof | W2 two-account invite E2E green; badge-count unit proof (`lib/notifications/inbox.test.ts`) |
 | W3 | Repeatable demo seed/reset (logical fixture + manifest, not pinned UUIDs) + enforced, documented stale-server restart protocol | Seed→reset→seed round trip reproduces fixture shape/counts/relative dates; manifest ids recorded; restart protocol executed in rehearsal |
-| W4 | Reconcile automation execution-log retention claims with actual durable schema/behavior | **Landed — 2026-08-02 (uncommitted on the feature branch):** drift list closed (TEST_MATRIX row, US-066 packet, `docs/product/automation.md`); retention semantics match schema; focused `e2e/automation-log-retention.spec.ts` re-run green (1 passed); `git diff --check` clean |
-| W5 | Reconcile touched tracker/docs/TEST_MATRIX truth (incl. `docs/product/overview.md`, `docs/product/notifications.md`); harness audit evidence proportionate to scope | **Landed — 2026-08-02 (uncommitted on the feature branch):** `harness-cli audit` evidence recorded in validation.md; touched files carry no claim contradicting the harness rows they reference (backlog.md/IN-04/TEST_MATRIX/US-083 + product docs reconciled; US-066/075 harness rows marked implemented with evidence; durable decision rows 0029/0030 added; `git diff --check` clean) |
+| W4 | Reconcile automation execution-log retention claims with actual durable schema/behavior | **Landed — 2026-08-02 (committed dc1fd0a):** drift list closed (TEST_MATRIX row, US-066 packet, `docs/product/automation.md`); retention semantics match schema; focused `e2e/automation-log-retention.spec.ts` re-run green (1 passed); `git diff --check` clean |
+| W5 | Reconcile touched tracker/docs/TEST_MATRIX truth (incl. `docs/product/overview.md`, `docs/product/notifications.md`); harness audit evidence proportionate to scope | **Landed — 2026-08-02 (committed b1280f8):** `harness-cli audit` evidence recorded in validation.md; touched files carry no claim contradicting the harness rows they reference (backlog.md/IN-04/TEST_MATRIX/US-083 + product docs reconciled; US-066/075 harness rows marked implemented with evidence; durable decision rows 0029/0030 added; `git diff --check` clean) |
 | — | **Stage 2 — daily-work UX** | — |
-| W6 | Today / My Work cross-workspace personal read model (archive/membership/isolation rules, no new table) | W6 unit/integration/RTL + E2E green; every referenced US-077 AC mapped to explicit evidence (self-audit table below). **Landed 2026-08-02 (uncommitted on the feature branch):** unit/integration/RTL green (40 focused, after the corrections pass: hydration client-mounted boundary, en-US-pinned labels, RSC page-wiring test — validation.md W6), `e2e/today.spec.ts` 4/4 green (2026-08-02 shared-server lock run; one helper repair — validation.md run record) |
-| W7 | Global quick capture via existing `createCardAction` (`C` + `Cmd/Ctrl+K`) | W7 unit/integration/RTL + E2E green; every referenced US-078 AC mapped to explicit evidence (self-audit table below) |
+| W6 | Today / My Work cross-workspace personal read model (archive/membership/isolation rules, no new table) | W6 unit/integration/RTL + E2E green; every referenced US-077 AC mapped to explicit evidence (self-audit table below). **Landed 2026-08-02 (committed dcc481b):** unit/integration/RTL green (40 focused, after the corrections pass: hydration client-mounted boundary, en-US-pinned labels, RSC page-wiring test — validation.md W6), `e2e/today.spec.ts` 4/4 green (2026-08-02 shared-server lock run; one helper repair — validation.md run record) |
+| W7 | Global quick capture via existing `createCardAction` (`C` + `Cmd/Ctrl+K`) | W7 unit/integration/RTL + E2E green; every referenced US-078 AC mapped to explicit evidence (self-audit table below). **Landed (committed in this W7 commit, 2026-08-02):** unit/integration/RTL green (146 focused + 229 affected-area regression — final post-correction counts); `e2e/quick-capture.spec.ts` **5/5 green** on the final shared-server run (≈1.3–1.4m — hydration-readiness marker + US-043 two-Escape fixes landed first; validation.md W7 run record) |
 | W8 | Undo snackbar for archive-card and archive-list only, via real restore Server Actions; parent-list-archived race fails safe | W8 undo E2E green; race guard integration + two-client test green; non-goal matrix tested as denied/absent |
 
 ## Referenced Acceptance (Self-Audit)
@@ -202,13 +203,13 @@ row to cite its evidence.
 | US-077 AC4 — respects workspace membership and board authorization | W6 | W6 integration isolation cases (A2/A3-style) |
 | US-077 AC5 — archiving a card or board removes it from `/today` on next refresh | W6 | W6 integration + E2E (archive → refresh → absent) |
 | US-077 AC6 — zero new database tables/migrations | W6 | W6 gate check: no migration file in the workstream diff |
-| US-078 AC1 — header button or shortcut opens Quick Capture from any authenticated route | W7 | W7 RTL + E2E (from `/today`) |
-| US-078 AC2 — target board defaults to active/most-recent board | W7 | W7 unit `lib/quick-capture.test.ts` (default resolution) |
-| US-078 AC3 — target list defaults to first/left-most (or designated capture) list | W7 | W7 unit `lib/quick-capture.test.ts` (default resolution) |
-| US-078 AC4 — title required; description, due date, priority optional | W7 | W7 unit (schema mapping) + RTL (required-title guard) |
-| US-078 AC5 — submitting invokes existing `createCardAction`, appending an ordinary `Card` with position gap math | W7 | W7 integration (action invocation + position) |
-| US-078 AC6 — emits `card:created` and revalidates the board path so the card appears live | W7 | W7 integration (emit) + E2E live appearance on target board |
-| US-078 AC7 — success notification with direct "View Card on Board" link | W7 | W7 RTL (toast content/link) |
+| US-078 AC1 — header button or shortcut opens Quick Capture from any authenticated route | W7 | W7 RTL (chrome button + immediate open + C/Ctrl+K/Meta+K with preventDefault-once; guards: typing targets/copy/Shift+C/repeat/IME/open overlay) + E2E `e2e/quick-capture.spec.ts` from `/today` (C + Cmd/Ctrl+K openers) — 5/5 green |
+| US-078 AC2 — target board defaults to active/most-recent board | W7 | W7 unit `lib/quick-capture.test.ts` (route→saved→first-creatable resolution, per-field saved validity, list-less board kept) + integration (options action membership/role isolation) + RTL (each default path) |
+| US-078 AC3 — target list defaults to first/left-most (or designated capture) list | W7 | W7 unit `lib/quick-capture.test.ts` (saved-valid-for-board or left-most; null for list-less boards) + RTL (defaults + board-change list reset) |
+| US-078 AC4 — title required; description, due date, priority optional | W7 | W7 unit (schema mapping) + RTL (required-title guard) + integration (optional fields persist in ONE `card.create`; empty-string→null; invalid priority/date boundary) |
+| US-078 AC5 — submitting invokes existing `createCardAction`, appending an ordinary `Card` with position gap math | W7 | W7 integration (`tests/server-actions/quick-capture.test.ts`: single atomic create with position gap, no chained updates; A1/A2/A3/archived-board regression) |
+| US-078 AC6 — emits `card:created` and revalidates the board path so the card appears live | W7 | W7 integration (emit payload fidelity: dueDate ISO + priority; `revalidatePath` call) + E2E two-client live appearance with W1 barrier/tripwire — green |
+| US-078 AC7 — success notification with direct "View Card on Board" link | W7 | W7 RTL (self-contained `role="status"` toast + deep-link href + persistence) + E2E deep-link click-through — green |
 
 ## Non-Goals
 

@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { CreateWorkspaceModal } from "@/components/boards/create-workspace-modal"
 import { NotificationBell } from "@/components/notifications/notification-bell"
 import { NotificationDropdown } from "@/components/notifications/notification-dropdown"
+import { QuickCapture } from "@/components/quick-capture/quick-capture"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { UserButton } from "@/components/user-button"
@@ -98,6 +99,7 @@ export function AuthenticatedHeaderActions({
 
   return (
     <div className="flex items-center gap-1">
+      <QuickCapture />
       <ThemeToggle />
       <Popover open={isNotificationsOpen} onOpenChange={setIsNotificationsOpen}>
         <PopoverTrigger asChild>

@@ -569,7 +569,7 @@ export async function createCardAction(
 
   const { userId } = await verifySession();
 
-  const { listId, title } = parsed.data;
+  const { listId, title, description, dueDate, priority } = parsed.data;
 
   const result = await getListWithBoard(listId);
   if (!result || result.board.archivedAt) {
@@ -599,12 +599,18 @@ export async function createCardAction(
         : CARD_POSITION_GAP;
       // A newly created card is never complete: completion is card-owned and set
       // only by the explicit toggle, never derived from the list (decision 0020).
+      // US-083 W7: the quick-capture optional fields (description, due date,
+      // priority) persist HERE in the same atomic create — no chained update
+      // actions, no wrapper mutation.
       const createdCard = await tx.card.create({
         data: {
           listId,
           title,
           createdById: userId,
           position,
+          description: description ?? null,
+          dueDate: dueDate ?? null,
+          priority: priority ?? null,
         },
         select: {
           id: true,
@@ -613,6 +619,7 @@ export async function createCardAction(
           position: true,
           estimateHours: true,
           dueDate: true,
+          priority: true,
           archivedAt: true,
           deletedAt: true,
         },
@@ -655,6 +662,11 @@ export async function createCardAction(
         listId: card.card.listId,
         title: card.card.title,
         position: card.card.position,
+        // US-083 W7 fidelity: observer clients receive due date + priority
+        // for quick-captured cards (the reducer applies them; description is
+        // not part of the board-card snapshot).
+        dueDate: toIsoOrNull(card.card.dueDate),
+        priority: card.card.priority,
       },
     });
     emitAnalyticsRefresh(result.board.workspaceId);
@@ -805,13 +817,17 @@ export async function restoreCardAction(
       ]);
     });
     revalidatePath(`/boards/${result.list.boardId}`);
-    // Reappear on other viewers' boards — reuses the tested card:created reducer.
+    // Reappear on other viewers' boards — reuses the tested card:created
+    // reducer. US-083 W7 fidelity: like createCardAction, the payload carries
+    // the card's due date + priority so restored cards keep their meta.
     emitCardCreated(result.list.boardId, {
       card: {
         id: result.card.id,
         listId: result.card.listId,
         title: result.card.title,
         position: result.card.position,
+        dueDate: toIsoOrNull(result.card.dueDate),
+        priority: result.card.priority,
       },
     });
     emitAnalyticsRefresh(result.board.workspaceId);

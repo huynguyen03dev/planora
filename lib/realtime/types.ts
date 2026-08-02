@@ -39,11 +39,18 @@ export interface ListDeletedPayload extends BoardEventPayload {
   listId: string;
 }
 
+export type CardPriority = "URGENT" | "HIGH" | "MEDIUM" | "LOW";
+
 export interface CardSnapshot {
   id: string;
   listId: string;
   title: string;
   position: number;
+  // US-083 W7: quick-captured cards carry due date + priority fidelity to
+  // observer clients. Optional so pre-W7 emitters/payloads stay valid — the
+  // receiver falls back to null when absent.
+  dueDate?: string | null;
+  priority?: CardPriority | null;
 }
 
 export interface CardCreatedPayload extends BoardEventPayload {

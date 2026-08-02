@@ -84,7 +84,7 @@ scripts/bin/harness-cli query matrix
 
 ## Acceptance Evidence
 
-### W4 — Automation execution-log retention reconciliation (LANDED 2026-08-02 — uncommitted on the feature branch)
+### W4 — Automation execution-log retention reconciliation (LANDED 2026-08-02 — committed dc1fd0a)
 
 Evidence chain for each reconciled claim (see the W4 claims table in the
 execplan for the full stale→evidence mapping):
@@ -119,7 +119,7 @@ Planned — implementation unstarted for the remaining workstreams (W6–W8). Co
 will be run and results recorded here after each workstream gate, with the
 single final story status at the end.
 
-### W5 — Tracker/harness truth reconciliation (LANDED 2026-08-02 — uncommitted on the feature branch)
+### W5 — Tracker/harness truth reconciliation (LANDED 2026-08-02 — committed b1280f8)
 
 All harness commands below were run personally against `harness.db` on
 2026-08-02 (`scripts/bin/harness-cli`); outputs observed directly. The
@@ -217,7 +217,7 @@ the scoped `query sql` UPDATE above).
   already rewrote the unified-inbox/live-arrival section; re-verified no stale
   claim remains (incl. `notifyInvited()` retained no-op — still accurate).
 
-### W6 — Today / My Work cross-workspace read model (LANDED 2026-08-02 — uncommitted on the feature branch)
+### W6 — Today / My Work cross-workspace read model (LANDED 2026-08-02 — committed dcc481b)
 
 RED-first TDD: all five W6 test files were authored against non-existent
 production modules and observed RED before any implementation, then GREEN
@@ -383,3 +383,204 @@ log also in the execplan W6 section. `tsc --noEmit`, changed-file ESLint,
 `git diff --check` clean. No product, schema, or realtime code touched —
 the W6 implementation itself needed no change; the defect was in the test
 arrangement helper.
+
+### W7 — global quick capture (landed 2026-08-02 — focused-test checkpoint + final E2E gate)
+
+RED-first TDD evidence (all personally observed; no commit).
+Each RED row states its exact code state; row 2's precondition was a
+PARTIAL production state, not a tests-only one (see the note under it).
+The E2E gate record (5/5 green) is in the "Final E2E gate" section below.
+
+**RED runs:**
+
+```bash
+npx vitest run lib/quick-capture.test.ts
+# → RED: Failed to load url ./quick-capture — module missing (tests-only
+#   state — no production code existed yet)
+
+npx vitest run tests/server-actions/quick-capture.test.ts
+# → RED: 11 failed, 5 passed — PRECONDITION: a PARTIAL production state,
+#   not a tests-only/module-missing state and not a "rejects" state.
+#   lib/quick-capture-options.ts existed but the options export FAILED, and
+#   the pre-W7 createCardSchema STRIPPED the optional keys at parse (zod
+#   object default) — description/dueDate/priority were silently dropped
+#   before the transaction, so the options-action cases and the
+#   persist/fidelity cases failed. "11 failed / 5 passed" is exact ONLY
+#   for that stated precondition.
+
+npx vitest run components/quick-capture/quick-capture.test.tsx \
+  components/quick-capture/quick-capture-shortcuts.test.tsx
+# → RED: 2 suites failed to load — component module missing (tests-only)
+
+npx vitest run tests/board-store.test.ts components/authenticated-header-actions.test.tsx
+# → RED: 2 failed — W7 reducer-fidelity case (payload dueDate/priority
+#   dropped by the unextended reducer) + chrome Quick Capture button case
+#   (not yet mounted in the authenticated header)
+```
+
+**GREEN runs (final post-correction run, 2026-08-02 — exact counts):**
+
+```bash
+npx vitest run lib/quick-capture.test.ts tests/server-actions/quick-capture.test.ts \
+  components/quick-capture/quick-capture.test.tsx \
+  components/quick-capture/quick-capture-shortcuts.test.tsx \
+  components/authenticated-header-actions.test.tsx tests/board-store.test.ts
+# → GREEN: 6 files, 146 tests — per-file: 33 + 18 + 23 + 13 + 5 + 54
+#   (baseline was already 141, not 140; the correction pass added 5 cases:
+#   2 RTL lifecycle + 2 action + 1 reducer)
+
+npx vitest run tests/server-actions/list-card.test.ts tests/server-actions/card-priority-cover.test.ts \
+  tests/server-actions/automation-failure-isolation.test.ts tests/server-actions/checklist.test.ts \
+  lib/card-history.test.ts tests/board-store.test.ts \
+  "app/(authenticated)/(dashboard)/boards/[boardId]/board-store-provider.test.tsx" \
+  "app/(authenticated)/layout.test.tsx"
+# → GREEN: 8 files, 229 tests (affected-area regression — existing
+#   createCardAction/restoreCardAction consumers, realtime/store consumers,
+#   chrome; board-store.test.ts is counted in BOTH runs by design)
+
+npx tsc --noEmit          # clean
+# changed-file ESLint     # clean
+git diff --check          # clean
+```
+
+**Correction pass (reviewer + proof-auditor findings, 2026-08-02 — no
+commit; the E2E spec stays authored/unrun):**
+
+1. **Quick Capture stuck-ref lifecycle (product bug):** closing the dialog
+   while the options fetch was in flight left `fetchStartedRef` true, so
+   every later open was permanently stuck on "Loading boards…". Fixed: a
+   close invalidates the in-flight request (`fetchSeqRef` bump) and clears
+   the started flag; each fetch captures its request id and a late
+   resolve/reject of a stale request can never overwrite the newer one.
+   Proof: 2 new discriminating RTL cases (late resolve / late rejection of
+   the stale deferred against a fresh request — RED on the old lifecycle,
+   GREEN on the fix), `components/quick-capture/quick-capture.test.tsx`.
+2. **Board/list Radix Select uncontrolled→controlled flip (zero-warning):**
+   while lazy options loaded, `value={boardId ?? undefined}` made the
+   selects uncontrolled, then controlled once the default resolved (33
+   "uncontrolled to controlled" + 6 reverse warnings on the pre-fix
+   component). Fixed: `value={boardId ?? ""}` / `value={listId ?? ""}` —
+   controlled from first mount. The suite now runs with ZERO
+   uncontrolled↔controlled warnings. (Pre-existing happy-dom `act()` noise —
+   4× "An update to QuickCapture" on the submit test + 3 Radix select
+   warnings — reproduces identically on the pre-fix component and is not
+   part of this finding; recorded as residual.)
+3. **restoreCardAction emit fidelity (product fix):** its `card:created`
+   emit lacked the dueDate/priority fidelity `createCardAction` now has, so
+   a restored card's meta vanished for observer clients. Fixed: the emit
+   carries `dueDate` (ISO) / `priority` from the archived-aware resolver
+   (fields already selected). Proof: new action case pins the full payload
+   (id/listId/title/position/dueDate/priority) + revalidate + the pinned
+   CARD_RESTORED history row — RED on the unpatched emit, GREEN on the fix,
+   `tests/server-actions/quick-capture.test.ts`.
+4. **E2E route-default test was vacuous (arrangement bug):** it created ONE
+   board, so the route board "won" without competing with a first-creatable
+   board, and its comment claimed a second board existed. Fixed: an
+   earlier-created board ("Alpha") makes the deterministic first-creatable
+   fallback distinct from the route board ("Roadmap"), which still wins on
+   its own page — non-vacuous; comment corrected. Still authored/unrun.
+5. **RED row-2 narrative corrected:** see the RED block above — partial
+   production state (options export existed but failed; pre-W7 zod stripped
+   optional keys), not tests-only, no "rejects". The exact "11 failed / 5
+   passed" is preserved for that precondition.
+6. **Counts reconciled:** baseline focused gate was already 141 (not 140);
+   the final post-correction run is 146 focused / 229 regression with the
+   exact per-file numbers above. overview/execplan/US-078/TEST_MATRIX carry
+   the same final numbers.
+7. **Automation preservation is now load-bearing in W7:** new focused case
+   asserts the REAL create transaction invokes the evaluator's
+   `tx.rule.findMany` (workspaceId + triggerType card-created + enabled
+   only) — the extended create can never bypass the US-066 path.
+8. **History payload pinned:** the AC4 case now pins the CARD_CREATED row
+   (workspaceId/boardId/cardId/eventType + dueDate metadata,
+   skipDuplicates false), not merely "createMany called".
+9. **preventDefault proof completed:** handled Ctrl+K and Meta+K assert
+   exactly-once preventDefault; every guarded case (typing targets, copy,
+   Shift+C, repeat, IME, already-open dialog, open overlay/listbox) asserts
+   zero.
+10. **Reducer absent-field fallback proven:** new store case — a pre-W7
+    payload without dueDate/priority yields `null` for both (not stale
+    spread values).
+
+**Post-checkpoint fixes (root, 2026-08-02, before the final E2E run):**
+
+11. **Hydration-readiness marker for the global shortcut (E2E race fix):**
+    a fast navigation could lose the first C keydown while the
+    shortcut listener was still hydrating. The chrome button now exposes
+    `data-shortcuts-ready` (owned by the keydown-listener effect; `"true"`
+    only after `addEventListener` ran), and the spec's `openCapture` waits
+    for the attribute before pressing C. Narrow saved-destination run 1/1
+    green; the full spec green afterwards.
+12. **US-043 two-Escape semantics in the focus-guard test (test fix):**
+    the card detail sheet intentionally keeps its open state on the first
+    Escape while a title draft is unsaved (revert), closing only on the
+    second Escape. The guard test now presses Escape twice before
+    asserting the input is gone and the C guard has released. Narrow run
+    1/1 green.
+
+**Final E2E gate — `e2e/quick-capture.spec.ts` 5/5 GREEN (2026-08-02):**
+
+```bash
+# port 3000 verified free before/after; Playwright boots its own server
+# (fresh, single worker). Heavy suites run sequentially — nothing else ran.
+npm run test:e2e -- e2e/quick-capture.spec.ts
+```
+
+→ **5 passed (≈1.3–1.4m).** First official green observed by the root seat
+(≈1.3m); independently re-run green twice by the W7 finalization seat —
+run 1 ≈1.4m (log `/tmp/w7-quick-capture-e2e.log`), run 2 ≈1.3m on the fully
+edited final tree incl. the spec-header record (log
+`/tmp/w7-quick-capture-e2e-final.log`), 2026-08-02:
+per-test ✓ 1 C from /today + optional fields + deep-link toast (19.0s),
+✓ 2 saved-destination fallback (14.3s), ✓ 3 route default + C input-focus
+guard, US-043 two-Escape (15.0s), ✓ 4 two-client live appearance with W1
+barrier + connect-resync settle + masking tripwire, priority chip visible
+(19.3s), ✓ 5 Cmd/Ctrl+K opener (6.5s). No assertion weakened — the tripwire
+counters, the readiness-marker wait, and the two-Escape sequence all ran as
+written.
+
+**Full-suite gate at the stable checkpoint (2026-08-02, after the
+readiness-marker edit):**
+
+```bash
+npm test                    # → 85 files, 1351 tests, all passed (37.8s)
+npx tsc --noEmit            # clean
+npx eslint <16 changed ts/tsx files>  # clean
+npm run test:e2e -- e2e/quick-capture.spec.ts  # 5/5 (above)
+```
+
+**Files added:** `lib/quick-capture.ts` (pure defaults/shortcut/storage
+logic), `lib/quick-capture.test.ts` (33), `lib/quick-capture-options.ts`
+(server read model, four bounded queries), `components/quick-capture/
+quick-capture.tsx` (button + dialog + form + toast, self-contained),
+`components/quick-capture/quick-capture.test.tsx` (23),
+`components/quick-capture/quick-capture-shortcuts.test.tsx` (13),
+`tests/server-actions/quick-capture.test.ts` (18),
+`e2e/quick-capture.spec.ts` (5 tests — **5/5 green** on the final
+shared-server run, 2026-08-02).
+
+**Files modified:** `lib/schemas/card.ts` (createCardSchema optional
+fields, backward-compatible), `app/(authenticated)/(dashboard)/boards/
+[boardId]/actions.ts` (createCardAction: one atomic create + emit payload
+fidelity; restoreCardAction: emit fidelity — correction pass #3),
+`lib/realtime/types.ts` (CardSnapshot dueDate/priority),
+`app/(authenticated)/(dashboard)/boards/[boardId]/board-store.ts` (reducer
+fidelity, null fallback), `app/(authenticated)/actions.ts`
+(`getQuickCaptureOptionsAction`), `components/authenticated-header-actions.tsx`
+(+test), `tests/board-store.test.ts`
+(+2: fidelity + null-fallback), `DESIGN.md` (Keyboard Shortcuts convention
+— first global shortcut owner).
+
+**Contract decisions locked:** see the W7 section of the execplan (D1
+defaults/per-field saved validity, D2 shortcut semantics + preventDefault-
+only-when-handled + Cmd/Ctrl+K browser-chrome reservation caveat, D3 options
+action membership/role isolation + determinism + no N+1, D4 schema/action
+extension in one transaction, D5 realtime fidelity with null fallbacks,
+D6 lazy first-open options + self-contained toast/no auto-navigation).
+
+**Residual:** pre-existing happy-dom `act()` noise in the RTL suite (see
+correction pass #2 — reproduces identically on the pre-fix component);
+Cmd/Ctrl+K remains browser-chrome-reserved in real browsers (documented
+caveat, authoritative proof is the RTL/unit guard suites — bare C is the
+reliable demo path); W8 (bounded undo) is the next workstream. The full
+`npm test` gate and the E2E gate are both closed at this checkpoint.

@@ -24,6 +24,15 @@ export const estimateHoursSchema = z.preprocess(
     .optional(),
 );
 
+const MAX_CARD_DESCRIPTION_LENGTH = 10000;
+
+// US-083 W7: quick capture's optional fields ride the SAME schema as the
+// existing board composer, backward-compatibly — absent keys (the board
+// composer's form) parse to null just like empty strings (the capture
+// dialog's form). Priority follows the existing "NONE" → null convention
+// (see updateCardPriorityAction); dueDate accepts the "YYYY-MM-DD" wire
+// format the detail sheet already uses (z.coerce.date convention, with ""
+// normalized to null before coercion).
 export const createCardSchema = z.object({
   listId: z.string().uuid({ message: "Invalid list ID" }),
   title: z
@@ -31,6 +40,24 @@ export const createCardSchema = z.object({
     .trim()
     .min(MIN_CARD_TITLE_LENGTH, "Title is required")
     .max(MAX_CARD_TITLE_LENGTH, `Title must be ${MAX_CARD_TITLE_LENGTH} characters or less`),
+  description: z
+    .string()
+    .max(MAX_CARD_DESCRIPTION_LENGTH, `Description must be ${MAX_CARD_DESCRIPTION_LENGTH} characters or less`)
+    .transform((value) => (value === "" ? null : value))
+    .nullable()
+    .optional(),
+  dueDate: z
+    .preprocess((value) => {
+      if (value === "" || value == null) return null;
+      return value;
+    }, z.coerce.date().nullable())
+    .optional(),
+  priority: z
+    .preprocess((value) => {
+      if (value === "" || value === "NONE" || value == null) return null;
+      return value;
+    }, z.enum(["URGENT", "HIGH", "MEDIUM", "LOW"]).nullable())
+    .optional(),
 });
 
 export type CreateCardInput = z.infer<typeof createCardSchema>;
@@ -99,8 +126,6 @@ export const moveCardSchema = z
   );
 
 export type MoveCardInput = z.infer<typeof moveCardSchema>;
-
-const MAX_CARD_DESCRIPTION_LENGTH = 10000;
 
 export const updateCardDetailsSchema = z.object({
   cardId: z.string().uuid({ message: "Invalid card ID" }),

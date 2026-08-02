@@ -520,6 +520,46 @@ describe("applyRemoteCardCreated", () => {
 
     expect(cardsIn("list-1").map((card) => card.id)).toEqual(["card-a", "card-c"]);
   });
+
+  it("preserves dueDate/priority fidelity from the payload (US-083 W7 quick capture)", () => {
+    useBoardStore.setState({ boardId: "board-1", lists: makeListsWithCards() });
+
+    useBoardStore.getState().applyRemoteCardCreated({
+      boardId: "board-1",
+      card: {
+        id: "card-new",
+        listId: "list-1",
+        title: "Captured",
+        position: 32768,
+        dueDate: "2026-08-15T00:00:00.000Z",
+        priority: "URGENT",
+      },
+    });
+
+    const card = cardsIn("list-1").find((c) => c.id === "card-new");
+    expect(card).toBeDefined();
+    expect(card!.priority).toBe("URGENT");
+    expect(card!.dueDate).toEqual(new Date("2026-08-15T00:00:00.000Z"));
+  });
+
+  it("falls back to null when a pre-W7 payload carries no dueDate/priority (absent-field fallback)", () => {
+    useBoardStore.setState({ boardId: "board-1", lists: makeListsWithCards() });
+
+    useBoardStore.getState().applyRemoteCardCreated({
+      boardId: "board-1",
+      card: {
+        id: "card-legacy",
+        listId: "list-1",
+        title: "Legacy",
+        position: 24576,
+      },
+    });
+
+    const card = cardsIn("list-1").find((c) => c.id === "card-legacy");
+    expect(card).toBeDefined();
+    expect(card!.priority).toBeNull();
+    expect(card!.dueDate).toBeNull();
+  });
 });
 
 describe("applyRemoteCardUpdated", () => {

@@ -452,7 +452,7 @@ fixed in W5.
 ### W6 implementation progress (handback evidence)
 
 W6 (Today / My Work cross-workspace read model) landed 2026-08-02,
-uncommitted on the feature branch. RED-first TDD: the five W6 test files
+committed dcc481b. RED-first TDD: the five W6 test files
 were authored against non-existent production modules and observed RED
 before implementation (`lib/today` module-missing, `lib/today-query`
 module-missing, `today-view`/`today-nav-link` module-missing, and a
@@ -493,6 +493,154 @@ US-077 AC1 + the self-audit row are amended
 to the locked cross-workspace membership-scoped interpretation; product
 section-name drift reconciled. Full evidence chain in validation.md (W6
 section).
+
+### W7 implementation progress (landed 2026-08-02 — focused-test checkpoint + final E2E gate)
+
+W7 (global quick capture) is implemented through its **focused-test
+checkpoint** — RED-first TDD, all unit/integration/RTL gates green — and its
+**E2E gate is closed: `e2e/quick-capture.spec.ts` 5/5 GREEN** on the fresh
+shared-server run (≈1.3–1.4m; post-checkpoint readiness-marker + US-043
+two-Escape fixes landed first — full record below).
+
+**Locked contract decisions (with evidence):**
+
+- **D1 — Default destination:** current `/boards/{boardId}` route if the
+  board is creatable → last successful destination from localStorage
+  (per-field validity: a still-creatable saved board is KEPT even when its
+  saved list was archived — the board is never silently jumped away from;
+  the list falls back to the left-most live list) → first creatable board in
+  the options action's deterministic membership/board order. A board with no
+  lists stays selected with a null list and an honestly disabled submit —
+  never a silent jump (`lib/quick-capture.test.ts` cases + RTL).
+- **D2 — Shortcut semantics:** bare `C` (no ctrl/meta/alt/shift — Shift+C
+  arrives as "C" and never fires) and `Cmd/Ctrl+K` (no alt/shift). Guarded
+  against input/textarea/select/contenteditable targets, copy (modified C),
+  key repeat, IME composition, the already-open dialog, and ANY other open
+  dialog/menu/listbox (`findOpenOverlay` on radix `data-state="open"`
+  content). `preventDefault` is called ONLY when the predicate matches (the
+  event is actually handled) — proven per guard in RTL with preventDefault
+  spies. **Cmd/Ctrl+K is browser-reserved chrome** (address bar / find);
+  implemented and unit/RTL-tested, but portability across browsers is NOT
+  claimed — bare C is the documented reliable demo path. DESIGN.md gained a
+  concise "Keyboard Shortcuts" convention (W7 is the first global shortcut
+  owner; no hotkey registry).
+- **D3 — Options action:** `getQuickCaptureOptionsAction` is the ONE new
+  read-only authenticated Server Action. Scope derived server-side from the
+  session user's `WorkspaceMember` rows — never client-supplied. Only
+  editor/admin memberships are returned (viewer memberships excluded by the
+  query), active boards and active lists only, deterministic order
+  (membership `createdAt` → workspace order; board `createdAt`; list
+  `position`), exactly four bounded queries (membership / workspace / board /
+  list selects) — no N+1. `createCardAction` remains the authoritative
+  permission/isolation boundary (a viewer/foreign target is still rejected
+  with the obfuscated "List not found").
+- **D4 — Schema/action extension:** `createCardSchema` gains optional
+  `description` (""→null, max 10000), `dueDate` (""→null, `YYYY-MM-DD` →
+  `Date`, invalid strings rejected), `priority` ("NONE"/""→null, enum) —
+  backward-compatible (absent keys parse like empty strings; the board
+  composer's bare form is untouched). `createCardAction` persists them in the
+  SAME atomic `tx.card.create` (no chained update actions, no wrapper
+  mutation/entity); position gap math, history, automation evaluation,
+  `revalidatePath`, and both emits are preserved.
+- **D5 — Realtime fidelity:** `CardSnapshot` gains optional `dueDate` /
+  `priority` (null fallbacks — pre-W7 payloads stay valid);
+  `createCardAction` AND `restoreCardAction` emit them (the restore emit
+  was corrected in the pass below); the board-store reducer applies them
+  (existing consumers and the drag-aware deferral untouched). Description
+  deliberately stays out of the board-card snapshot (the store does not
+  model it).
+- **D6 — Lazy + self-contained:** options load on FIRST open only (cached
+  for the session; closing mid-flight invalidates the in-flight fetch so the
+  next open refetches — a stale resolve/reject can never overwrite a newer
+  request; a failed fetch shows an inline alert with an explicit Retry);
+  the dialog opens with zero awaits (<50ms path — RTL proves the
+  dialog renders while the fetch is still pending). Success feedback is a
+  self-contained transient `role="status"` toast with the
+  `/boards/{boardId}?cardId={cardId}` deep link, owned by the capture
+  component — no Notification row, no app-wide toast framework, no
+  auto-navigation.
+
+**RED → GREEN (all personally observed, 2026-08-02):**
+
+| # | Code state | Run | Result |
+| --- | --- | --- | --- |
+| 1 | tests only (no production code) | `npx vitest run lib/quick-capture.test.ts` | **RED** — module missing (`./quick-capture` unresolved) |
+| 2 | PARTIAL production state (not tests-only): `lib/quick-capture-options.ts` existed but the options export FAILED; the pre-W7 zod schema STRIPPED the optional keys at parse (no "rejects" — fields silently dropped) | `npx vitest run tests/server-actions/quick-capture.test.ts` | **RED** — 11 failed, 5 passed, exact ONLY for that stated precondition (options-action cases + persist/fidelity cases whose fields never reached the transaction) |
+| 3 | tests only | `npx vitest run components/quick-capture/quick-capture.test.tsx components/quick-capture/quick-capture-shortcuts.test.tsx` | **RED** — 2 suites failed to load (component module missing) |
+| 4 | tests only | `npx vitest run tests/board-store.test.ts components/authenticated-header-actions.test.tsx` | **RED** — 2 failed (reducer fidelity + chrome button cases) |
+| 5 | production implemented | focused W7 gate (6 files) | **GREEN** — 146/146 (final post-correction run; baseline was already 141, not 140 — per-file: 33 + 18 + 23 + 13 + 5 + 54) |
+| 6 | production implemented | affected-area regression (8 files: list-card, card-priority-cover, automation-failure-isolation, checklist, card-history, board-store, board-store-provider, layout) | **GREEN** — 229/229 (board-store.test.ts counted in BOTH runs by design) |
+| 7 | production implemented | `npx tsc --noEmit` | clean |
+| 8 | production implemented | changed-file ESLint | clean (one fix pass: unescaped apostrophe + unused import) |
+| 9 | production implemented | `git diff --check` | clean |
+
+**Correction pass (reviewer + proof-auditor findings, same day — no
+commit, E2E was still unrun at that point — final run record below):** (1) Quick Capture stuck-ref lifecycle
+— closing mid-fetch left `fetchStartedRef` true forever; fixed via close
+invalidation (`fetchSeqRef` bump) + request-id discrimination with 2 new
+RTL deferred-promise cases (late resolve AND late reject of the stale
+request never overwrite the new one); (2) board/list Radix Selects
+controlled from first mount (`value={x ?? ""}` — never `undefined`): suite
+zero uncontrolled↔controlled warnings (pre-fix component: 33 + 6);
+(3) `restoreCardAction`'s `card:created` emit now carries dueDate/priority
+fidelity like `createCardAction` (new pinned-payload action case + the
+CARD_RESTORED history row); (4) e2e route-default test made non-vacuous
+(earlier-created "Alpha" board so the route board wins against a real
+first-creatable alternative; false comment fixed); (5) RED row-2 narrative
+corrected above (partial production state, not tests-only, no "rejects");
+(6) counts reconciled from the final run (146 focused / 229 regression);
+(7) automation preservation load-bearing: focused case asserts the REAL
+create tx calls `tx.rule.findMany` (workspaceId + card-created + enabled);
+(8) history payload pinned (CARD_CREATED row ids + dueDate metadata);
+(9) preventDefault proven exactly-once for handled Ctrl+K/Meta+K and zero
+for every guarded case; (10) reducer absent-field null-fallback case
+(pre-W7 payload → priority/dueDate null).
+
+Test-side corrections during the RED pass (mock realism, not production
+changes): the options-action mocks simulate the DB's role filter (the
+viewer membership never reaches the read model); `makeTx` gained the
+`cardMember.findMany` seam; the grouping mock returns lists in query
+(position) order. One production fix from RED: zod `nullable()` must sit
+INSIDE the preprocess for `dueDate`/`priority` (the ""/NONE→null mapping is
+an inner-schema value). RTL environment fixes (happy-dom role mapping):
+`type="date"` is queried by label, not role textbox; contenteditable is
+queried by label.
+
+**E2E spec — five tests:** (1) C from `/today` → immediate dialog, deterministic
+defaults, optional fields (description/due date/priority) via one submit, toast
+deep link → board `?cardId=` with detail sheet showing the persisted fields;
+(2) saved-destination fallback (capture to Beta → reopen defaults to Beta, not
+the first board); (3) route-board default on `/boards/{id}` + C input-focus
+guard (focused detail-sheet title input types instead of opening; guard
+releases after Escape) — the arrangement creates a SECOND, earlier
+first-creatable board ("Alpha") so the route board wins NON-VACUOUSLY;
+(4) two-client liveness — Alice captures from `/today`, Bob's already-loaded
+board shows the card + "Urgent" priority chip live, with the W1 presence
+barrier + connect-resync settle + masking tripwire (reload / socket reconnect /
+route-POST counters); (5) Cmd/Ctrl+K opener with the browser-chrome reservation
+caveat (headless Chromium passes the key; real-browser chrome may reserve it —
+the authoritative K proof is the RTL/unit guard suites).
+
+**Post-checkpoint fixes (root, 2026-08-02, before the final E2E run):**
+(1) hydration-readiness marker — the chrome button now carries
+`data-shortcuts-ready` owned by the shortcut-listener effect ("true" only
+after `addEventListener` ran); the spec's `openCapture` waits for it before
+the first C press, so a fast navigation can no longer lose the first keydown
+during hydration (narrow saved-destination run 1/1 green); (2) the
+focus-guard test follows the locked US-043 two-Escape semantics — the first
+Escape reverts an unsaved title edit and keeps the sheet open, only the second
+Escape closes it, releasing the input focus so the C guard lifts (narrow run
+1/1 green).
+
+**Final E2E gate (2026-08-02):** `npm run test:e2e -- e2e/quick-capture.spec.ts`
+— full spec **5/5 GREEN in ≈1.3–1.4m** on the fresh shared-server run (port
+3000 verified free before/after; Playwright boots its own server). First
+official green observed by the root seat; independently re-run green by the
+W7 finalization seat (run log + per-test timings in validation.md W7). No
+E2E assertion weakened — the tripwire counters, the readiness-marker wait,
+and the two-Escape sequence all ran as written. Full-suite gate at the
+stable checkpoint after these edits: `npm test` 1351 green (85 files).
+
 
 1. **W3 — Demo determinism (foundation first).** Wrap existing seeds into a
    repeatable `demo:seed` / `demo:reset` workflow: fixed logical fixture

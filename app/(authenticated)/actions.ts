@@ -1,5 +1,7 @@
 "use server";
 
+import { getQuickCaptureOptions } from "@/lib/quick-capture-options";
+import type { QuickCaptureOptions } from "@/lib/quick-capture";
 import { verifySession } from "@/lib/dal";
 import { getPendingInvitationCount } from "@/lib/invitation";
 import { getUnreadNotificationCount } from "@/lib/notification";
@@ -28,4 +30,19 @@ export async function getInboxBadgeCountsAction(): Promise<{
     getPendingInvitationCount(user.email),
   ]);
   return { unread, invitations };
+}
+
+/**
+ * US-083 W7 — the one new read-only authenticated Server Action behind the
+ * global Quick Capture dialog. Returns ONLY editor/admin-creatable
+ * workspaces (scope derived server-side from the session user's memberships,
+ * never client-supplied) with active boards and active lists, in a
+ * deterministic membership/board order (see `lib/quick-capture-options.ts`
+ * for the bounded four-query read model — no N+1). The dialog calls this
+ * lazily on first open; `createCardAction` stays the authoritative
+ * permission/isolation boundary for the actual create.
+ */
+export async function getQuickCaptureOptionsAction(): Promise<QuickCaptureOptions> {
+  const { userId } = await verifySession();
+  return getQuickCaptureOptions(userId);
 }
