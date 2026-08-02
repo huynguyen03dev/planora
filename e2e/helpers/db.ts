@@ -183,6 +183,30 @@ export async function cleanup(opts: { workspaceId?: string; emails: string[] }):
 }
 
 /**
+ * Set a card's due date directly (arrange step for the US-083 W6 `/today`
+ * spec — the four buckets are seeded in DB time, not driven through the
+ * date-picker UI; mirroring the `addLabel` arrange-step precedent).
+ */
+export async function setCardDueDate(cardId: string, dueDate: Date): Promise<void> {
+  await pool().query(`UPDATE "card" SET "dueDate" = $1 WHERE id = $2`, [
+    dueDate,
+    cardId,
+  ]);
+}
+
+/**
+ * Assign a card to a user directly (arrange step — same precedent; the
+ * assign UI + realtime path is proven elsewhere, US-011).
+ */
+export async function assignCardMember(cardId: string, userId: string): Promise<void> {
+  await pool().query(
+    `INSERT INTO "cardMember" ("cardId", "userId", "assignedAt")
+     VALUES ($1, $2, now())`,
+    [cardId, userId],
+  );
+}
+
+/**
  * Close the pool so the test process can exit cleanly. Idempotent and safe to
  * call per spec file: it ends the current pool (if any) and clears the ref, so a
  * later query in another spec simply opens a fresh pool via `pool()`.

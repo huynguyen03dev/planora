@@ -2,7 +2,7 @@
 
 ## Status
 
-planned (high-risk) — implementation unstarted. One story packet with eight
+planned (high-risk) — implementation in progress: **W1–W6 landed (W4/W5/W6 uncommitted on the feature branch)**, W7–W8 pending. One story packet with eight
 independently checkable internal workstreams (W1–W8); one final story status.
 **Absorbs the planned behavior of US-077 (Today / My Work) and US-078 (Global
 Quick Capture); those story packets are retired as separate work. The full
@@ -38,7 +38,9 @@ flagged as documented):
   row "Real-time sync" and
   `e2e/realtime-comment-list-reorder.spec.ts` (header comment) both state the
   six events above have **no dedicated cross-client proof** — that is the
-  documented gap W1 closes.
+  documented gap W1 closes (**closed — W1 landed 2026-08-02, committed
+  937e75f**: dedicated two-client proof in `e2e/realtime-event-proof.spec.ts`,
+  sabotage-verified per event; the stale spec-header claim is re-pointed).
 - **Invitation arrivals are not pushed live.** Workspace invitations surface in
   the unified inbox by reading the invitation table (`/api/invitations/pending`,
   fetched when the notification dropdown opens — `components/notifications/
@@ -48,7 +50,9 @@ flagged as documented):
   resyncs on socket connect, but an arriving invitation does **not** push an
   event — the badge updates only after the dropdown/SSR fetch. No two-account
   invite E2E exists today (e2e/ has no invite spec). W2 makes arrival live and
-  proves it with a real two-account invite flow.
+  proves it with a real two-account invite flow (**closed — W2 landed
+  2026-08-02, committed 3f238be**: `e2e/invitation-live-badge.spec.ts` three-user
+  proof + badge-count unit surface; see the W2 handback section in the execplan).
 - **Demo seeds exist but are not a deterministic, documented demo loop.**
   `scripts/seed-demo-board.ts` (idempotent per slug: wipes + recreates) and
   `scripts/seed-analytics-demo.ts` exist for local UI review. There is no
@@ -57,25 +61,35 @@ flagged as documented):
   users and cleans up, but nothing documents the demo-day restart discipline
   (Socket.io state and Next dev caches go stale when the server is not
   restarted between seed and demo — noted in the presence row of
-  `docs/TEST_MATRIX.md`). W3 closes this.
-- **Automation execution-log retention claims drift from the durable schema.**
-  Schema (`prisma/schema.prisma`, `RuleExecutionLog`): rows denormalize
-  `workspaceId` + `ruleName`, `ruleId` is nullable with `onDelete: SetNull`,
-  `@@unique([ruleId, dedupKey])`, `metadata Json?`; survival of rule deletion
-  is proven by `e2e/automation-log-retention.spec.ts` (US-066). But
-  `docs/stories/epics/E06-automation/US-066-automation-rules-engine/execplan.md`
-  still claims logs cascade-delete with the rule, `docs/product/automation.md`
-  mentions `errorDetails` (no such column; actual fields are `error` /
-  `metadata`), and the "append-only" wording in the US-066 design has no
-  documented retention window or prune policy. Also documented-to-harness
-  drift: decisions 0029 and 0030 exist as `docs/decisions/*.md` files but have
-  **no durable rows** in `harness.db` (verified via `harness-cli query sql`).
-  W4/W5 reconcile these claims.
-- **Today / My Work and Global Quick Capture are planned but unbuilt**
-  (US-077, US-078 packets, both `planned` / unstarted). `createCardAction`
+  `docs/TEST_MATRIX.md`). W3 closes this (**closed — W3 landed 2026-08-02,
+  committed 827f222 + d127762**: repeatable `demo:seed`/`demo:reset` +
+  manifest + enforced stale-server restart protocol in `docs/DEMO_RUNBOOK.md`).
+- **Automation execution-log retention (reconciled — W4 landed, uncommitted on the feature branch).** Schema
+  (`prisma/schema.prisma`, `RuleExecutionLog`): rows denormalize `workspaceId`
+  + `ruleName`, `ruleId` is nullable with `onDelete: SetNull`,
+  `@@unique([ruleId, dedupKey])`, `metadata Json?` + `error String?` (no
+  `errorDetails` column); **no retention/prune window exists** — nothing
+  deletes log rows except workspace deletion (`workspaceId` FK `onDelete:
+  Cascade`). Rule-deletion survival is proven end-to-end by
+  `e2e/automation-log-retention.spec.ts` (US-066; focused re-run green
+  2026-08-02). W4 fixed the stale claims (US-066 execplan cascade-delete
+  wording, `errorDetails`, the per-action-step row count, and the undocumented
+  append-only wording) in `docs/product/automation.md`, the US-066 packet, and
+  `docs/TEST_MATRIX.md` — each fix cites the schema/migration/E2E evidence it
+  now matches. **Closed by W5 (2026-08-02):** decisions 0029 and 0030 have
+  durable rows in `harness.db` (`harness-cli decision add` — doc paths set,
+  status accepted; verified via `harness-cli query decisions`).
+- **Today / My Work is built (W6 landed 2026-08-02, uncommitted on the
+  feature branch); Global Quick Capture is planned but unbuilt (W7).** The
+  `/today` cross-workspace read model (`lib/today-query.ts`, `lib/today.ts`,
+  `app/(authenticated)/(dashboard)/today/page.tsx`, `components/today/`,
+  chrome nav entry) is implemented and covered by unit/integration/RTL;
+  `e2e/today.spec.ts` is green (4/4, 2026-08-02 shared-server lock run — one
+  arrange-defect repair in `e2e/helpers/app.ts`, validation.md run record). The
+  US-078 packet remains `planned` / unstarted. `createCardAction`
   (`app/(authenticated)/(dashboard)/boards/[boardId]/actions.ts`), the real
   restore actions `restoreCardAction` (US-016, integration-proven) and
-  `restoreListAction` (US-074, proven) all exist — the foundations W6–W8 build
+  `restoreListAction` (US-074, proven) all exist — the foundations W7/W8 build
   on.
 - **Archive/card and archive/list are reversible today via restore actions,
   but there is no undo surface.** Archive-card (US-016) and archive-list
@@ -103,8 +117,9 @@ A demo-ready daily work loop, end to end:
    real two-account invite flow (inviter invites → invitee sees badge live →
    accepts → badge clears).
 4. **Today / My Work (W6):** `/today` read model over existing
-   `CardMember` / `dueDate` / `priority` / `archivedAt` data across authorized
-   boards in the workspace — Overdue / Due Today / Due This Week / Later
+   `CardMember` / `dueDate` / `priority` / `archivedAt` data **across every
+   workspace the user is a member of** (membership-derived server-side;
+   never client-supplied) — Overdue / Due Today / Due This Week / Later
    sections, archive/membership/isolation rules honored, **zero new tables**.
 5. **Global quick capture (W7):** header button or `C` / `Cmd/Ctrl+K` opens a
    capture dialog that creates an ordinary `Card` through the existing
@@ -137,21 +152,24 @@ cross-client realtime → archive card/list → undo → invitation live badge.
 ## Affected Product Docs
 
 - `docs/product/boards-and-cards.md` — quick capture, undo, archive/restore
-  semantics (W7, W8).
+  semantics (W7, W8); `/today` section-name drift reconciled to the locked
+  Overdue / Due Today / Due This Week / Later buckets (W6).
 - `docs/product/overview.md` — `/today` and quick-capture roadmap references
-  re-pointed to US-083 W6/W7 (W5); product behavior unchanged.
+  re-pointed to US-083 W6/W7 (W5); `/today` route wording amended to
+  cross-workspace (W6).
 - `docs/product/notifications.md` — unified inbox / badge behavior; live
   invitation-arrival limitation is the W2 target; badge-count unit surface
   `lib/notifications/inbox.ts` (W2).
 - `docs/product/workspaces-and-access.md` — cross-workspace read-model
-  isolation rules (W6), invitation inbox (W2).
+  isolation rules (W6, landed), invitation inbox (W2).
 - `docs/product/realtime-sync.md` — event matrix proof status (W1, W2).
 - `docs/product/automation.md` — execution-log retention reconciliation (W4).
 - `docs/product/analytics.md` — `analytics:refresh` cross-client proof (W1).
-- `docs/TEST_MATRIX.md` — planned US-083 row; US-077/US-078 rows retired with
-  pointers (W5).
+- `docs/TEST_MATRIX.md` — US-083 row now `in_progress` (W1–W4 landed — W4 uncommitted on the feature branch; W5
+  evidence recorded; W6 evidence recorded 2026-08-02); US-077/US-078 rows retired with pointers (W5).
 - `DESIGN.md` — future UI validation cites its tokens/surfaces; no UI changes
-  in this recording turn.
+  in this recording turn. W6's `/today` surface and chrome nav entry apply
+  existing tokens only (no new design tokens).
 
 ## Workstreams (one story, independent gates)
 
@@ -160,10 +178,10 @@ cross-client realtime → archive card/list → undo → invitation live badge.
 | W1 | Cross-client E2E proof: `card:updated`, `list:created`, `list:updated`, `list:deleted`, `notification:new`, `analytics:refresh` | W1 E2E spec green on two real browser clients, incl. emit-removal sabotage runs turning red |
 | W2 | Invitation arrival updates inbox/bell badge live; real two-account invite flow proof | W2 two-account invite E2E green; badge-count unit proof (`lib/notifications/inbox.test.ts`) |
 | W3 | Repeatable demo seed/reset (logical fixture + manifest, not pinned UUIDs) + enforced, documented stale-server restart protocol | Seed→reset→seed round trip reproduces fixture shape/counts/relative dates; manifest ids recorded; restart protocol executed in rehearsal |
-| W4 | Reconcile automation execution-log retention claims with actual durable schema/behavior | Drift list closed; retention semantics doc matches schema |
-| W5 | Reconcile touched tracker/docs/TEST_MATRIX truth (incl. `docs/product/overview.md`, `docs/product/notifications.md`); harness audit evidence proportionate to scope | `harness-cli audit` evidence recorded; no stale claims in touched files |
+| W4 | Reconcile automation execution-log retention claims with actual durable schema/behavior | **Landed — 2026-08-02 (uncommitted on the feature branch):** drift list closed (TEST_MATRIX row, US-066 packet, `docs/product/automation.md`); retention semantics match schema; focused `e2e/automation-log-retention.spec.ts` re-run green (1 passed); `git diff --check` clean |
+| W5 | Reconcile touched tracker/docs/TEST_MATRIX truth (incl. `docs/product/overview.md`, `docs/product/notifications.md`); harness audit evidence proportionate to scope | **Landed — 2026-08-02 (uncommitted on the feature branch):** `harness-cli audit` evidence recorded in validation.md; touched files carry no claim contradicting the harness rows they reference (backlog.md/IN-04/TEST_MATRIX/US-083 + product docs reconciled; US-066/075 harness rows marked implemented with evidence; durable decision rows 0029/0030 added; `git diff --check` clean) |
 | — | **Stage 2 — daily-work UX** | — |
-| W6 | Today / My Work cross-workspace personal read model (archive/membership/isolation rules, no new table) | W6 unit/integration/RTL + E2E green; every referenced US-077 AC mapped to explicit evidence (self-audit table below) |
+| W6 | Today / My Work cross-workspace personal read model (archive/membership/isolation rules, no new table) | W6 unit/integration/RTL + E2E green; every referenced US-077 AC mapped to explicit evidence (self-audit table below). **Landed 2026-08-02 (uncommitted on the feature branch):** unit/integration/RTL green (40 focused, after the corrections pass: hydration client-mounted boundary, en-US-pinned labels, RSC page-wiring test — validation.md W6), `e2e/today.spec.ts` 4/4 green (2026-08-02 shared-server lock run; one helper repair — validation.md run record) |
 | W7 | Global quick capture via existing `createCardAction` (`C` + `Cmd/Ctrl+K`) | W7 unit/integration/RTL + E2E green; every referenced US-078 AC mapped to explicit evidence (self-audit table below) |
 | W8 | Undo snackbar for archive-card and archive-list only, via real restore Server Actions; parent-list-archived race fails safe | W8 undo E2E green; race guard integration + two-client test green; non-goal matrix tested as denied/absent |
 
@@ -178,7 +196,7 @@ row to cite its evidence.
 
 | Referenced AC (retained in) | Incorporated by | Evidence target (must cite at close) |
 | --- | --- | --- |
-| US-077 AC1 — `/today` shows cards assigned to the user across all boards in the active workspace | W6 | W6 integration (query scoping) + E2E `e2e/today.spec.ts` |
+| US-077 AC1 — `/today` shows cards assigned to the user across all boards in **every workspace the user is a member of** (cross-workspace interpretation locked by W6: workspace scope is derived server-side from the user's `WorkspaceMember` rows, never accepted from the client; the US-077 packet AC1 wording is amended accordingly) | W6 | W6 integration (query scoping, membership-derived `in` clause) + E2E `e2e/today.spec.ts` (cross-workspace card renders; foreign-workspace exclusion — assigned card in a workspace the viewer is not a member of never appears) — E2E 4/4 green 2026-08-02 |
 | US-077 AC2 — four sections: Overdue / Due Today / Due This Week / Later with exact date-window predicates | W6 | W6 unit `lib/today.test.ts` (boundary cases) + E2E section assertions |
 | US-077 AC3 — card tile opens the existing Card Detail Sheet or navigates to board/card context | W6 | W6 RTL (tile wiring) + E2E click-through |
 | US-077 AC4 — respects workspace membership and board authorization | W6 | W6 integration isolation cases (A2/A3-style) |

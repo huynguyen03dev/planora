@@ -96,6 +96,9 @@ features, so every feature demo is backed by the Stage 1 harness.
 | W1 E2E spec/helpers and focused validation | `w1-realtime-impl` | Handback | Stable handback delivered: hardened tripwire green, analytics sabotage RED at the observer assertion, final six-event GREEN (run log rows 15–17) |
 | Playwright server, PostgreSQL fixture data, Mailpit | `w1-realtime-impl` | **Released** | Final correction handback — the E2E seat is free for the next owner |
 | W2 E2E spec/helpers and focused validation (incl. all W2 Playwright runs and their fixture data) | `w2-invitation-live-badge` | **Handback — released** | W2 handback: live-badge proof green, sabotage RED at the observer assertion (run log rows 8–12), sabotage fully restored, seat free for W4/W5 |
+| W4 doc reconciliation + focused E2E evidence (`e2e/automation-log-retention.spec.ts`) | `w4-retention-reconcile` | **Handback — released** | W4 handback (2026-08-02): focused retention spec green (1 passed, 32.5s), stale claims fixed with schema/migration/E2E citations, `git diff --check` clean; seat free for W5 |
+| W5 tracker/harness truth reconciliation (backlog.md, IN-04, TEST_MATRIX, product docs, harness story/decision rows, audit evidence) | `w5-tracker-reconcile` | **Handback — released** | W5 handback (2026-08-02): audit evidence recorded in validation.md, touched files carry no claim contradicting harness rows, decisions 0029/0030 durable rows added, US-066/075 harness rows reconciled to implemented (US-075 `story verify` pass), `git diff --check` clean; seat free for W6 |
+| W6 E2E focused run (`e2e/today.spec.ts`) + Playwright shared server, local Postgres/Mailpit, port 3000 | `today-e2e` | **Handback — released** | W6 handback (2026-08-02): focused today spec 4/4 green (1.1m, run log in the W6 section), one arrange-defect repair in `e2e/helpers/app.ts` (`createWorkspace` user-menu path for members with workspaces — RED mechanism in validation.md), server stopped, port 3000 free, fixtures cleaned, `git diff --check` clean; seat free for W7 |
 
 Read-only discovery for W2 and W4/W5 may continue, but implementation stays
 sequenced W1 → W2 → W4/W5. Protected inherited artifacts
@@ -284,6 +287,213 @@ itself (`invitation:new` type+emitter, action emit, combined resync action,
 header subscription) plus the pre-existing W1 `flow-chart-created-total`
 testid. No debug logs, no forced delays, no test-only branches.
 
+### W4 implementation progress (handback evidence)
+
+W4 reconciles the automation execution-log retention contract with the actual
+durable schema/behavior. All claims below were re-derived from production
+evidence (schema, migrations, code, tests) — the prior factual map was treated
+as a lead only.
+
+**Durable behavior (decisive evidence):** `prisma/schema.prisma`
+(`RuleExecutionLog`, lines 481–506): `workspaceId` + `ruleName` denormalized
+(NOT NULL), `ruleId String?`, workspace FK `onDelete: Cascade`, rule FK
+`onDelete: SetNull`, `@@unique([ruleId, dedupKey])`, `error String?`,
+`metadata Json?`. Migration
+`20260707021956_automation_logs_survive_rule_deletion` (committed `dc1fd0a`)
+switched the rule FK `CASCADE → SET NULL`, backfilled the denormalized columns
+before NOT NULL, and added the `[workspaceId, executedAt]` index — so logs
+**survive rule deletion** and are cleared **only by workspace deletion**. No
+production code deletes/prunes log rows (no `ruleExecutionLog.deleteMany`
+outside the generated client; no retention job). Every evaluation writes **one**
+row per matched rule per event (`lib/automation/evaluator.ts` `logExecution`
++ claim-first finalize; `lib/automation/effects.ts` `logRuleExecutionError`
+post-rollback; `actionType` is always `"sequence"`); per-step audit lands in
+`metadata.steps` only when ≥1 step failed (decision 0030). No `errorDetails`
+column exists. End-to-end runtime truth re-proven on 2026-08-02:
+`npm run test:e2e -- e2e/automation-log-retention.spec.ts` → **1 passed (32.5s)**
+(create rule → trigger → log visible → delete rule → reload → log still shows
+the denormalized rule name, no fallback text; fresh dev server per the W3
+policy, fixture cleaned up, E2E lock released).
+
+**Claims fixed (stale → current evidence):**
+
+| Stale claim (was) | Decisive current evidence | Fix landed in |
+| --- | --- | --- |
+| TEST_MATRIX "Known discrepancy: `deleteRuleAction` hard-deletes and `RuleExecutionLog` cascades (`onDelete: Cascade`), so deleting a rule removes its logs" | Migration `20260707021956_automation_logs_survive_rule_deletion` (SetNull + denormalization); schema lines 481–506; `e2e/automation-log-retention.spec.ts` re-run green; log panel now shows a `(deleted)` chip, the "Deleted rule" fallback is gone; delete-confirm copy matches behavior | `docs/TEST_MATRIX.md` row "Automation rule management Server Actions" |
+| US-066 execplan "Flagged discrepancy … the UI-copy vs schema conflict is left for the human to resolve" | Same migration + E2E; US-066 validation.md already records "RESOLVED 2026-07-07 (keep-logs)" | US-066 execplan step 9 narrative (annotated RESOLVED) |
+| US-066 design model block: `ruleId String` NOT NULL, rule FK `onDelete: Cascade`, no `workspaceId`/`ruleName`, `metadata` comment `{ dryRun?; matchedConditions? }` | Shipped schema (above) + migration | US-066 design.md domain bullet + `RuleExecutionLog` block (now the shipped shape) |
+| `docs/product/automation.md`: "writes `RuleExecutionLog` rows (one per action step)" | `lib/automation/evaluator.ts` / `effects.ts`: one row per rule evaluation; `metadata.steps` only on failure (decision 0030) | `docs/product/automation.md` Model section |
+| `docs/product/automation.md` US-075 roadmap: diagnostic details `errorDetails` | No such column; actual fields `error` (summary string) + `metadata.steps` (structured codes); US-075 implemented (decision 0030) | `docs/product/automation.md` US-075 section (now implemented-state) |
+| "Append-only" wording with no documented window | No prune/retention job exists; rows clear only via workspace cascade | `docs/product/automation.md` Model section + US-066 design.md (window explicitly documented as absent) |
+
+No new retention window, `errorDetails` field, or cascade behavior was
+invented — every fixed claim cites the schema/migration/code/E2E evidence it
+now matches. No code or schema changes were needed; the product contract and
+the docs now agree (the delete-confirm copy "Past execution-log entries are
+kept" was already accurate post-fix).
+
+### W5 implementation progress (handback evidence)
+
+W5 reconciles the tracker/docs/TEST_MATRIX truth the story depends on and
+records harness audit evidence proportionate to scope. All claims below were
+personally observed on 2026-08-02 via the harness CLI against `harness.db`
+(`harness.db.bak-20260714-105049` and `tmp/` untouched).
+
+**Durable-layer changes (harness story rows):**
+
+- `harness-cli story update US-083 --status in_progress --unit 1 --integration 1 --e2e 1 --platform 0`
+  — Stage 1 W1–W5 landed (W4/W5 uncommitted on the feature branch); evidence
+  field records the W1–W3 commits, the W4 E2E reference, and this pass;
+  notes field rewritten to in-progress state (via
+  `query sql` UPDATE scoped to `id = 'US-083'` — `story update` exposes no
+  notes flag).
+- `harness-cli story update US-066 --status implemented` — was `planned` with
+  zero proof flags while TEST_MATRIX marks the engine/scheduled/rule-mgmt/UI
+  rows implemented (PR #78 + dc1fd0a). Evidence: TEST_MATRIX case counts
+  (101/8/34 + US-068 RTL) + `e2e/automation-log-retention.spec.ts` green
+  2026-08-02. No verify_command configured (none exists for US-066).
+- `harness-cli story update US-075 --status implemented --unit 1 --integration 1`
+  — was `planned` while the failure-isolation work landed via PR #92
+  (cc23e69 + dc0fb4a) and decision 0030 is Accepted. `harness-cli story verify US-075`
+  ran the configured command → **pass** (4 tests, 1.33s;
+  `tests/server-actions/automation-failure-isolation.test.ts`);
+  `last_verified_at`/`last_verified_result` recorded. E2E proof still absent
+  (documented gap, TEST_MATRIX row).
+- `harness-cli query sql "UPDATE story SET notes = '…' WHERE id = 'US-075'"`
+  — US-075 notes field rewritten from the stale "Planned / implementation
+  unstarted" to the implemented/verified + decision 0030 state (same
+  scoped `query sql` UPDATE mechanism as the US-083 notes; `story update`
+  exposes no notes flag).
+- `harness-cli trace --summary "…" --story US-083 --agent pi-implementer
+  --outcome completed --actions '…' --changed '…' --notes "…"` — this pass
+  recorded as trace id 3 (US-083); the trace is what clears US-083 from the
+  orphaned list (in_progress status alone keeps it orphan-class until a
+  linked trace exists).
+
+**Decision rows (recorded drift closed):** decisions 0029 and 0030 existed
+only as `docs/decisions/*.md` files with **no durable rows**. Added via
+`harness-cli decision add` with doc paths + status accepted:
+
+- `0029-permanent-delete-cloudinary-attachment-guard` — Permanent Delete
+  Cloudinary Attachment Guard.
+- `0030-automation-rule-failure-isolation-semantics` — Automation Rule Failure
+  Isolation Semantics.
+
+Verified with `harness-cli query decisions` (both rows present, doc_path set)
+and `harness-cli query sql`.
+
+**Tracker files reconciled (changed this pass):**
+
+| File | Stale claim (was) | Now |
+| --- | --- | --- |
+| `docs/stories/backlog.md` | US-083 `planned (unstarted)`; US-075 `planned (unstarted)`; E08 `planned (US-083 planned)` | US-083 `in progress (Stage 1 W1–W5 landed — W4/W5 uncommitted on the feature branch; W6–W8 pending)`; US-075 `implemented (PR #92, decision 0030; E2E not implemented)`; E08 `planned (US-083 in progress)` |
+| IN-04 | Status line `planned — implementation unstarted`; US-083/US-075 rows `planned (unstarted)` | in-progress status line; rows match backlog.md |
+| `docs/TEST_MATRIX.md` | US-083 row said `W2 landed (uncommitted on the feature branch)` (W2 is committed 3f238be); E2E cell `planned (W6–W8)`; Status cell `planned` | W2 `(committed 3f238be)`; E2E `implemented (W1, W2, W4); planned (W6–W8)`; Status `in_progress`; W5 evidence sentence appended |
+| `docs/product/overview.md` | `US-083 (high-risk, planned)` | `(high-risk, in progress)` + Stage 1/2 split |
+| `e2e/realtime-comment-list-reorder.spec.ts` | header claimed the six events still lack dedicated cross-client proof | re-pointed to `e2e/realtime-event-proof.spec.ts` (W1, committed 937e75f) |
+| US-083 packet (overview/execplan/validation) | W5 row unwritten; W5-audit evidence absent; W1–W3 bullets recording-time only | W5 marked landed; audit/matrix evidence recorded (validation.md); closure markers on W1–W3 bullets |
+
+**Scope decision (governing docs, not blind expansion):** execplan W5 names
+`docs/stories/backlog.md`, IN-04, TEST_MATRIX, `docs/product/overview.md`,
+`docs/product/notifications.md`, harness story rows, decision rows
+(0029/0030), US-077/078 retirement wording, and audit evidence. US-066/075
+harness rows are stale (planned vs TEST_MATRIX implemented) and TEST_MATRIX
+rows are touched by this story — the exit gate "touched files contain no claim
+that contradicts the harness rows they reference" makes reconciling them
+required, not optional. `docs/product/notifications.md` was already current
+(W2 committed 3f238be rewrote the unified-inbox section; verified no stale
+claim remains). US-077/078 harness rows were already `retired` with absorption
+notes. **US-075 packet status rewritten to implemented** (the packet is a
+W4-touched file — AC3 edit — and the gate requires touched files to carry no
+claim contradicting harness rows; its "planned — implementation unstarted"
+Status/Evidence/Future-Decision-Gate lines are now implemented-state with
+PR #92 + decision 0030 + verify-pass citations). **US-066 overview.md status
+was rewritten in the W5 closure pass** ("planned (high-risk) — new feature
+intake" → implemented with PR #78 + dc1fd0a citations): the packet was not in
+the W5 working-tree diff (only design.md/execplan.md were, and neither
+carries a status line), so the W5 gate did not reach it — the closure pass
+removed the contradiction before handback.
+
+**Audit evidence (personally observed, before → after):**
+
+| Metric | Before | After story-row/decision reconciliation | After W5 trace recorded (final) |
+| --- | --- | --- | --- |
+| Orphaned stories (planned/in-progress, no traces) | 15 | 13 | 12 |
+| Unverified stories | 34 | 33 | 33 |
+| Unverified decisions | 3 | 3 | 3 |
+| Open backlog without outcomes | 0 | 0 | 0 |
+| Stale stories / broken tools | 0 / 0 | 0 / 0 | 0 / 0 |
+| Entropy score | 100/100 | 100/100 | 100/100 |
+
+US-066 left only the orphaned list — via its status change (planned →
+implemented; it has no verify_command, so it was never on the unverified
+list). US-075 left the orphaned list via status and the unverified list via
+`story verify` (pass). US-083 left
+the orphaned list once this W5 pass was recorded as a trace (verified via
+grep of the full audit output; US-083 remains on the unverified list because
+its verify_command is the W6–W8 file subset that cannot run until those files
+land — see validation.md). The three unverified decisions (0011/0012/0019)
+are pre-existing and out of W5 scope. Residual audit drift after W5: the 12
+remaining orphaned stories and 33 unverified stories are other epics' rows,
+not touched by this story; they are recorded here as known broader drift, not
+fixed in W5.
+
+**Static checks** — `git diff --check` clean on the W5 doc diff.
+
+> **Non-blocking chronology annotation (accepted 2026-08-02):** the W5
+> command list in validation.md spans **two moments and is not
+> chronological**. The US-075 notes UPDATE and the US-066 overview.md status
+> rewrite were **closure-pass work after trace id 3 (after the W5 audit)**;
+> they are grouped with the pre-trace commands for readability. The audit
+> numbers above reflect the pre-closure state; the closure pass removed the
+> last two residual contradictions and is documented in validation.md's
+> residual-gaps list.
+
+### W6 implementation progress (handback evidence)
+
+W6 (Today / My Work cross-workspace read model) landed 2026-08-02,
+uncommitted on the feature branch. RED-first TDD: the five W6 test files
+were authored against non-existent production modules and observed RED
+before implementation (`lib/today` module-missing, `lib/today-query`
+module-missing, `today-view`/`today-nav-link` module-missing, and a
+behavioral RED — the authenticated layout rendered but had no "Today" link),
+then GREEN: `lib/today.test.ts` + `tests/server-actions/today.test.ts`
+23/23, components RTL 12/12, adjacent header suite 4/4, `tsc --noEmit`
+clean (one correction pass: the generated `Card` has no direct `board`
+relation — the select goes through `list.board`), changed-file ESLint
+clean, `git diff --check` clean. `e2e/today.spec.ts` authored (four buckets
+across two workspaces incl. the exact +7/+8 boundary arrangements,
+deep-link sheet, card-archive + board-archive refresh removal, unassigned
+excluded, foreign-workspace exclusion — an assigned card in a workspace the
+viewer is not a member of never appears — both empty states). E2E run
+2026-08-02 under the shared-server lock: **4/4 green (1.1m)** — run log
+below.
+
+Exact run log (2026-08-02, personally observed; command
+`npm run test:e2e -- e2e/today.spec.ts`):
+
+| # | Code state | Run | Result |
+| --- | --- | --- | --- |
+| 1 | authored spec, pre-repair | full spec | **1 failed, 3 passed** — RED at test 1's second `createWorkspace(page, "Globex")`: 60s timeout waiting for the "Create workspace" button |
+| 2 | spec-side `goto("/boards")` workaround | focused `-g "assigned cards across workspaces"` | **1 failed — same RED**: the button exists only in the zero-workspace empty state; a member with workspaces creates one from the user-menu dropdown (mechanism: helper contract silently assumed the post-signup empty state, the only state prior specs exercised) |
+| 3 | helper repair (user-menu fallback), spec workaround reverted | focused `-g "assigned cards across workspaces"` | 1 passed (29.3s) |
+| 4 | final code | full spec | **4 passed (1.1m)** |
+
+Typecheck, changed-file ESLint, and `git diff --check` clean after the
+repair. `e2e/helpers/app.ts` is the only E2E-side change; the
+zero-workspace direct-button fast path is unchanged, so prior specs are
+unaffected (their calls still take that path). No product/schema/realtime
+code touched. A W6 corrections pass hardened
+hydration (time-dependent grouping renders only after a client-mounted
+boundary — deterministic SSR skeleton, no suppressHydrationWarning), pinned
+date labels to the en-US English UI, added the RSC page-wiring test, removed
+dead `startOfDayLocal`, and recorded the unbounded personal read model (no
+pagination) as a residual follow-up — details in validation.md (W6 section).
+US-077 AC1 + the self-audit row are amended
+to the locked cross-workspace membership-scoped interpretation; product
+section-name drift reconciled. Full evidence chain in validation.md (W6
+section).
+
 1. **W3 — Demo determinism (foundation first).** Wrap existing seeds into a
    repeatable `demo:seed` / `demo:reset` workflow: fixed logical fixture
    (users, workspace, board payload, card counts, relative due dates) with a
@@ -329,6 +539,7 @@ testid. No debug logs, no forced delays, no test-only branches.
    proportional to scope.
    *Exit gate:* audit output recorded; touched files contain no claim that
    contradicts the harness rows they reference.
+   **Landed 2026-08-02** — see the W5 implementation progress section above.
 6. **W6 — Today / My Work.** Read-model query + `/today` page + grouping
    helpers; archive/membership/isolation rules; every US-077 packet AC
    (retained) mapped to evidence per the overview self-audit table.

@@ -21,14 +21,19 @@ A `Rule` (per workspace) carries: `name`, optional `description`, `enabled`,
 `position` orders the rule list; `createdBy` records the author. Rules cascade
 with their workspace, and a board-scoped rule cascades with its board.
 
-Every evaluation writes `RuleExecutionLog` rows (one per action step) with
-`status`, `chainId`, `chainDepth`, optional `error`, `dedupKey`, and
-`metadata` — the audit trail behind the execution-log panel. Log rows **survive
-their rule's deletion**: the rule FK is `onDelete: SetNull` (so `ruleId` goes
-null), and `workspaceId` + `ruleName` are denormalized onto the row (the
-`CardHistoryEvent` survival pattern) so the entry stays workspace-scoped and
-keeps showing the rule's name after deletion. Logs still cascade with their
-**workspace**.
+Every rule evaluation writes one `RuleExecutionLog` row — one per matched
+rule per event, not per action step (`actionType` is always `"sequence"`;
+scheduled dedup claims are finalized in place). Each row carries `status`,
+`chainId`, `chainDepth`, optional `error`, `dedupKey`, and `metadata` — the
+audit trail behind the execution-log panel; a per-step `steps` audit array is
+written into `metadata` only when ≥1 step failed (decision 0030). There is **no
+retention/prune window**: nothing deletes log rows except workspace deletion.
+Log rows **survive their rule's deletion**: the rule FK is `onDelete: SetNull`
+(so `ruleId` goes null), and `workspaceId` + `ruleName` are denormalized onto
+the row (the `CardHistoryEvent` survival pattern) so the entry stays
+workspace-scoped and keeps showing the rule's name after deletion (the log
+panel marks orphaned rows with a `(deleted)` chip). Logs still cascade with
+their **workspace** — deleting a workspace clears its logs.
 
 ## Triggers
 
@@ -187,11 +192,22 @@ and the full Server Action security boundary + business logic
 (`tests/server-actions/automation-rules.test.ts`). The management UI (React
 components) has no automated coverage — the standing no-RTL gap.
 
-## Failure Isolation & Stale Targets (Roadmap US-075)
+## Failure Isolation & Stale Targets (US-075 — implemented, decision 0030)
 
-- **Failure Isolation:** Rule action execution failures (e.g. missing target lists, unassigned members, or deleted labels) are handled gracefully so they do not crash the primary user card edit or corrupt transaction state.
-- **Diagnostic Logging:** Every execution attempt writes structured status (`partially_failed` or `failed`) and diagnostic details (`errorDetails`) to `RuleExecutionLog`.
-- **Decision Gate (Inside Packet):** Resolves Strict Rollback (Option A) vs Best-Effort Continuation (Option B) for multi-action step failures prior to implementation.
+- **Failure Isolation:** Rule action execution failures (e.g. missing target
+  lists, unassigned members, or deleted labels) are handled gracefully per
+  step — a structured stale-target `RuleExecutionError` is audited and the
+  remaining independent steps still run; the user's primary card edit commits.
+  Unexpected (non-`RuleExecutionError`) errors still abort the transaction and
+  write a post-rollback `error` row.
+- **Diagnostic Logging:** Overall status is `success` / `partially_failed` /
+  `failed`, and the per-step audit (structured code + stale target id) lands
+  in `RuleExecutionLog.metadata` (`steps` array). There is **no `errorDetails`
+  column** — the human-readable summary is the `error` field.
+- **Decision gate resolved:** Strict Rollback (Option A) vs Best-Effort
+  Continuation (Option B) was decided as best-effort continuation with
+  isolated steps (decision 0030); full proof in `docs/TEST_MATRIX.md` row
+  "Automation rule failure isolation & stale target handling".
 
 ## Trigger Expansion (Roadmap US-080)
 

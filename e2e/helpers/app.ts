@@ -31,9 +31,20 @@ export async function signUp(page: Page, creds: Creds): Promise<void> {
   await page.waitForURL(/\/boards/, { timeout: 30_000 });
 }
 
-/** Create a workspace from the boards page; returns its id (from the URL). */
+/** Create a workspace; returns its id (from the URL). */
 export async function createWorkspace(page: Page, name: string): Promise<string> {
-  await page.getByRole("button", { name: /create workspace/i }).first().click();
+  // The zero-workspace empty boards page shows a direct button; a member with
+  // workspaces creates one from the user-menu dropdown instead. Both open the
+  // same create-workspace dialog.
+  const direct = page
+    .getByRole("button", { name: /create workspace/i })
+    .first();
+  if (await direct.isVisible().catch(() => false)) {
+    await direct.click();
+  } else {
+    await page.locator("button:has([data-slot='avatar'])").click();
+    await page.getByRole("menuitem", { name: "Create workspace" }).click();
+  }
   await page.locator("#workspaceName").fill(name);
   await page.getByRole("button", { name: /^create$/i }).click();
   await page.waitForURL(/\/boards\?workspace=/, { timeout: 30_000 });

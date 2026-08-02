@@ -55,6 +55,31 @@ copy stays faithful to the real roles. (Surfaced during US-007: `editor` cannot
 *create* boards — `board:["update"]` only — and this table was corrected to
 match.)
 
+## Personal cross-workspace reads (`/today`, US-083 W6)
+
+The one read path that intentionally spans workspaces is the personal
+`/today` view. Isolation rules (locked):
+
+- **Scope is membership-derived, server-side.** The page resolves the
+  caller's `WorkspaceMember` rows (`lib/today-query.ts`
+  `getPersonalWorkCards(userId)`) and scopes the card query to those
+  workspace ids with `workspaceId: { in: <memberships> }`. The query never
+  accepts a workspace id from the client — a caller-supplied id could widen
+  the read past their memberships, so the read model takes only `userId`.
+- **Live-card contract:** a card appears only when its own
+  `archivedAt`/`deletedAt`/`completedAt` are null, its containing list's
+  `archivedAt` is null, its board's `archivedAt` is null, and it is assigned
+  to the caller (`members: { some: { userId } }`). One membership query + one
+  bounded card query; no N+1.
+- **Read-only, viewer-inclusive:** any role (admin/editor/viewer) can read
+  their own `/today`; the view offers no mutations.
+
+Proof: `tests/server-actions/today.test.ts` (query shape: membership-derived
+`in` clause, live-card filters, bounded select, zero-membership empty model,
+single-query/no-N+1) + `lib/today.test.ts` (bucket predicates) + RTL
+(`components/today/`) + `e2e/today.spec.ts` (cross-workspace card renders,
+unassigned/archived excluded).
+
 ## Members & invitations
 
 - **Workspace shell (US-063):** `/workspace/[slug]` renders a left sidebar

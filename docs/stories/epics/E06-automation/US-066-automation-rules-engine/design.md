@@ -9,11 +9,18 @@
   parameters). Tracks `enabled` boolean, `position` float for same-trigger
   ordering, and standard timestamps.
 
-- **RuleExecutionLog** — an append-only record of every rule evaluation attempt.
-  Carries `ruleId`, `cardId` (if card-scoped), `status` (success/skipped/error/halted), `dedupKey` (scheduled-trigger idempotency),
-  `error` message on failure, `chainId` (correlation id for loop-prevention
-  tracing), and `chainDepth` at the time of execution. Indexed on `ruleId` and
-  `cardId` for querying.
+- **RuleExecutionLog** — an append-only record of every rule evaluation attempt
+  (append-only in practice: no prune/retention window exists; rows are cleared
+  only when their workspace is deleted). Carries denormalized `workspaceId` +
+  `ruleName` (so the audit row survives rule deletion), nullable `ruleId`
+  (`onDelete: SetNull`), `cardId` (if card-scoped), `status`
+  (success/partially_failed/failed/skipped/error/halted), `dedupKey`
+  (scheduled-trigger idempotency), `error` message on failure, `chainId`
+  (correlation id for loop-prevention tracing), and `chainDepth` at the time of
+  execution. Indexed on `workspaceId + executedAt`, `ruleId + executedAt`,
+  `cardId`, and `chainId` for querying. Shipped shape after the retention fix
+  (migration `20260707021956_automation_logs_survive_rule_deletion`); see
+  validation.md.
 
 - **Loop prevention** — four-layer mechanism:
   1. **Chain correlation id** (`chainId: string`) — a UUID generated at the root
@@ -257,21 +264,28 @@ model Rule {
 
 model RuleExecutionLog {
   id          String   @id @default(uuid())
-  ruleId      String
+  // Shipped state (US-083 W4 reconciled): denormalized workspaceId + ruleName
+  // so the audit row survives rule deletion; ruleId is nullable and the rule
+  // FK is SetNull (migration 20260707021956_automation_logs_survive_rule_deletion).
+  workspaceId String
+  ruleId      String?
+  ruleName    String
   chainId     String?  // correlation id for loop-prevention tracing
   chainDepth  Int      @default(0)
   cardId      String?
-  actionType  String   // action step type executed; "sequence" for a multi-step rule-fire summary
+  actionType  String   // "sequence" — one summary row per rule evaluation, not per step
   triggerType String
-  status      String   // "success" | "skipped" | "error" | "halted"
+  status      String   // "success" | "partially_failed" | "failed" | "skipped" | "error" | "halted"
   error       String?
   dedupKey    String?  // scheduled-trigger idempotency: @@unique([ruleId, dedupKey])
-  metadata    Json?    // { dryRun?: boolean; matchedConditions?: boolean; }
+  metadata    Json?    // per-step audit { steps: [...] } written when >=1 step failed (decision 0030)
   executedAt  DateTime @default(now())
 
-  rule Rule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  rule      Rule?     @relation(fields: [ruleId], references: [id], onDelete: SetNull)
 
   @@unique([ruleId, dedupKey])
+  @@index([workspaceId, executedAt])
   @@index([ruleId, executedAt])
   @@index([cardId])
   @@index([chainId])

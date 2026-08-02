@@ -10,7 +10,7 @@ normal
 
 ## Product Contract
 
-Provide a unified personal focus view (`/today` or `/my-work`) for logged-in workspace members. The page aggregates cards assigned to the current user across all authorized workspace boards, organized into clean chronological and priority sections (Overdue, Due Today, Due This Week, Later / No Due Date).
+Provide a unified personal focus view (`/today` or `/my-work`) for logged-in workspace members. The page aggregates cards assigned to the current user across **every workspace the user is a member of** (cross-workspace read model; see the AC1 amendment below), organized into clean chronological and priority sections (Overdue, Due Today, Due This Week, Later / No Due Date).
 
 **Architecture Contract:**
 US-077 is strictly a **read model** constructed dynamically from existing `Card`, `CardMember`, `dueDate`, `priority`, and `archivedAt` fields across authorized boards. **Do not invent a new domain table or database entity.**
@@ -23,7 +23,7 @@ US-077 is strictly a **read model** constructed dynamically from existing `Card`
 
 ## Acceptance Criteria
 
-1. Navigating to `/today` displays cards assigned to the authenticated user across all boards in the active workspace.
+1. Navigating to `/today` displays cards assigned to the authenticated user across **all boards in every workspace the user is a member of**. *(AC1 amended 2026-08-02 by US-083 W6 — locked cross-workspace interpretation: workspace scope is derived server-side from the session user's `WorkspaceMember` rows and never accepted from the client, so the view is personal and membership-scoped, not "active workspace"-scoped; the section-name contract below uses the locked bucket names.)*
 2. Cards are grouped into four clear visual sections:
    - **Overdue:** Due date is in the past (`dueDate < startOfDay(now)` and `completedAt == null`).
    - **Due Today:** Due date falls on today (`startOfDay(now) <= dueDate <= endOfDay(now)`).
@@ -37,8 +37,8 @@ US-077 is strictly a **read model** constructed dynamically from existing `Card`
 ## Design Notes
 
 - **Route:** `app/(authenticated)/(dashboard)/today/page.tsx`.
-- **Queries:** `getPersonalWorkCardsQuery({ workspaceId, userId })` using Prisma `findMany` over `Card` with `where: { list: { board: { workspaceId, archivedAt: null } }, archivedAt: null, members: { some: { userId } } }`.
-- **UI Surfaces:** Personal Work Dashboard layout, section headers with card count badges, compact card tiles using existing shadcn primitives.
+- **Queries:** `getPersonalWorkCards(userId)` (US-083 W6 implementation of the planned `getPersonalWorkCardsQuery({ workspaceId, userId })` — the workspace parameter is deliberately dropped: membership-derived server-side, cross-workspace by lock) using Prisma `findMany` over `Card` with `where: { archivedAt: null, deletedAt: null, completedAt: null, members: { some: { userId } }, list: { archivedAt: null, board: { archivedAt: null, workspaceId: { in: <memberships> } } } }` — one membership query + one bounded card query, no N+1.
+- **UI Surfaces:** Personal Work Dashboard layout, section headers with card count badges, compact card tiles using existing shadcn primitives. Section names (locked): **Overdue / Due Today / Due This Week / Later** with exact calendar-day predicates (diff < 0 / 0 / 1..7 / ≥8 or none) computed in the viewer's local time.
 
 ## Validation
 

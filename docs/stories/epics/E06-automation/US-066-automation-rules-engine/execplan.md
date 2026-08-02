@@ -331,13 +331,19 @@ Hard gates (→ high-risk):
     filter), `notifications.md` (`notify-member` post-commit + reminder dedup);
     added `automation.md` to `docs/product/README.md`. Added 4 rows +
     a US-066 Coverage-Snapshot bullet to `TEST_MATRIX.md` (engine 101 / scheduled
-    8 / rule-management Server Actions 34 = 143 cases; UI untested). **Flagged
-    discrepancy** (recorded in the rule-management matrix row): `deleteRuleAction`
-    hard-deletes and `RuleExecutionLog` cascades, so deleting a rule removes its
-    logs — contradicts the delete-confirm copy "Past execution-log entries are
-    kept" and the log panel's dead "Deleted rule" fallback. Docs describe the
-    actual (cascade) behavior; the UI-copy vs schema conflict is left for the
-    human to resolve.
+    8 / rule-management Server Actions 34 = 143 cases; UI untested). **~~Flagged
+    discrepancy~~ — RESOLVED 2026-07-07 (keep-logs), confirmed US-083 W4:** at
+    US-066 landing time `deleteRuleAction` hard-deleted and `RuleExecutionLog`
+    cascaded, so deleting a rule removed its logs — contradicting the delete-confirm
+    copy "Past execution-log entries are kept" and the then-dead "Deleted rule"
+    fallback. Resolved by migration
+    `20260707021956_automation_logs_survive_rule_deletion`: `workspaceId` +
+    `ruleName` denormalized onto the log, `ruleId` made nullable, rule FK switched
+    `Cascade → SetNull` (backfilled); the workspace FK remains `Cascade`. The old
+    fallback was later replaced by a `(deleted)` chip in the log panel, so the UI
+    copy and schema now agree. End-to-end proof: `e2e/automation-log-retention.spec.ts`
+    (focused re-run 2026-08-02 green). See validation.md (RESOLVED) and
+    `docs/TEST_MATRIX.md` row "Automation rule management Server Actions".
 
 11. **Verification** — run the full test matrix; story proof + acceptance
     evidence; decision 0022 verification.
