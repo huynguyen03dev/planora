@@ -99,6 +99,7 @@ type FixtureList = Omit<ManifestList, "cards"> & {
 type FixtureBoard = Omit<ManifestBoard, "lists"> & {
   backgroundColor: string;
   lists: FixtureList[];
+  createdAt: Date;
 };
 
 export type DemoFixturePlan = {
@@ -192,7 +193,7 @@ export function buildDemoFixturePlan(
   collaborator: DemoFixtureUser,
   now: Date,
 ): DemoFixturePlan {
-  const boards: FixtureBoard[] = [
+  const boardPlans = [
     {
       id: randomUUID(),
       title: "Product Roadmap",
@@ -268,6 +269,16 @@ export function buildDemoFixturePlan(
     },
   ];
 
+  // Board order must be deterministic: quick capture's default board is the
+  // first creatable one, ordered by board createdAt then id. Nested creates
+  // inside one transaction share the same now(), so without an explicit
+  // createdAt the random-UUID id tiebreak would decide the order — the demo
+  // path's capture target would flip between seeds. Pin 1ms-offset values.
+  const boards = boardPlans.map((plan, index) => ({
+    ...plan,
+    createdAt: new Date(now.getTime() + index),
+  }));
+
   const manifestBoards = boards.map((boardItem) => ({
     id: boardItem.id,
     title: boardItem.title,
@@ -290,7 +301,11 @@ export function buildDemoFixturePlan(
       version: 1,
       generatedAt: now.toISOString(),
       workspace: {
-        id: randomUUID(),
+        // App workspaceId schemas (invitation/board/automation) require the
+        // Better-Auth 32-char id format; a UUID here would make invites, board
+        // creation, and rules fail with "Invalid workspace ID" in the demo
+        // workspace (caught by the demo rehearsal — run log).
+        id: randomUUID().replace(/-/g, ""),
         slug: DEMO_FIXTURE_SLUG,
         name: "Planora US-083 Demo",
       },
@@ -389,6 +404,7 @@ export async function seedDemoFixture(
             title: boardItem.title,
             backgroundColor: boardItem.backgroundColor,
             createdById: owner.id,
+            createdAt: boardItem.createdAt,
             lists: {
               create: boardItem.lists.map((listItem, listIndex) => ({
                 id: listItem.id,

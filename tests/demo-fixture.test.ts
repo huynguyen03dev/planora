@@ -198,3 +198,71 @@ describe("demo fixture safety", () => {
     expect(db.workspace.delete).not.toHaveBeenCalled();
   });
 });
+
+describe("US-083 fixture contracts (rehearsal-caught, 2026-08-02)", () => {
+  // Regression guards for the two defects the demo rehearsal caught:
+  // 1. the workspace id must be in the app's 32-char alphanumeric format
+  //    (^[A-Za-z0-9]{32}$, lib/schemas/invitation.ts + board.ts +
+  //    automation.ts) — a UUID made invites, board creation, and automation
+  //    rules fail with "Invalid workspace ID" in the demo workspace;
+  // 2. board createdAt is pinned 1ms apart in fixture order so "Product
+  //    Roadmap" deterministically precedes "Team Operations" — quick
+  //    capture's default board (first creatable, ordered by createdAt then
+  //    id) would otherwise flip between seeds on the random-UUID tiebreak.
+  const now = new Date("2026-08-02T10:00:00.000Z");
+
+  it("seeds the workspace id in the app's 32-char alphanumeric format", () => {
+    const plan = buildDemoFixturePlan(owner, collaborator, now);
+    expect(plan.manifest.workspace.id).toMatch(/^[A-Za-z0-9]{32}$/);
+  });
+
+  it("pins board createdAt 1ms apart: Product Roadmap before Team Operations", () => {
+    const plan = buildDemoFixturePlan(owner, collaborator, now);
+    const [first, second] = plan.boards;
+    expect(first.title).toBe("Product Roadmap");
+    expect(second.title).toBe("Team Operations");
+    expect(first.createdAt.getTime()).toBe(now.getTime());
+    expect(second.createdAt.getTime()).toBe(now.getTime() + 1);
+  });
+
+  it("keeps the documented logical shape (2 boards / 5 lists / 7 cards)", () => {
+    const plan = buildDemoFixturePlan(owner, collaborator, now);
+    expect(plan.manifest.logicalShape).toEqual({ boards: 2, lists: 5, cards: 7 });
+  });
+
+  it("persists the 32-char workspace id and the pinned per-board createdAt through the seed write", async () => {
+    const created: Array<Record<string, unknown>> = [];
+    const tx = {
+      user: {
+        findMany: vi.fn(async () => [owner, collaborator]),
+      },
+      workspace: {
+        findUnique: vi.fn(async () => null),
+        delete: vi.fn(async () => ({})),
+        create: vi.fn(async (args: { data: Record<string, unknown> }) => {
+          created.push(args.data);
+          return { id: args.data.id as string, slug: DEMO_FIXTURE_SLUG, metadata: null };
+        }),
+      },
+    };
+    const db = {
+      $transaction: async <T>(callback: (t: typeof tx) => Promise<T>): Promise<T> =>
+        callback(tx),
+    } as unknown as DemoFixtureDb;
+
+    const { manifest } = await seedDemoFixture(db, {
+      ownerEmail: owner.email,
+      collaboratorEmail: collaborator.email,
+      now,
+    });
+
+    expect(manifest.workspace.id).toMatch(/^[A-Za-z0-9]{32}$/);
+    expect(created[0].id).toBe(manifest.workspace.id);
+
+    const boards = (created[0].boards as { create: Array<{ title: string; createdAt: Date }> })
+      .create;
+    expect(boards.map((board) => board.title)).toEqual(["Product Roadmap", "Team Operations"]);
+    expect(boards[0].createdAt.getTime()).toBe(now.getTime());
+    expect(boards[1].createdAt.getTime()).toBe(now.getTime() + 1);
+  });
+});

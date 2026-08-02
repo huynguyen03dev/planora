@@ -37,12 +37,21 @@ deterministic UI state) — none are aspirational. Proof is layered:
 ## Fixtures
 
 - Repeatable demo fixture (W3): demo-owner + 1 collaborator, one workspace,
-  two boards ("Product Roadmap", "Sprint"), fixed lists/cards with relative
-  due dates (pinned reference day), one archived card, one archived list, one
-  pending invitation — produced by the W3 seed wrapper and reset between runs.
-  Determinism is **logical**: shape/counts/titles/relative dates must repeat;
-  DB UUIDs differ per run (seeds use `randomUUID()`) and are exposed via the
-  W3 machine-readable manifest, unless implementation deliberately pins ids.
+  two boards ("Product Roadmap", "Team Operations"), five lists, seven cards
+  with relative due dates (pinned reference day: +0 / +1 / +3 / -2 / -3 / +7 /
+  none) and one completed card per board — produced by the W3 seed wrapper and
+  reset between runs. The fixture deliberately does NOT pre-create archived
+  cards/lists or a pending invitation: archive→undo and the live invitation
+  badge are performed live during the demo/rehearsal through the real UI. The
+  workspace id is seeded in the app's 32-char workspace-id format (the
+  invitation/board/automation schemas reject UUIDs — see the rehearsal
+  section); board `createdAt` values are pinned 1ms apart so the demo path's
+  quick-capture default board (first creatable = "Product Roadmap") is
+  deterministic (same-timestamp nested creates used to fall to the random-UUID
+  id tiebreak — rehearsal-caught fix). Determinism is **logical**:
+  shape/counts/titles/relative dates must repeat; ids differ per run (seeds
+  use `randomUUID()`) and are exposed via the W3 machine-readable manifest,
+  unless implementation deliberately pins ids.
 - E2E accounts: fresh `signUp()` users per run (existing `e2e/helpers` pattern;
   email verification via the Mailpit sink, `e2e/helpers/mail.ts`).
 - Real two-account invite: inviter account + invitee account (separate browser
@@ -50,18 +59,21 @@ deterministic UI state) — none are aspirational. Proof is layered:
 
 ## Commands
 
-**Focused node unit/integration subset** (planned; this is the story's
-`verify_command` — a fast node-env subset, NOT the story's single/full gate).
-Files land with their workstreams; the command only passes once every listed
-file exists:
+**Focused node unit/integration subset** (this is the story's
+`verify_command` — a fast node-env subset, NOT the story's single/full gate):
 
 ```bash
-npx vitest run lib/today.test.ts lib/quick-capture.test.ts lib/undo.test.ts lib/notifications/inbox.test.ts tests/server-actions/today.test.ts tests/server-actions/quick-capture.test.ts tests/server-actions/undo-restore.test.ts tests/server-actions/invitation-live.test.ts
+npx vitest run lib/today.test.ts lib/quick-capture.test.ts lib/undo.test.ts lib/invitation.test.ts lib/notifications/inbox.test.ts tests/server-actions/today.test.ts tests/server-actions/quick-capture.test.ts tests/server-actions/undo-restore.test.ts
 ```
 
-(`lib/notifications/inbox.test.ts` is the planned W2 badge-count unit surface
-for `computeInboxBadgeCount`; the file exists today and gains the W2 delta
-cases.)
+**Repair (final close, 2026-08-02):** the originally planned command listed
+`tests/server-actions/invitation-live.test.ts` — a phantom file that does not
+and will not exist (locked decision: no redundant live-invitation unit file
+was created). The W2 invitation surfaces live in `lib/invitation.test.ts`
+(`getPendingInvitationCount`, 3) and `lib/notifications/inbox.test.ts`
+(`computeInboxBadgeCount` + `buildInboxItems`, 8); the command now points at
+those real files and is what `harness-cli story verify US-083` runs (green,
+8 files / 114 tests, recorded in the final-close section).
 
 **Full workstream exit additionally requires** (per workstream, not captured
 by the subset): RTL suites green (`npm test` components project), the
@@ -614,7 +626,8 @@ reliable demo path); W8 (bounded undo) is the next workstream. The full
 | 11 | in-transaction revalidation branch disabled in `restoreCardAction` (the race case asserts `card.update` never runs) | `npx vitest run tests/server-actions/undo-restore.test.ts` | **RED** — 1 failed at `race: parent list archived between pre-read and tx`; restored → 13/13 GREEN |
 | 12 | real-DB proof guard flipped OFF (WITH_GUARD=false) | `npx vitest run tests/db-undo-race-proof.test.ts` | **RED** — 2 failed: test 1 (the unguarded interleaving commits the invisible card) AND test 3 (no FOR UPDATE lock → the archiver's UPDATE no longer hits lock_timeout); test 2 is the unguarded control and stays green. Corrected after the proof-audit: test 3's lock acquisition was initially hardcoded (only test 1 went red); it is now wired through the same WITH_GUARD switch as the production protocol. Restored → 3/3 GREEN |
 
-`grep -c SABOTAGE` over the working tree at handback: 0.
+`grep -c SABOTAGE` over production/test code at handback: 0 (the packet's own
+evidence narrative legitimately uses the word).
 
 **Design realized (locked contract):**
 
@@ -705,7 +718,7 @@ shared-server lock; `deleteListAction` naming remains a legacy alias
 | C5 | `getCardArchivedAt` conflated a missing row with a live card (both null). | Fail-closed: exactly one row required, else throws with the id + count. | Covered by the E2E helper's fail-loud contract; verified in the W8 E2E gate below (5/5 GREEN). |
 | C6 | Evidence typos: lib/undo count was 15 (actual 13), resolver count 2 (actual 3), guard-off DB sabotage reddened only test 1 (test 3's lock was hardcoded). | Counts corrected in the W8 tables (rows 5/12 above); test 3's lock acquisition wired through the WITH_GUARD switch and the sabotage re-run: **2 failed (tests 1 + 3) | 1 passed**, restored → 3/3. | Observed above (real Postgres). |
 
-Re-verified after the pass: `lib/undo.test.ts` 16, `tests/server-actions/undo-restore.test.ts` 13, `lib/card.test.ts` 18 (3 resolver), `components/undo/undo-snackbar.test.tsx` 14, `archive-card-dialog.test.tsx` 2, `list-column.test.tsx` 7, `tests/db-undo-race-proof.test.ts` 3, `quick-capture.test.ts` 18, `list-card.test.ts` 116 — all green (3+3+3 files = 47 + 23 + 137); `tsc --noEmit`, changed-file ESLint, `git diff --check` clean; zero SABOTAGE markers. Final gates: full `npm test` 1400 passed (90 files); W8 E2E 5/5 GREEN (gate section below).
+Re-verified after the pass: `lib/undo.test.ts` 16, `tests/server-actions/undo-restore.test.ts` 13, `lib/card.test.ts` 18 (3 resolver), `components/undo/undo-snackbar.test.tsx` 14, `archive-card-dialog.test.tsx` 2, `list-column.test.tsx` 7, `tests/db-undo-race-proof.test.ts` 3, `quick-capture.test.ts` 18, `list-card.test.ts` 116 — all green (3+3+3 files = 47 + 23 + 137); `tsc --noEmit`, changed-file ESLint, `git diff --check` clean; zero SABOTAGE markers in production/test code. Final gates: full `npm test` 1400 passed (90 files); W8 E2E 5/5 GREEN (gate section below).
 
 
 ### W8 E2E gate — shared-server run (2026-08-02, lock granted by Root; all personally observed)
@@ -732,3 +745,341 @@ de-export of `PARENT_LIST_ARCHIVED_MESSAGE` (module-private) — the 8s TTL and
 all W8 behavior otherwise untouched. Test-only changes: alert locator scoping,
 two-context sign-up, overlay-close helper + settle, and the earlier
 generation-race RTL/reducer fixes (all re-verified below).
+
+---
+
+## W3 exit gate — EXECUTED for real (final close, 2026-08-02)
+
+The W3 exit gate was run for real, not just planned: the two demo users were
+provisioned through the actual sign-up flow + Mailpit verification (decision
+0025 — no bypass), then the seed→reset→seed round trip was executed and the
+two runs compared logically.
+
+**User provisioning (real UI + Mailpit):** the two demo users were first
+provisioned for the round trip through a throwaway /tmp script driving the
+real sign-up form + Mailpit verification (initial execution, below). The
+rehearsal spec is now SELF-PROVISIONING (correction pass 2026-08-02): it
+signs both users up through the real flow itself when they are absent on the
+current database, so a fresh CI database needs nothing but Postgres + Mailpit
+(proven on a disposable database — see the correction-pass section).
+
+```bash
+# /tmp/provision-demo-users.ts (throwaway; imports repo helpers via a /tmp
+# node_modules symlink; Mailpit mailbox cleared first) — INITIAL execution
+npx tsx /tmp/provision-demo-users.ts
+# → provisioned+verified: owner@example.com (Demo Owner)
+# → provisioned+verified: collaborator@example.com (Demo Collaborator)
+# → PROVISION_OK
+```
+
+Both users verified through the real email flow; no verification was forged.
+(The script's first attempt failed on a relative-URL `page.goto` — test-script
+defect, fixed by prefixing the base URL; the partial unverified `owner`
+row created by that attempt was deleted before the clean re-run.)
+
+**Round trip (commands + observed results):**
+
+```bash
+npm run demo:seed -- --owner-email owner@example.com --collaborator-email collaborator@example.com
+# → Seeded reserved demo workspace: planora-us083-demo
+# → Workspace id: 98ed998e-… (run 1)
+# → Logical shape: 2 boards, 5 lists, 7 cards
+# → Manifest: .demo/fixture-manifest.json  (copied to /tmp/us083-manifest-run1.json)
+npm run demo:reset -- … # → Deleted reserved demo workspace 98ed998e-…
+npm run demo:seed -- …  # → Workspace id: 8f279808-… (run 2); manifest copied to /tmp/us083-manifest-run2.json
+```
+
+**Comparison (logical, ids may differ):** a throwaway script
+(`/tmp/compare-manifests.mjs` + `/tmp/fixture-shape.mjs` — the latter reads the
+live DB and computes each card's due-date offset from the manifest's
+`generatedAt`) verified:
+
+| Property | Run 1 | Run 2 | Match |
+| --- | --- | --- | --- |
+| logicalShape (boards/lists/cards) | 2 / 5 / 7 | 2 / 5 / 7 | ✓ |
+| board titles | Product Roadmap + Team Operations (3+2 lists, 5+2 cards) | identical | ✓ |
+| list/card titles | identical | identical | ✓ |
+| members + roles | owner=admin, collaborator=editor | identical | ✓ |
+| relative due-date offsets | 0, +3, +1, -2, -3, +7, none | identical | ✓ |
+| workspace id | 98ed998e-… (UUID) | 8f279808-… (UUID) | differ ✓ |
+| all 14 board/list/card entity ids | random | random | all differ ✓ |
+| generatedAt | 09:59:38Z | 10:00:02Z | differs ✓ |
+
+`ROUND_TRIP_OK`. Re-run after the fixture fixes (see the rehearsal section)
+with the same result, plus the workspace id now in the app's 32-char format
+and "Product Roadmap" deterministically first by pinned `createdAt`.
+
+**Fixture state left behind (deliberate):** the final seeded fixture remains
+in place — workspace `planora-us083-demo` (manifest `.demo/fixture-manifest.json`),
+users `owner@example.com` + `collaborator@example.com` (verified, password
+`demo-password-123`), 2 boards / 5 lists / 7 cards — exactly the state the
+DEMO_RUNBOOK expects before a demo/rehearsal. Reset anytime with `demo:reset`.
+
+## Platform proof — `e2e/platform-375.spec.ts` (final close, 2026-08-02)
+
+New 375px DOM-level spec (no visual-test infrastructure — overflow via
+scrollWidth/clientWidth, usability via the real actions) covering the three
+new demo surfaces. RED first-run recorded, then GREEN:
+
+| Run | Result | Classification |
+| --- | --- | --- |
+| 1 (first) | **1 passed / 2 failed** | TEST-ARRANGEMENT defect (not product): `addCard`'s click resolves before the Server Action commit, and the spec queried the DB id immediately — a 375px-only exposure of a latent race the desktop specs mask by looping more interactions. The 375px assertions themselves were green on this run (the Quick Capture test — dialog, capture, focus guard, overflow — passed first try). |
+| 2 (fix: `addCardAndSettle` waits for the card face before any DB lookup) | **3/3 passed (45.5s)** | fix verified |
+
+What is proven (3 tests): `/today` renders all four buckets at 375px with
+`documentElement`/`body` horizontal overflow ≤ 1px; Quick Capture opens via
+the bare C shortcut, captures a real card, and the C guard stays inert while
+an editable field holds focus (typed "c" lands in the input, no dialog; after
+focus leaves the editable, C opens the dialog) — all without overflow; the
+undo snackbar at 375px offers Undo for an archived card and restores it in
+place (reload/socket tripwire clean) without overflow.
+
+## Demo rehearsal — `e2e/demo-rehearsal.spec.ts` (final close, 2026-08-02)
+
+One continuous test runs the ENTIRE locked demo path from the seeded fixture
+in one sitting — this is the rehearsal, not a collection of separate specs.
+RED-first chain (all personally observed):
+
+| Run | Result | Classification |
+| --- | --- | --- |
+| 1 | RED — sign-in "Invalid email or password" | TEST defect: the spec assumed the E2E password; the demo users are provisioned with `demo-password-123` (fixed). |
+| 2 | RED — the captured card never reached the collaborator's Product Roadmap board | **PRODUCT/FIXTURE defect (real):** both fixture boards share one transaction `now()`, so quick capture's default board (first creatable by `createdAt`, then random id) fell to the random-UUID tiebreak — in this run "Team Operations" won, so the capture landed there. The demo path's capture target was nondeterministic between seeds. **Fix:** the fixture pins 1ms-offset board `createdAt` values ("Product Roadmap" < "Team Operations" deterministically). |
+| 3 | RED — Undo click intercepted by a dialog overlay | TEST defect: missing `networkidle` settle after the archive (W8-spec pattern); added. |
+| 4 | RED — afterAll fixture check: 6 cards ≠ 7 | **TEST defect (real, vacuity):** the shared `archiveCard` helper's `getByRole("button", { name: "Archive card" }).first()` matched the COMPLETED seeded card's face archive button (US-069 renders `aria-label="Archive card"` on completed card faces, and main content sorts before the sheet portal) instead of the sheet's — the seeded "Document safety invariants" was archived, and the spec's assertions could not detect it (vacuous). **Fix:** the rehearsal archives through the sheet-scoped button and pins the offer title + DB archivedAt transitions for BOTH the captured card and the seeded completed card (non-vacuous). Residual recorded: the shared helper stays ambiguous when a completed card shares the board — W8's committed boards never have one; the rehearsal uses the pinned flow. |
+| 5 | RED — offer-label assertion on the status div | TEST defect: the offer title is the Undo button's aria-label, not the status text; asserted `toHaveAccessibleName("Undo archive of …")`. |
+| 6 | RED — invite: "Invalid workspace ID" | **PRODUCT/FIXTURE defect (real):** the seeded workspace id was a UUID, but the app's workspaceId schemas (invitation/board/automation) require the BA 32-char format — invites (and board creation, and automation rules) were impossible in the demo workspace. **Fix:** the fixture seeds `randomUUID().replace(/-/g, "")` (32-hex, matches `^[A-Za-z0-9]{32}$`). |
+| 7 (final, local DB) | **1/1 passed (42.6s)** | full path green; fixture preserved |
+| 8 (fresh disposable DB — correction pass) | **1/1 passed (56.2s)** | self-provisioning: users absent → real sign-up + Mailpit verification + checked-in `demo:seed` inside the spec; full path green; fixture preserved; DB dropped after verification (correction-pass section) |
+
+The green run proves, in one sitting on the real UI from the seeded state:
+`/today` shows the seeded relative-date relationships (owner: +0 in Due Today,
++1 and +7 in Due This Week, the completed -3 card excluded, Overdue/Later
+empty; the collaborator's -2 card never on the owner's view); the bare C
+shortcut captures to the deterministic default (Product Roadmap → Inbox) and
+the collaborator's already-loaded board shows the card LIVE (presence barrier
++ connect-resync settle + masking tripwire, `expectNoRoutePosts`); archive
+card → Undo restores in place (offer pinned to the captured card, "Card
+restored" status, DB `archivedAt` null, seeded completed card untouched,
+tripwire clean); archive Inbox list → Undo restores the list with its three
+cards (DB asserts); the owner invites a registered outsider through the real
+members dialog and the outsider's already-loaded page shows the badge
+increment live ("Notifications (1 unread)", tripwire clean, inbox lists the
+invitation); and after the run the seeded logical shape is intact (2 boards /
+5 lists / 7 cards — the rehearsal's own artifacts — the captured card + its
+history rows, the outsider user + invitation — are removed in `afterAll`;
+the demo workspace is never touched).
+
+## Combined US-083 E2E gate + full suite (final close, 2026-08-02)
+
+```bash
+npx playwright test e2e/realtime-event-proof.spec.ts e2e/invitation-live-badge.spec.ts \
+  e2e/today.spec.ts e2e/quick-capture.spec.ts e2e/undo-snackbar.spec.ts \
+  e2e/platform-375.spec.ts e2e/demo-rehearsal.spec.ts
+```
+
+| Run | Result | Classification |
+| --- | --- | --- |
+| 1 (first, full tree) | **24 passed / 1 failed** | COMMITTED-spec flake: `undo-snackbar` non-goal test — the second `openCardDetail` never opened the sheet (click succeeded; DOM snapshot showed the plain board). Mechanism: the sheet-close's `router.replace` (strips `?cardId=`) had not COMMITTED when the reopen `router.push` ran, and Next dedupes a push to the same `?cardId=` URL — `networkidle` cannot cover a replace whose fetch hasn't started. Fix (assertion-preserving): wait for `cardId` to leave the URL before re-opening. Focused re-runs 3/3 green (one flaky pass with `--trace on` confirmed the timing character). |
+| 2 (final) | **25/25 passed (6.7m)** | gate green on the final tree |
+
+Then the full suite on the final tree — **FINAL provenance (post-self-provisioning
+correction, 2026-08-02, exclusive shared-server lock, complete log at
+/tmp/us083-full-e2e-final3.log):**
+
+```bash
+npm run test:e2e
+# → 36 passed (10.2m) — the test count REMAINS 36 (all 36 E2E tests across
+#   every spec, incl. the seven US-083 specs, on one fresh server)
+```
+
+This replaces the earlier pre-correction 36/36 provenance: the count is now
+explicitly measured on the final self-provisioning tree. Correction chain from
+this gate (first-run results recorded, no assertion/provisioning/Mailpit/
+tripwire/cleanup/fixture-preservation gate weakened):
+
+| Full-suite run | Result | Classification / fix |
+| --- | --- | --- |
+| 1 | **35 passed / 1 failed** | `realtime-card-create.spec.ts` (US-009 baseline) — Bob's page loaded but the `card:created` broadcast missed him. Root cause: the baseline spec's "confirmed present" was only the list-title visibility — no presence barrier — so under full-suite load Alice's emit could fire while Bob's socket was still JOINING the room (failure snapshot showed both avatars only at failure time). Fix (W1 discipline, assertion-preserving): await the connect-resync route POST and require TWO presence avatars on both pages before Alice acts. Focused reruns 2/2 green. |
+| 2 | **35 passed / 1 failed** | `realtime-card-move.spec.ts` test 1 (US-009 baseline) — same root cause, same fix (presence barrier + resync settle before Alice drags). Focused rerun 2/2 green. |
+| 3 (final) | **36 passed (10.2m)** | green on the final tree; zero server/browser errors in the run log |
+
+**Observed, pre-existing, OUT of US-083 scope (recorded, not fixed):** during
+run 1 the US-066 spec's tail triggered a transient `TypeError: Cannot read
+properties of null (reading 'name')` in `lib/workspace-members.ts:41` — the
+automation-log-retention spec leaves its module-level page open after the
+test, and a socket-reconnect badge resync re-rendered the automation page
+while the afterAll cleanup had deleted the workspace's owner user, so
+Prisma's two-query `include` merge yielded `member.user = null`. No test
+failed from it, the workspace was cleaned up normally, and it did not recur
+in runs 2–3; it is a latent pre-existing race outside this story's gates.
+
+No tripwire, DB assertion, overlay gate, or Mailpit verification was weakened
+at any point.
+
+## Final close — static gates + harness (2026-08-02)
+
+```bash
+npm test                       # → 90 files, 1400 tests, all passed (42.4s)
+npx tsc --noEmit               # → clean (exit 0)
+npx eslint <4 changed/new files>  # → clean
+git diff --check               # → clean
+```
+
+Harness (`harness.db` edited only via `harness-cli`):
+
+```bash
+# before (recorded):
+scripts/bin/harness-cli audit
+# → Orphaned stories: 12 (US-083 not listed — has a trace)
+# → Unverified stories: 33 (incl. US-083)
+# → Unverified decisions: 3 (0011/0012/0019 — other epics, unchanged)
+# → Entropy score: 100/100
+scripts/bin/harness-cli query matrix --numeric | grep US-083
+# → US-083 in_progress 1 1 1 0
+scripts/bin/harness-cli query sql "SELECT id, verify_command FROM story WHERE id='US-083'"
+# → verify_command still listed the phantom tests/server-actions/invitation-live.test.ts
+
+# verify_command repair (decision 1): point at the real W2 surfaces
+scripts/bin/harness-cli story update --id US-083 --verify "npx vitest run lib/today.test.ts lib/quick-capture.test.ts lib/undo.test.ts lib/invitation.test.ts lib/notifications/inbox.test.ts tests/server-actions/today.test.ts tests/server-actions/quick-capture.test.ts tests/server-actions/undo-restore.test.ts"
+# → Story US-083 updated (the repaired subset itself ran green first: 8 files, 114 tests)
+
+scripts/bin/harness-cli story verify US-083
+# → Story US-083 verification: pass (114 passed)
+
+scripts/bin/harness-cli story update --id US-083 --status implemented --unit 1 --integration 1 --e2e 1 --platform 1 --evidence "…"
+# → US-083 implemented 1 1 1 1 (row confirmed via query sql)
+
+scripts/bin/harness-cli trace --summary "US-083 final close: …" --story US-083 --agent pi-implementer --outcome completed --duration 300 --actions "…" --changed "…" --notes "…"
+# → Trace #4 recorded (outcome completed)
+
+# later, same session, same local-only harness.db (still gitignored, edited
+# only via harness-cli):
+# → Trace #5 recorded — correction pass (self-provisioning/CI-safe rehearsal)
+# → Trace #6 recorded — final full-suite gate on the self-provisioning tree
+
+# after (recorded):
+scripts/bin/harness-cli audit
+# → Orphaned stories: 12 (unchanged)
+# → Unverified stories: 32 (US-083 LEFT the list — verify pass recorded)
+# → Unverified decisions: 3 (unchanged)
+# → Entropy score: 100/100 (capped; residual drift is other epics' rows)
+scripts/bin/harness-cli query matrix --numeric | grep US-083
+# → US-083 implemented 1 1 1 1
+```
+
+Delta: status `in_progress → implemented`; `platform_proof 0 → 1`; US-083
+moved off the unverified list; completed close trace #4 recorded, then
+trace #5 (correction pass — CI-safe/self-provisioning rehearsal) and trace #6
+(final full-suite gate on the self-provisioning tree). The US-083
+harness row's evidence now covers W1–W8 plus the W3 round-trip execution, the
+continuous rehearsal, the platform proof, and the combined/full E2E gates.
+All harness records above live in the local-only, gitignored `harness.db`
+(edited only via `harness-cli`; never staged/committed).
+Claims are branch-local: implemented and locally accepted on
+`feature/us-083-demo-ready-daily-work-loop` (8 commits ahead of dev through
+b272685); the PR/merge remains a separate authorization gate — no commit, PR,
+push, or merge was performed by the close pass.
+
+---
+
+## Correction pass (reviewer findings, 2026-08-02)
+
+A review found a shipping blocker in the rehearsal evidence: the spec assumed
+pre-provisioned demo users + a seeded fixture, which CI (fresh Postgres +
+Mailpit, no demo data) cannot provide. All six findings were corrected:
+
+1. **Self-provisioning rehearsal (CI-safe).** `e2e/demo-rehearsal.spec.ts`
+   no longer has any external precondition. Its setup (`ensureDemoFixture`)
+   (a) ensures the two fixed demo users — signing them up through the REAL
+   sign-up form + Mailpit verification when absent (Mailpit mailbox cleared
+   first so the fixed-email verification link is unambiguous), or reusing
+   them only after a real sign-in probe with the documented demo password
+   (`demo-password-123`); wrong password or an existing-but-unverified user
+   fails loudly with the remedy (delete the row / verify it), and (b)
+   re-seeds the reserved fixture through the CHECKED-IN `npm run demo:seed`
+   code path (`scripts/demo-fixture.ts` + `lib/demo-fixture.ts`) on every
+   run, so each run starts fresh and same-day; the seed fails closed on a
+   mismatched ownership marker. No /tmp prerequisite, no silent skip.
+2. **Workspace-scoped cleanup.** The rehearsal's `afterAll` deletes ONLY rows
+   created by that rehearsal, scoped by the demo workspace id (card + history
+   subqueries join through list → board → workspace; the invitation delete is
+   scoped by email AND organizationId; the outsider user carries a unique
+   per-run email). No title-global DELETEs remain.
+3. **Focused unit coverage for the fixture contracts** — the W3 test file
+   `tests/demo-fixture.test.ts` (8 pre-existing safety cases, committed with
+   827f222) gained 4 contract cases: the workspace id matches the app's
+   32-char format; board `createdAt` is pinned 1ms apart with Product Roadmap
+   first; the logical shape 2/5/7; and the write path persists both contracts.
+   RED→GREEN demonstrated: with both fixture fixes temporarily reverted the
+   suite went **3 failed / 9 passed** (exactly the two contract tests + the
+   write-through test; the pre-existing safety cases stayed green), restored
+   **12/12 passed**.
+4. **TEST_MATRIX unit cell restored**: W3 is covered by
+   `tests/demo-fixture.test.ts` and is listed again in the unit-proof column.
+5. **SABOTAGE-marker wording scoped** to production/test code everywhere in
+   the packet (the packet's own evidence narrative legitimately uses the
+   word; `grep -c SABOTAGE` over production/test code at handback: 0).
+   Durability stays harness-local: `harness.db` is gitignored and edited only
+   via `harness-cli`; `harness.db.bak-20260714-105049`, `.demo/`, and repo
+   `tmp/` are never staged/committed/deleted; bulky /tmp logs are NOT
+   archived into Git — the command/result tables in this document are the
+   durable record.
+6. **Protected paths untouched**; explicit path-scoped staging discipline
+   remains for the eventual commit. Backup note: the main backup file
+   `harness.db.bak-20260714-105049` stayed PRISTINE (163840 bytes, mtime
+   unchanged); the `-shm` and zero-byte `-wal` sidecar files beside it were
+   READER ARTIFACTS created by SQLite during `harness-cli` audits of this
+   session — they remain untracked/excluded and are neither deleted nor
+   staged.
+
+### Fresh-database proof (the decisive CI-safety check, 2026-08-02)
+
+A genuinely disposable Postgres database was created, migrated, exercised,
+and dropped — nothing else shared its state:
+
+```bash
+# 1. create a disposable database on the same Postgres instance (app creds,
+#    maintenance DB): planora_ci_proof_1785669124108
+# 2. apply the real migrations to it:
+DATABASE_URL="postgresql://…@localhost:5432/planora_ci_proof_1785669124108?schema=public" \
+  npx prisma migrate deploy
+# → All migrations have been successfully applied.
+# 3. pre-run state verified: users = 1 (the migration-embedded
+#    automation@planora.internal — unrelated), workspaces = 0 → the demo
+#    users and the fixture were genuinely absent.
+# 4. Mailpit mailbox cleared; port 3000 verified free; Playwright boots its
+#    own fresh server (stale-server policy):
+DATABASE_URL="postgresql://…@localhost:5432/planora_ci_proof_1785669124108?schema=public" \
+  npx playwright test e2e/demo-rehearsal.spec.ts
+# → 1 passed (56.2s). The spec self-provisioned: both demo users signed up
+#   through the real form + Mailpit verification, then the checked-in
+#   demo:seed ran inside the spec ("Seeded reserved demo workspace:
+#   planora-us083-demo … Logical shape: 2 boards, 5 lists, 7 cards"), then
+#   the full locked path (today → capture → realtime → undo ×2 → invite).
+# 5. post-run verification on the fresh DB: fixture shape 2/5/7; demo users
+#    present + emailVerified=true; zero rehearsal leftovers (no
+#    'Rehearsal capture card' card/history rows, no rehearsal-outsider
+#    users/invitations). The pre-existing local DB was untouched (demo
+#    workspace id + shape unchanged).
+# 6. DROP DATABASE "planora_ci_proof_1785669124108" → dropped; no
+#    planora_ci_proof_* database remains.
+```
+
+Then the combined US-083 E2E gate was re-run on the final tree (local DB —
+exercises the REUSE path: existing users pass the real sign-in probe, the
+fixture is re-seeded same-day): **25/25 passed (6.8m)** — the final count
+reflects the self-provisioning spec. The DEFAULT FULL SUITE then ran green on
+the same final tree: **36/36 passed (10.2m)** — count unchanged (36),
+post-self-provisioning provenance in the combined-gate section above
+(correction chain 35/1 → 35/1 → 36/36; two US-009 baseline specs gained the
+W1 presence barrier — recorded there). Targeted unit/static gates re-ran:
+
+```bash
+npx vitest run tests/demo-fixture.test.ts   # → 12/12 passed (8 pre-existing + 4 contract cases)
+npm test                                    # → 1404 passed (90 files)
+npx tsc --noEmit                            # → clean
+npx eslint <changed files>                  # → clean
+git diff --check                            # → clean
+```
+
+Branch-local claims only; no commit, push, PR, or merge was performed.

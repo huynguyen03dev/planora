@@ -264,7 +264,7 @@ empty) after each sabotage/demo run and at handback.
 | 6 | production implemented | `npx tsc --noEmit` / eslint changed files / `git diff --check` | clean |
 | 7 | production implemented | `npm run test:e2e -- e2e/invitation-live-badge.spec.ts` | **GREEN** — live badge, inbox, accept, Carol denial all pass (37.8s) |
 | 8 | `emitInvitationNew` call commented in `workspace/actions.ts` (sabotage) | same focused spec | **RED at the intended observer assertion**: `expect(bell(bobPage)).toHaveAccessibleName("Notifications (1 unread)")` — Received `"Notifications"`; tripwire clean (no reload/reconnect/route-POST masking) |
-| 9 | sabotage restored | `git diff` shows only the real W2 change; no SABOTAGE marker | restored |
+| 9 | sabotage restored | `git diff` shows only the real W2 change; no SABOTAGE marker in production/test code | restored |
 | 10 | restored | `npm run test:e2e -- e2e/invitation-live-badge.spec.ts e2e/realtime-event-proof.spec.ts` | **GREEN** — 7/7 (W2 + all six W1 proofs; combined resync preserves the single-POST connect barrier) |
 | 11 | restored | `npm run test:e2e` (full suite) | **GREEN** — 18/18 (6.6m) |
 | 12 | restored | `npm test` (re-run after doc/comment edits) | **GREEN** — 1221/1221 |
@@ -652,6 +652,22 @@ stable checkpoint after these edits: `npm test` 1351 green (85 files).
    *Exit gate:* two consecutive seed→reset→seed runs reproduce the same
    fixture shape/counts/relative dates with manifest ids recorded; protocol
    executed once in rehearsal.
+   **Exit gate EXECUTED 2026-08-02 (final-close pass, run log + comparison in
+   the validation.md W3 section):** the two demo users were provisioned through
+   the REAL sign-up + Mailpit verification flow; seed→reset→seed reproduced
+   2 boards / 5 lists / 7 cards with identical titles, member roles, and
+   relative due-date offsets (0, +1, +3, -2, -3, +7, none) while all 14
+   entity ids + the workspace id differed per run; the stale-server restart
+   protocol was followed for every server start; the final seeded fixture was
+   left in place (workspace `planora-us083-demo`, manifest at
+   `.demo/fixture-manifest.json`) and the continuous demo rehearsal ran on it
+   (validation.md rehearsal section). The rehearsal spec is now
+   SELF-PROVISIONING (correction pass 2026-08-02): it signs the two fixed
+   users up through the real flow when absent, reuses them only after a real
+   sign-in probe with the documented password, and re-seeds the fixture
+   through the checked-in `demo:seed` code on every run — proven on a
+   genuinely fresh disposable database (migrations → spec self-provisioned →
+   1/1 green → DB dropped; validation.md correction-pass section).
 2. **W1 — Cross-client realtime proof.** Add one two-client E2E spec per event
    (or grouped per event family) using the US-009/012 harness; each drives the
    real Server Action from client A and asserts live observation on client B.
@@ -718,6 +734,25 @@ stable checkpoint after these edits: `npm test` 1351 green (85 files).
 9. **Demo rehearsal + rollout notes.** Run the full locked demo path from W3
    state; record rollout/rollback notes (see below) and the final single-story
    status.
+   **EXECUTED 2026-08-02 (final-close pass):** one continuous rehearsal spec
+   (`e2e/demo-rehearsal.spec.ts`) runs the locked path from the seeded fixture
+   — /today buckets → quick capture (C) → two-client realtime observation →
+   card archive→Undo → list archive→Undo → live invitation badge — with
+   fixture-preservation proof (2/5/7 intact after the run; the rehearsal's own
+   artifacts removed). Three defects were caught and fixed during the
+   rehearsal (RED runs recorded in validation.md): (1) fixture board order was
+   nondeterministic (same-timestamp nested creates → random-UUID id tiebreak
+   decided quick capture's default board) — the fixture now pins 1ms-offset
+   board `createdAt`; (2) the fixture's UUID workspace id was rejected by the
+   app's workspaceId schemas (`^[A-Za-z0-9]{32}$` — invitation/board/
+   automation), so invites and board creation were impossible in the demo
+   workspace — the fixture now seeds a 32-char id; (3) the shared `archiveCard`
+   helper's `.first()` archive button is ambiguous when a completed card
+   shares the board (completed card faces render their own aria-label="Archive
+   card" button, US-069, which sorts before the sheet portal) — the rehearsal
+   uses a sheet-scoped archive with non-vacuous title/DB assertions. Final
+   story status: see the overview Status line + validation.md final-close
+   section.
 
 ### W8 implementation progress (landed 2026-08-02 — focused gates + E2E gate green)
 
@@ -809,12 +844,20 @@ validation.md W8 E2E section.
 | 8 | production implemented | `npx tsc --noEmit` / changed-file ESLint / `git diff --check` | clean |
 | 9 | **sabotage:** in-tx revalidation branch disabled in `restoreCardAction` | `npx vitest run tests/server-actions/undo-restore.test.ts` | **RED** — 1 failed at the race case (`card.update` ran); restored, re-run GREEN 13/13 |
 | 10 | **sabotage:** proof guard flipped OFF | `npx vitest run tests/db-undo-race-proof.test.ts` | **RED** — 2 failed (tests 1 AND 3: no lock → the archiver's UPDATE no longer hits lock_timeout either); the initial probe reddened only test 1 because test 3's lock was hardcoded — wired through the WITH_GUARD switch in the correction pass (validation.md C6); restored, re-run GREEN 3/3 |
-| 11 | final code state | `git diff` — only the real W8 change; no SABOTAGE marker | restored |
-| 12 | correction pass (proof-audit findings C1–C6, see validation.md) | reducer/RTL race tests RED first → fix → focused re-runs | **RED** 2 + 2 failed → **GREEN** 16 + 14; DB-proof sabotage re-observed **2 failed** (tests 1+3) → restored 3/3; tsc/ESLint/`git diff --check` clean; no SABOTAGE marker |
+| 11 | final code state | `git diff` — only the real W8 change; no SABOTAGE marker in production/test code | restored |
+| 12 | correction pass (proof-audit findings C1–C6, see validation.md) | reducer/RTL race tests RED first → fix → focused re-runs | **RED** 2 + 2 failed → **GREEN** 16 + 14; DB-proof sabotage re-observed **2 failed** (tests 1+3) → restored 3/3; tsc/ESLint/`git diff --check` clean; no SABOTAGE marker in production/test code |
 | 13 | **E2E gate (Root-granted lock)** | run 1: full spec → 5 failed (product defect: `"use server"` const export) → fix → run 2 focused 1/1 → run 3 full 3/5 (2 test defects: announcer alert locator, same-page 2nd sign-up) → fixes → run 4 focused race 1/1 + non-goal still red (swallowed click) → +settle → run 5 trace: Escape focus-dependence → overlay-close fix → run 6 focused 1/1 → run 7 full | **5/5 GREEN (1.5m)** — full diagnosis chain in validation.md W8 E2E section |
 
-E2E: `e2e/undo-snackbar.spec.ts` **AUTHORED — NOT RUN** (5 tests; shared-server
-lock required per the W3 policy — request the seat from Root after review).
+E2E: `e2e/undo-snackbar.spec.ts` **5/5 GREEN** — Root-granted shared-server
+run 2026-08-02 (1.5m; full run log in validation.md W8 E2E section), re-run
+inside the US-083 combined gate (25/25) and the full E2E suite (36/36) on
+2026-08-02 — the 36/36 was re-proven POST-self-provisioning correction on
+the final tree (10.2m, count unchanged; correction chain 35/1 → 35/1 → 36/36;
+two US-009 baseline specs gained the W1 presence barrier — validation.md
+combined-gate section). Combined-gate follow-up: the non-goal test's sheet-reopen now
+waits for the close's router.replace to commit (URL cardId gone) before
+re-opening — Next dedupes a reopen push to the same ?cardId= URL and the
+sheet never opens otherwise (observed flake; focused re-runs 3/3 green).
 
 ## Rollout / Rollback / Demo Rehearsal
 

@@ -2,7 +2,21 @@
 
 ## Status
 
-planned (high-risk) — implementation in progress: **W1–W8 landed (W1–W7 committed through 5c0a5f2; W8 lands in this commit)**. W7 (global quick capture) closed its focused unit/integration/RTL checkpoint AND its E2E gate (`e2e/quick-capture.spec.ts` 5/5 green, fresh shared-server run 2026-08-02). W8 (bounded undo) closed its focused unit/integration/RTL/real-DB gates (real-Postgres interleaving proof + guard-removal sabotage RED) AND its E2E gate (`e2e/undo-snackbar.spec.ts` 5/5 GREEN on the Root-granted shared-server run, 2026-08-02 — one product defect caught and fixed: a `"use server"` const export). One story packet with eight
+implemented and locally accepted on the feature branch `feature/us-083-demo-ready-daily-work-loop`
+(8 commits ahead of dev through b272685; PR/merge is a separate authorization gate — no commit
+or PR was opened by the final-close pass). **W1–W8 all landed and committed**; the branch-local
+acceptance gates closed 2026-08-02: W3 exit gate executed for real (real sign-up + Mailpit
+verification of the two demo users, seed→reset→seed round trip, manifest comparison —
+validation.md W3 section), continuous demo rehearsal green from the seeded fixture and
+self-provisioning on a fresh database (`e2e/demo-rehearsal.spec.ts` — validation.md
+rehearsal + correction-pass sections), 375px platform proof green
+(`e2e/platform-375.spec.ts` — no horizontal overflow on Today/Quick Capture/undo snackbar,
+shortcut focus guard), combined US-083 E2E gate 25/25 green, full E2E suite 36/36 green
+(re-proven post-self-provisioning correction on the final tree, 10.2m — validation.md
+combined-gate section),
+`npm test` 1404 green, `tsc --noEmit` / changed-file ESLint / `git diff --check` clean,
+harness row implemented with unit/integration/e2e/platform = 1 + completed close trace.
+W7 (global quick capture) closed its focused unit/integration/RTL checkpoint AND its E2E gate (`e2e/quick-capture.spec.ts` 5/5 green, fresh shared-server run 2026-08-02). W8 (bounded undo) closed its focused unit/integration/RTL/real-DB gates (real-Postgres interleaving proof + guard-removal sabotage RED) AND its E2E gate (`e2e/undo-snackbar.spec.ts` 5/5 GREEN on the Root-granted shared-server run, 2026-08-02 — one product defect caught and fixed: a `"use server"` const export). One story packet with eight
 independently checkable internal workstreams (W1–W8); one final story status.
 **Absorbs the planned behavior of US-077 (Today / My Work) and US-078 (Global
 Quick Capture); those story packets are retired as separate work. The full
@@ -86,7 +100,8 @@ flagged as documented):
   chrome nav entry) is implemented and covered by unit/integration/RTL;
   `e2e/today.spec.ts` is green (4/4, 2026-08-02 shared-server lock run — one
   arrange-defect repair in `e2e/helpers/app.ts`, validation.md run record). The
-  US-078 packet remains `planned` / unstarted. `createCardAction`
+  US-078 packet is **retired** (absorbed by W7 — full ACs retained by exact
+  reference in the retired packet). `createCardAction`
   (`app/(authenticated)/(dashboard)/boards/[boardId]/actions.ts`), the real
   restore actions `restoreCardAction` (US-016, integration-proven) and
   `restoreListAction` (US-074, proven) all exist — the foundations W7/W8 build
@@ -140,6 +155,10 @@ A demo-ready daily work loop, end to end:
 
 Demo path (locked): repeatable demo seed → `/today` → quick capture →
 cross-client realtime → archive card/list → undo → invitation live badge.
+**Executed end to end in one sitting from the seeded fixture 2026-08-02**
+(`e2e/demo-rehearsal.spec.ts`, 1/1 green — validation.md rehearsal section);
+the path is deterministic now that the fixture pins board order and uses the
+app's workspace-id format (rehearsal-caught fixes, validation.md).
 
 ## Affected Users
 
@@ -165,8 +184,9 @@ cross-client realtime → archive card/list → undo → invitation live badge.
 - `docs/product/realtime-sync.md` — event matrix proof status (W1, W2).
 - `docs/product/automation.md` — execution-log retention reconciliation (W4).
 - `docs/product/analytics.md` — `analytics:refresh` cross-client proof (W1).
-- `docs/TEST_MATRIX.md` — US-083 row now `in_progress` (W1–W6 landed — W4–W6 committed (dc1fd0a, b1280f8, dcc481b); W5
-  evidence recorded; W6 evidence recorded 2026-08-02); US-077/US-078 rows retired with pointers (W5).
+- `docs/TEST_MATRIX.md` — US-083 row now `implemented` (branch-local; W1–W8 evidence incl.
+  the W3 round-trip/rehearsal, 375px platform proof, combined 25/25 + full-suite 36/36 E2E
+  gates; harness row implemented with proof flags 1/1/1/1); US-077/US-078 rows retired with pointers (W5).
 - `DESIGN.md` — future UI validation cites its tokens/surfaces; W7 added the
   concise **Keyboard Shortcuts** convention (first global shortcut owner;
   existing tokens only, no new design tokens). W6's `/today` surface and

@@ -23,7 +23,8 @@ npm run demo:seed -- \
 ```
 
 The command creates `planora-us083-demo` with a repeatable logical shape and
-writes `.demo/fixture-manifest.json`. UUIDs may change between runs; the manifest
+writes `.demo/fixture-manifest.json`. IDs may change between runs (the workspace
+id uses the app's 32-char format, boards/lists/cards are UUIDs); the manifest
 contains the IDs for the current run.
 
 Re-seeding replaces an earlier workspace only when its reserved slug and strict
@@ -45,14 +46,14 @@ never deleted.
 ## Repeatability Contract
 
 Repeatability means the same board/list/card titles, counts, assignments, roles,
-and relative due dates. It does not require stable database UUIDs. A safe
+and relative due dates. It does not require stable database IDs. A safe
 rehearsal is:
 
 1. `demo:seed`
 2. inspect `.demo/fixture-manifest.json`
 3. `demo:reset`
 4. `demo:seed` again
-5. compare `logicalShape` and the logical titles, not UUID values
+5. compare `logicalShape` and the logical titles, not ID values
 
 The stale-server policy for Playwright is tracked separately in US-083 W3 and
 is enforced as follows:

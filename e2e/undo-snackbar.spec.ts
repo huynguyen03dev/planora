@@ -1,10 +1,16 @@
 /**
  * US-083 W8 — bounded undo snackbar, end to end.
  *
- * STATUS: AUTHORED — NOT RUN. Playwright is not executed from this seat; the
- * shared-server lock (server, Postgres fixture data, Mailpit, port 3000) is
- * granted by Root after review. Run command (under the lock, fresh server per
- * the W3 policy): `npm run test:e2e -- e2e/undo-snackbar.spec.ts`.
+ * STATUS: RUN GREEN. Full spec 5/5 passed on the Root-granted shared-server
+ * run (2026-08-02, 1.5m — full run log in the US-083 validation.md W8 E2E
+ * section: one product defect caught (a "use server" const export) and three
+ * test-defect corrections landed; no assertion/tripwire/overlay gate
+ * weakened). Re-run green inside the US-083 combined gate and the full E2E
+ * suite on 2026-08-02 (25/25 and 36/36). One additional test-robustness fix
+ * landed from the combined gate: the non-goal sheet-reopen now waits for the
+ * close's router.replace to COMMIT (cardId gone from the URL) before
+ * re-opening — otherwise the reopen push to the same ?cardId= URL is deduped
+ * and the sheet never opens (observed flake; focused re-runs 3/3 green).
  *
  * Coverage intent (maps to the locked W8 contract, decision 0031):
  *  - Card archive → snackbar offers Undo → Undo calls the REAL
@@ -346,8 +352,12 @@ test("non-goal absence: member removal and label deletion offer no undo", async 
   await expect(page.locator("#card-detail-title")).toHaveCount(0);
   await expect(undoSnackbar(page)).toHaveCount(0);
   await expect(undoAlert(page)).toHaveCount(0);
-  // Settle the sheet-close navigation (router.replace) before re-opening, so
-  // the next card click cannot be swallowed by the in-flight transition.
+  // Settle the sheet-close navigation (router.replace) before re-opening: the
+  // replace must have COMMITTED (cardId gone from the URL) or the reopen push
+  // to the same ?cardId= URL is deduped by Next's router and the sheet never
+  // opens (observed flake in the US-083 combined gate). networkidle alone does
+  // not cover a replace whose fetch has not started yet.
+  await expect(page).not.toHaveURL(/cardId=/);
   await page.waitForLoadState("networkidle");
 
   // Label deletion (the manage-labels dialog lives in the open sheet):

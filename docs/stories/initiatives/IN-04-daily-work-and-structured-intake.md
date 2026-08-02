@@ -2,7 +2,12 @@
 
 ## Status
 
-in progress — US-083 Stage 1 (W1–W5) landed 2026-08-02 (realtime proof, live invite badge, demo determinism, retention/tracker reconciliation; W4/W5 uncommitted on the feature branch); Stage 2 (W6–W8) pending. Roadmap accepted; backlog and intake artifacts materialized.
+implemented (branch-local) — US-083 W1–W8 all landed and closed 2026-08-02: realtime proof,
+live invite badge, demo determinism (W3 round trip executed for real), retention/tracker
+reconciliation, Today/My Work, quick capture, bounded undo — plus the continuous demo
+rehearsal and the 375px platform proof; combined US-083 E2E gate 25/25, full E2E suite 36/36,
+`npm test` 1400, harness row implemented (PR/merge is a separate authorization gate).
+Roadmap accepted; backlog and intake artifacts materialized.
 
 **Update (2026-08-01):** owner locked the roadmap combination as a **single high-risk story, US-083 "Demo-ready daily work loop"** (not an IN-05 initiative), delivered as the owner's **Stage 1 (foundation/demo reliability)** then **Stage 2 (daily-work UX)** — delivery stages distinct from IN-04's numbered phase diagram below (US-083 spans the Phase 2/3 areas). US-083 fully absorbs the planned behavior of US-077 (Today / My Work → W6) and US-078 (Global Quick Capture → W7); those child stories are **retired as separate work** — the full acceptance criteria remain authoritative in the retained packets and are incorporated by exact reference, so W6/W7 cannot close until every referenced AC maps to evidence. US-074/075/076/079–082 remain unchanged. Decision 0031 (bounded reversible undo) gates US-083 W8.
 
@@ -101,7 +106,7 @@ Phase 4: Advanced Workflows
 | US-076 | First-party product-usage measurement baseline for the roadmap | high-risk | E01-analytics | planned (unstarted) |
 | US-077 | Today / My Work read-only cross-board view | normal | E08-personal-productivity-and-capture | **retired — absorbed by US-083 (W6)**; ACs retained in this packet, incorporated by exact reference |
 | US-078 | Global quick capture using standard Card creation | normal | E08-personal-productivity-and-capture | **retired — absorbed by US-083 (W7)**; ACs retained in this packet, incorporated by exact reference |
-| US-083 | Demo-ready daily work loop (W1–W8) | high-risk | E08-personal-productivity-and-capture | in progress (Stage 1 W1–W5 landed 2026-08-02 — W4/W5 uncommitted on the feature branch; Stage 2 W6–W8 pending) |
+| US-083 | Demo-ready daily work loop (W1–W8) | high-risk | E08-personal-productivity-and-capture | implemented (branch-local, 2026-08-02 — W1–W8 gates green incl. W3 round trip + continuous demo rehearsal, 375px platform proof, combined US-083 E2E 25/25, full E2E 36/36; harness row implemented; PR/merge is a separate authorization gate) |
 | US-079 | Per-board Capture/Triage using first-class Cards | normal | E08-personal-productivity-and-capture | planned (unstarted) |
 | US-080 | Automation trigger expansion for card attribute changes | normal | E06-automation | planned (unstarted) |
 | US-081 | Card templates as a standalone vertical slice | high-risk | E09-reusable-workflows | planned (unstarted) |
