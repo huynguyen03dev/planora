@@ -121,13 +121,13 @@ pasted into this document or a chat log you don't control.
 | `DATABASE_URL` | Railway Postgres plugin → Variables → copy | Use the **Internal** URL of the in-project Postgres. |
 | `BETTER_AUTH_SECRET` | **NEW** — generate: `openssl rand -base64 32` | Session/signature secret. Fresh value for prod; do not reuse another environment's value. |
 | `BETTER_AUTH_URL` | Prod URL, e.g. `https://planora-production-xxxx.up.railway.app` (or your custom domain) | Better Auth base URL. The local `.env` value is `http://localhost:3000` — **prod must use the deployed URL**. |
-| `NEXT_PUBLIC_APP_URL` | Same prod URL as `BETTER_AUTH_URL` | Used server-side for absolute links in emails/notifications. |
+| `NEXT_PUBLIC_APP_URL` | Same prod URL as `BETTER_AUTH_URL` | **Build-time variable** (inlined by Next.js at build; Dockerfile has matching `ARG`). Used for absolute links in emails/notifications. Set before the FIRST deploy. |
 | `BETTER_AUTH_TRUSTED_ORIGINS` | Prod URL (comma-separated), e.g. `https://planora-production-xxxx.up.railway.app` | Auth origin allowlist. Add `http://localhost:3000` too only if you plan to hit the prod API from a local frontend. |
 | `RESEND_API_KEY` | Copy from local `.env` (by name — do not print the value) | Required: production email always goes through Resend (see `lib/email.ts`). Without it, verification emails are only logged and sign-up cannot complete. |
 | `EMAIL_FROM` | Copy from local `.env` | Currently `Planora <noreply@planora.hazeruno.dpdns.org>` — that domain is already verified in Resend, so delivery will work as-is. |
 | `CRON_SECRET` | **NEW** — generate: `openssl rand -base64 32` | Guards `/api/cron/due-date-reminders`; also enables the in-process 15-minute reminder scheduler in `server.ts`. |
-| `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME` | Copy from local `.env` | Read server-side at runtime. |
-| `NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET` | Copy from local `.env` | Read server-side at runtime. |
+| `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME` | Copy from local `.env` | **Build-time variable** — Next.js inlines `NEXT_PUBLIC_*` into the bundle during `next build` (server + client). The Dockerfile declares matching `ARG`s, and Railway injects service variables into the build (docs.railway.com/builds/dockerfiles). Set before the FIRST deploy; a build without it compiles the value to `undefined`. |
+| `NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET` | Copy from local `.env` | **Build-time variable** (same rule as above). |
 | `CLOUDINARY_API_KEY` | Copy from local `.env` | Server-side signed uploads. |
 | `CLOUDINARY_API_SECRET` | Copy from local `.env` | Server-side signed uploads. |
 | `DATABASE_POOL_MAX` (optional) | Omit, or 10 | Default 10; lower only if Railway Postgres complains about connection count. |

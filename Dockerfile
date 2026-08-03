@@ -39,6 +39,18 @@ RUN apt-get update \
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+# Railway injects service variables at build time, but Dockerfiles must
+# declare them with ARG to receive them (docs.railway.com/builds/dockerfiles
+# — "Using variables at build time"). NEXT_PUBLIC_* vars are inlined by
+# Next.js at build time in BOTH client and server bundles, so without this
+# they compile to undefined and email links / Cloudinary uploads break.
+ARG NEXT_PUBLIC_APP_URL
+ARG NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME
+ARG NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET
+ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+ENV NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME=$NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME
+ENV NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET=$NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET
+
 # The Prisma client is generated into app/generated/prisma/ (gitignored) and
 # must exist before `next build`. `prisma generate` never connects to the DB.
 RUN npx prisma generate
