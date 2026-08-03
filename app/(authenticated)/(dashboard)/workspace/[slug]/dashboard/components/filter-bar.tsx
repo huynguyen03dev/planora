@@ -2,6 +2,17 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
 interface Board {
   id: string;
   title: string;
@@ -65,104 +76,106 @@ export function FilterBar({
   return (
     <div className="flex flex-wrap items-center gap-4 rounded-lg border bg-card p-4">
       <div className="flex items-center gap-2">
-        <label htmlFor="range" className="text-sm font-medium">
+        <Label htmlFor="range" className="text-sm font-medium">
           Range:
-        </label>
-        <select
-          id="range"
+        </Label>
+        <Select
           value={currentFilters.range ?? "30d"}
-          onChange={(e) => updateFilters({ range: e.target.value }, ["from", "to"])}
-          className="rounded border bg-background px-2 py-1 text-sm"
+          onValueChange={(val) => updateFilters({ range: val as "7d" | "30d" | "90d" }, ["from", "to"])}
         >
-          <option value="7d">Last 7 days</option>
-          <option value="30d">Last 30 days</option>
-          <option value="90d">Last 90 days</option>
-        </select>
+          <SelectTrigger id="range" size="sm" className="w-[140px]">
+            <SelectValue placeholder="Range" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="7d">Last 7 days</SelectItem>
+            <SelectItem value="30d">Last 30 days</SelectItem>
+            <SelectItem value="90d">Last 90 days</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="flex items-center gap-2">
-        <label htmlFor="board" className="text-sm font-medium">
+        <Label htmlFor="board" className="text-sm font-medium">
           Board:
-        </label>
-        <select
-          id="board"
-          value={currentFilters.board ?? ""}
-          onChange={(e) =>
-            updateFilters({ board: e.target.value || undefined })
-          }
-          className="rounded border bg-background px-2 py-1 text-sm"
+        </Label>
+        <Select
+          value={currentFilters.board ?? "all"}
+          onValueChange={(val) => updateFilters({ board: val === "all" ? undefined : val })}
         >
-          <option value="">All boards</option>
-          {boards.map((board) => (
-            <option key={board.id} value={board.id}>
-              {board.title}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger id="board" size="sm" className="w-[160px]">
+            <SelectValue placeholder="All boards" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All boards</SelectItem>
+            {boards.map((board) => (
+              <SelectItem key={board.id} value={board.id}>
+                {board.title}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="flex items-center gap-2">
-        <label htmlFor="member" className="text-sm font-medium">
+        <Label htmlFor="member" className="text-sm font-medium">
           Member:
-        </label>
-        <select
-          id="member"
-          value={currentFilters.member ?? ""}
-          onChange={(e) =>
-            updateFilters({ member: e.target.value || undefined })
-          }
-          className="rounded border bg-background px-2 py-1 text-sm"
+        </Label>
+        <Select
+          value={currentFilters.member ?? "all"}
+          onValueChange={(val) => updateFilters({ member: val === "all" ? undefined : val })}
         >
-          <option value="">All members</option>
-          {members.map((member) => (
-            <option key={member.id} value={member.id}>
-              {member.name}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger id="member" size="sm" className="w-[160px]">
+            <SelectValue placeholder="All members" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All members</SelectItem>
+            {members.map((member) => (
+              <SelectItem key={member.id} value={member.id}>
+                {member.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
+      <div className="flex items-center gap-2 text-sm">
+        <Checkbox
+          id="includeArchivedBoards"
           checked={currentFilters.includeArchivedBoards === "1"}
-          onChange={(e) =>
+          onCheckedChange={(checked) =>
             updateFilters({
-              includeArchivedBoards: e.target.checked ? "1" : undefined,
+              includeArchivedBoards: checked ? "1" : undefined,
             })
           }
-          className="rounded border"
         />
-        Include archived boards
-      </label>
+        <Label htmlFor="includeArchivedBoards" className="cursor-pointer font-normal text-sm">
+          Include archived boards
+        </Label>
+      </div>
 
       <div className="flex items-center gap-2">
-        <label htmlFor="from" className="text-sm font-medium">
+        <Label htmlFor="from" className="text-sm font-medium">
           From:
-        </label>
-        <input
+        </Label>
+        <Input
           id="from"
           type="date"
           value={currentFilters.from ?? ""}
           onChange={(e) => updateFilters({ from: e.target.value || undefined })}
-          className={`rounded border bg-background px-2 py-1 text-sm ${
-            currentFilters.from ? "text-foreground" : "text-muted-foreground"
-          }`}
+          className="h-8 py-1 text-sm w-36"
         />
       </div>
 
       <div className="flex items-center gap-2">
-        <label htmlFor="to" className="text-sm font-medium">
+        <Label htmlFor="to" className="text-sm font-medium">
           To:
-        </label>
-        <input
+        </Label>
+        <Input
           id="to"
           type="date"
           value={currentFilters.to ?? ""}
           onChange={(e) => updateFilters({ to: e.target.value || undefined })}
-          className={`rounded border bg-background px-2 py-1 text-sm ${
-            currentFilters.to ? "text-foreground" : "text-muted-foreground"
-          }`}
+          className="h-8 py-1 text-sm w-36"
         />
       </div>
     </div>

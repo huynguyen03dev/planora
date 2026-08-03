@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { signIn } from "@/lib/auth-client";
+import { safeInternalPath } from "@/lib/redirect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,11 +19,8 @@ import {
 
 export function SignInForm() {
   const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect");
-  const redirectTo =
-    redirect && redirect.startsWith("/") && !redirect.startsWith("//")
-      ? redirect
-      : "/boards";
+  const redirect = searchParams.get("redirect") ?? undefined;
+  const redirectTo = safeInternalPath(redirect);
   const invitedEmail = searchParams.get("email") ?? "";
   // Preserve invite context when bouncing to the sign-up link.
   const signUpHref = `/sign-up${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
@@ -36,20 +34,25 @@ export function SignInForm() {
     setError("");
     setLoading(true);
 
-    await signIn.email(
-      {
-        email,
-        password,
-        callbackURL: redirectTo,
-      },
-      {
-        onError(ctx) {
-          setError(ctx.error.message);
-          setLoading(false);
+    try {
+      await signIn.email(
+        {
+          email,
+          password,
+          callbackURL: redirectTo,
         },
-      },
-    );
+        {
+          onError(ctx) {
+            setError(ctx.error.message);
+          },
+        },
+      );
+    } finally {
+      setLoading(false);
+    }
   }
+
+  const hasError = Boolean(error);
 
   return (
     <div className="flex flex-1 items-center justify-center px-4">
@@ -63,7 +66,7 @@ export function SignInForm() {
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
             {error && (
-              <p className="text-sm text-destructive">{error}</p>
+              <p id="form-error" role="alert" className="text-sm text-destructive">{error}</p>
             )}
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
@@ -74,10 +77,21 @@ export function SignInForm() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                autoComplete="email"
+                aria-invalid={hasError}
+                aria-describedby={hasError ? "form-error" : undefined}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">Password</Label>
+                <Link
+                  href="/forgot-password"
+                  className="text-sm text-muted-foreground underline-offset-4 hover:text-primary hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              </div>
               <Input
                 id="password"
                 type="password"
@@ -85,10 +99,13 @@ export function SignInForm() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                autoComplete="current-password"
+                aria-invalid={hasError}
+                aria-describedby={hasError ? "form-error" : undefined}
               />
             </div>
           </CardContent>
-      <CardFooter className="flex flex-col gap-4 pt-6">
+          <CardFooter className="flex flex-col gap-4 pt-6">
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Signing in..." : "Sign In"}
             </Button>

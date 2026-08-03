@@ -38,11 +38,17 @@ Config: `prisma.config.ts` (schema at `prisma/schema.prisma`, migrations at
 
 ### Tests
 
-**Vitest 2** (node env) is configured (`vitest.config.ts`). It includes
-`lib/**/*.test.ts` and `tests/**/*.test.ts`. There is **no** React Testing
-Library, **no** E2E (Playwright), and **no** CI test step yet — component and
-browser flows are currently unverified. See `docs/TEST_MATRIX.md` for the
-contract-to-proof map.
+**Vitest 2** is configured as two projects (`vitest.workspace.ts`): a `node`
+project (`lib/**/*.test.ts` + `tests/**/*.test.ts`, node env) and a `components`
+project (`components/**/*.test.tsx` + `app/**/*.test.tsx`, happy-dom env, added
+US-068). **E2E is Playwright** (`npm run test:e2e`, `e2e/**`, added US-009 — a
+two-client realtime harness). **CI** runs the unit/integration gate (`ci.yml`)
+plus the E2E suite (`e2e.yml`). React Testing Library now exists (US-068) with a
+representative set of client-component tests (`board-filter`, `card-detail-sheet`
+autosave, `rule-builder-dialog`); most React component internals are still
+untested, so component coverage remains a live gap — just no longer a total one.
+Async Server Components stay covered by E2E, not RTL. See `docs/TEST_MATRIX.md`
+for the contract-to-proof map.
 
 ```bash
 npm test                                      # run all tests once
@@ -51,10 +57,19 @@ npx vitest run path/to/file.test.ts           # single file
 npx vitest run -t "test name"                 # single test by name
 ```
 
-Proven today: `lib/dnd/apply-drop.test.ts`, `lib/card-history.test.ts`,
-`lib/analytics/engine.test.ts`, `tests/board-store.test.ts`,
-`tests/analytics-export.test.ts`. Server Actions, auth/RBAC, realtime, and
-React components are untested (the largest gaps).
+The security boundary IS tested. Proven today includes: the Server Action
+auth/permission/isolation matrix (`tests/server-actions/*.test.ts`, incl. a
+142-case RBAC matrix and sabotage-verified action tests), the socket
+room-authorization functions (`lib/realtime/auth.test.ts`, US-062 tg1), position
+math (`lib/dnd/apply-drop.test.ts`, `lib/ordering.test.ts`, `lib/list.test.ts`,
+`lib/card.test.ts`), card history/analytics (`lib/card-history.test.ts`,
+`lib/analytics/engine.test.ts`), the board store (`tests/board-store.test.ts`),
+and CSV export (`tests/analytics-export.test.ts`). RTL now covers a
+representative set of client components (US-068). The real remaining gaps: most
+React component internals (RTL exists but coverage is thin) and much per-action
+**business** logic — the `list-card` positive controls exercise the transaction
+bodies for a representative set (US-062 tg2) but most CRUD/lifecycle math is
+still only boundary-tested.
 
 ---
 
@@ -218,7 +233,10 @@ Required environment variables:
 DATABASE_URL="postgresql://user:password@host:5432/dbname?schema=public"
 BETTER_AUTH_SECRET="<generate-with: openssl rand -base64 32>"
 BETTER_AUTH_URL="http://localhost:3000"
+SMTP_HOST="localhost"   # dev/test only → Mailpit sink; prod uses RESEND_API_KEY
 ```
+
+Full env list (email, Cloudinary, cron, trusted origins) in `.env.example`.
 
 Database setup:
 
@@ -228,7 +246,14 @@ Database setup:
 4. Prototyping only: `npx prisma db push` (no migration file — never in prod).
 
 Local PostgreSQL is available via `docker-compose.yml` (postgres:16-alpine,
-port 5432).
+port 5432). The same file runs **Mailpit** (SMTP `:1025`, UI/API `:8025`) as
+the dev/test mail sink.
+
+**Email verification is enforced in every environment** (decisions 0023 + 0025):
+a new account can't reach `/boards` until its link is followed. Never
+disable/forge/seed to bypass. Get the real link from Mailpit (`localhost:8025`)
+locally; E2E does this automatically via the `signUp()` helper. Details in
+decision 0025.
 
 ---
 

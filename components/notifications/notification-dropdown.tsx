@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, useTransition } from "react";
+import { useState, useEffect, useCallback, useRef, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -45,73 +45,123 @@ export function NotificationDropdown({
   const [notifications, setNotifications] = useState<InboxNotificationItem[]>([]);
   const [invitations, setInvitations] = useState<InboxInvitationItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [markAllReadError, setMarkAllReadError] = useState<string | null>(null);
   const [errorByInvitationId, setErrorByInvitationId] = useState<Record<string, string>>({});
   const [isResolving, startResolving] = useTransition();
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const hasLoadedOnceRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   const fetchInbox = useCallback(async () => {
+    // Supersede any in-flight fetch: a rapid close→open (or a Retry mid-flight)
+    // must not let an older response commit stale data over the newer one.
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setIsLoading(true);
+    setFetchError(null);
+    setMarkAllReadError(null);
+
+    let anyFailure = false;
+
     try {
       const [notificationsRes, invitationsRes] = await Promise.all([
-        fetch("/api/notifications?limit=10"),
-        fetch("/api/invitations/pending"),
+        fetch("/api/notifications?limit=10", { signal: controller.signal }),
+        fetch("/api/invitations/pending", { signal: controller.signal }),
       ]);
+
+      let nextNotifications: InboxNotificationItem[] | undefined;
+      let nextInvitations: InboxInvitationItem[] | undefined;
 
       if (notificationsRes.ok) {
         const data = await notificationsRes.json();
-        setNotifications(data.notifications ?? []);
+        nextNotifications = data.notifications ?? [];
+      } else {
+        anyFailure = true;
       }
 
       if (invitationsRes.ok) {
         const data = await invitationsRes.json();
-        const pending: InboxInvitationItem[] = data.invitations ?? [];
-        setInvitations(pending);
-        onInvitationCountChange(pending.length);
+        nextInvitations = data.invitations ?? [];
+      } else {
+        anyFailure = true;
+      }
+
+      // Commit state atomically — only replace populated data when both
+      // endpoints succeeded and this fetch wasn't superseded, preventing a
+      // partial failure (or a stale in-flight response) from stitching fresh
+      // data onto stale.
+      if (!anyFailure && !controller.signal.aborted) {
+        setNotifications(nextNotifications ?? []);
+        setInvitations(nextInvitations ?? []);
+        onInvitationCountChange((nextInvitations ?? []).length);
+        hasLoadedOnceRef.current = true;
       }
     } catch {
-      // Silently fail — the bell badge still reflects the last known counts.
+      anyFailure = true;
     } finally {
-      setIsLoading(false);
+      // A superseded (aborted) fetch must not touch shared state — the fetch
+      // that replaced it owns the loading/error/data now.
+      if (!controller.signal.aborted) {
+        // Surface error on first load for both network errors (catch) and
+        // non-OK HTTP responses (anyFailure set from ok checks above).
+        // When already loaded once, stay quiet — don't replace populated data.
+        if (anyFailure && !hasLoadedOnceRef.current) {
+          setFetchError("Failed to load notifications. Please try again.");
+        }
+
+        setIsLoading(false);
+      }
     }
   }, [onInvitationCountChange]);
 
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        onClose();
-      }
-    }
-
     if (isOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
       fetchInbox();
     }
-
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [isOpen, onClose, fetchInbox]);
+    // Abort the in-flight fetch when the dropdown closes/unmounts so a late
+    // response can't commit onto a closed panel.
+    return () => abortRef.current?.abort();
+  }, [isOpen, fetchInbox]);
 
   const handleNotificationClick = useCallback(
     async (notification: InboxNotificationItem) => {
       if (!notification.isRead) {
-        await markNotificationReadAction(notification.id);
-        onMarkOneRead();
+        try {
+          const result = await markNotificationReadAction(notification.id);
+          if (result.success) {
+            onMarkOneRead();
+          }
+        } catch {
+          // Ignore — proceed to navigation even if mark-read fails.
+        }
+        // On failure the badge stays accurate (parent count unchanged). The
+        // user's primary intent — navigate — still proceeds.
       }
 
       onClose();
 
       if (notification.linkUrl) {
-        window.location.href = notification.linkUrl;
+        router.push(notification.linkUrl);
       }
     },
-    [onClose, onMarkOneRead],
+    [onClose, onMarkOneRead, router],
   );
 
   async function handleMarkAllRead() {
-    await markAllNotificationsReadAction();
-    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
-    onMarkAllRead();
+    setMarkAllReadError(null);
+    try {
+      const result = await markAllNotificationsReadAction();
+      if (!result.success) {
+        setMarkAllReadError(result.error);
+        return;
+      }
+      setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+      onMarkAllRead();
+    } catch {
+      setMarkAllReadError("Failed to mark all as read. Please try again.");
+    }
   }
 
   function setInvitationError(invitationId: string, error: string) {
@@ -180,21 +230,24 @@ export function NotificationDropdown({
   const hasUnreadNotifications = notifications.some((n) => !n.isRead);
 
   return (
-    <div
-      ref={dropdownRef}
-      className="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border bg-popover p-0 shadow-lg"
-    >
+    <div className="w-full flex flex-col">
       <div className="flex items-center justify-between border-b px-4 py-2">
         <span className="text-sm font-semibold">Notifications</span>
+        {markAllReadError && (
+          <span className="text-xs text-destructive" role="alert">
+            {markAllReadError}
+          </span>
+        )}
         {hasUnreadNotifications && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={handleMarkAllRead}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            className="flex h-auto items-center gap-1 p-1 text-xs text-muted-foreground hover:text-foreground"
           >
-            <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-3.5" />
+            <HugeiconsIcon icon={CheckmarkCircle02Icon} className="size-3.5" aria-hidden="true" />
             Mark all read
-          </button>
+          </Button>
         )}
       </div>
 
@@ -203,9 +256,28 @@ export function NotificationDropdown({
           <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
             Loading...
           </div>
+        ) : fetchError ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-8">
+            <HugeiconsIcon
+              icon={Notification03Icon}
+              className="size-8 opacity-50 text-destructive"
+              aria-hidden="true"
+            />
+            <span className="text-sm text-destructive" role="alert">
+              {fetchError}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={fetchInbox}
+            >
+              Retry
+            </Button>
+          </div>
         ) : items.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-8 text-muted-foreground">
-            <HugeiconsIcon icon={Notification03Icon} className="size-8 opacity-50" />
+            <HugeiconsIcon icon={Notification03Icon} className="size-8 opacity-50" aria-hidden="true" />
             <span className="text-sm">No notifications yet</span>
           </div>
         ) : (
@@ -219,6 +291,7 @@ export function NotificationDropdown({
                   <HugeiconsIcon
                     icon={UserGroupIcon}
                     className="mt-0.5 size-4 shrink-0 text-primary"
+                    aria-hidden="true"
                   />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium leading-tight">
@@ -264,7 +337,7 @@ export function NotificationDropdown({
                 key={`notification-${item.id}`}
                 type="button"
                 onClick={() => handleNotificationClick(item)}
-                className={`flex w-full items-start gap-3 border-b px-4 py-3 text-left transition-colors hover:bg-accent ${
+                className={`flex w-full items-start gap-3 border-b px-4 py-3 text-left transition-colors hover:bg-accent outline-none focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring ${
                   item.isRead ? "opacity-60" : "bg-accent/50"
                 }`}
               >

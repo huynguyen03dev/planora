@@ -4,6 +4,7 @@ import { useState, useTransition, useRef } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  Archive02Icon,
   Attachment01Icon,
   Calendar03Icon,
   Cancel01Icon,
@@ -27,7 +28,7 @@ import {
   updateCardEstimateAction,
   updateCardPriorityAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { MemberAvatar } from "@/components/member-avatar";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -42,6 +43,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -50,7 +52,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ArchiveCardDialog } from "@/components/boards/archive-card-dialog";
 import { CardAttachments } from "@/components/boards/card-attachments";
+import { CardCompletionToggle } from "@/components/boards/card-completion-toggle";
 import { CardChecklistsSection, type ChecklistData } from "@/components/boards/card-checklists-section";
 import { CardLabelsSection, type LabelChip } from "@/components/boards/card-labels-section";
 import type { CardDetailRecord } from "@/lib/card";
@@ -58,7 +62,8 @@ import type { CommentRecord } from "@/lib/comment";
 import type { ActivityRecord } from "@/lib/activity";
 import type { AttachmentRecord } from "@/lib/attachment";
 import type { CardMemberRecord, AssignableWorkspaceMemberRecord } from "@/lib/card-member";
-import { cn, getInitials } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { resolveMentions } from "@/lib/mention";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
 import { useMentionAutocomplete } from "./use-mention-autocomplete";
 
@@ -82,24 +87,6 @@ function toDueDateValue(date: Date): string {
   return format(date, "yyyy-MM-dd");
 }
 
-function MemberAvatar({
-  name,
-  image,
-  size = "default",
-  className,
-}: {
-  name: string;
-  image?: string | null;
-  size?: "default" | "sm" | "lg";
-  className?: string;
-}) {
-  return (
-    <Avatar size={size} className={className}>
-      {image ? <AvatarImage src={image} alt={name} /> : null}
-      <AvatarFallback>{getInitials(name)}</AvatarFallback>
-    </Avatar>
-  );
-}
 
 
 type UIComment = {
@@ -131,6 +118,7 @@ type CardDetailSheetProps = {
   cardLabelIds: string[];
   checklists: ChecklistData[];
   canEdit: boolean;
+  canArchive: boolean;
   canComment: boolean;
 };
 
@@ -147,6 +135,7 @@ export function CardDetailSheet({
   cardLabelIds,
   checklists,
   canEdit,
+  canArchive,
   canComment,
 }: CardDetailSheetProps) {
   const router = useRouter();
@@ -215,7 +204,7 @@ export function CardDetailSheet({
       }}
     >
       <DialogContent
-        className="h-[min(90vh,820px)] max-w-[min(96vw,768px)] overflow-hidden p-0"
+        className="h-[min(90vh,820px)] max-w-[min(96vw,768px)] overflow-hidden bg-popover p-0"
         onEscapeKeyDown={(e) => {
           // While the hero title is being edited, Escape reverts the field
           // (handled on the input) and must NOT close the dialog. Cancel Radix's
@@ -243,6 +232,7 @@ export function CardDetailSheet({
           cardLabelIds={cardLabelIds}
           checklists={checklists}
           canEdit={canEdit}
+          canArchive={canArchive}
           canComment={canComment}
         />
       </DialogContent>
@@ -265,6 +255,7 @@ type CardDetailDialogBodyProps = {
   cardLabelIds: string[];
   checklists: ChecklistData[];
   canEdit: boolean;
+  canArchive: boolean;
   canComment: boolean;
 };
 
@@ -280,6 +271,7 @@ function CardDetailDialogBody({
   cardLabelIds,
   checklists,
   canEdit,
+  canArchive,
   canComment,
 }: CardDetailDialogBodyProps) {
   const router = useRouter();
@@ -294,6 +286,8 @@ function CardDetailDialogBody({
   const coverInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+
   const selectedDueDate = parseDateInputValue(draftDueDate);
 
   // The hero title/description bind to the live store value (passed in via
@@ -491,7 +485,7 @@ function CardDetailDialogBody({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
+    <div className="flex h-full min-h-0 flex-col">
       {/* Document-style header: the title is the hero (inline-editable), with an
           "Add to card" action row beneath it — no breadcrumb, no "Edit card"
           heading, no uppercase TITLE label (US-043). The Dialog still needs an
@@ -505,6 +499,14 @@ function CardDetailDialogBody({
 
       <div className="space-y-3 border-b px-8 py-4">
         <div className="flex items-start justify-between gap-3">
+          <CardCompletionToggle
+            cardId={card.id}
+            completedAt={card.completedAt}
+            canEdit={canEdit}
+            variant="hero"
+            onError={setError}
+            className="mt-1.5"
+          />
           {canEdit ? (
             <input
               id="card-detail-title"
@@ -574,6 +576,19 @@ function CardDetailDialogBody({
               {error ? error : isPending ? "Saving…" : null}
             </span>
 
+            {canArchive ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Archive card"
+                title="Archive"
+                onClick={() => setArchiveDialogOpen(true)}
+              >
+                <HugeiconsIcon icon={Archive02Icon} size={18} strokeWidth={2} />
+              </Button>
+            ) : null}
+
             <DialogClose asChild>
               <Button
                 type="button"
@@ -584,6 +599,19 @@ function CardDetailDialogBody({
                 <HugeiconsIcon icon={Cancel01Icon} size={18} strokeWidth={2} />
               </Button>
             </DialogClose>
+
+            {/* Archive confirm (portal — in-tree position is irrelevant). Any
+                card is archivable from here regardless of completion state; the
+                board face only offers archive on completed cards (US-069). */}
+            {canArchive ? (
+              <ArchiveCardDialog
+                cardId={card.id}
+                cardTitle={card.title}
+                open={archiveDialogOpen}
+                onOpenChange={setArchiveDialogOpen}
+                onError={setError}
+              />
+            ) : null}
           </div>
         </div>
 
@@ -796,18 +824,20 @@ function CardDetailDialogBody({
                     key={member.id}
                     className="flex items-center gap-1.5 rounded-full bg-muted py-0.5 pl-0.5 pr-2.5 text-sm"
                   >
-                    <MemberAvatar name={member.name} image={member.image} size="sm" />
+                    <MemberAvatar seed={member.id} name={member.name} image={member.image} size="sm" />
                     <span className="max-w-40 truncate">{member.name}</span>
                     {canEdit ? (
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="icon"
                         aria-label={`Remove ${member.name}`}
-                        className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+                        className="h-4 w-4 p-0 rounded-full text-muted-foreground hover:text-foreground hover:bg-transparent"
                         disabled={isPending}
                         onClick={() => handleRemoveMember(member.id)}
                       >
                         ×
-                      </button>
+                      </Button>
                     ) : null}
                   </span>
                 ))
@@ -840,7 +870,7 @@ function CardDetailDialogBody({
                             disabled={isPending}
                             onClick={() => handleAssignMember(member.id)}
                           >
-                            <MemberAvatar name={member.name} image={member.image} size="sm" />
+                            <MemberAvatar seed={member.id} name={member.name} image={member.image} size="sm" />
                             <span className="flex min-w-0 flex-col text-left">
                               <span className="truncate text-sm font-medium">{member.name}</span>
                               <span className="truncate text-xs font-normal text-muted-foreground">
@@ -871,9 +901,9 @@ function CardDetailDialogBody({
           </div>
 
           <div id="card-section-priority" className="flex items-center gap-3">
-            <label htmlFor="card-priority" className="w-20 shrink-0 text-sm text-muted-foreground">
+            <Label htmlFor="card-priority" className="w-20 shrink-0 text-sm font-normal text-muted-foreground">
               Priority
-            </label>
+            </Label>
             <Select
               value={draftPriority}
               onValueChange={(value) => {
@@ -977,9 +1007,9 @@ function CardDetailDialogBody({
           </div>
 
           <div className="flex items-center gap-3">
-            <label htmlFor="card-estimate-hours" className="w-20 shrink-0 text-sm text-muted-foreground">
+            <Label htmlFor="card-estimate-hours" className="w-20 shrink-0 text-sm font-normal text-muted-foreground">
               Estimate
-            </label>
+            </Label>
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <Select
                 value={draftEstimateHours === "" ? "none" : draftEstimateHours}
@@ -989,7 +1019,7 @@ function CardDetailDialogBody({
                   setError("");
                   saveEstimate(next);
                 }}
-                disabled={!canEdit || isPending || Boolean(card.completedAt)}
+                disabled={!canEdit || isPending}
               >
                 <SelectTrigger id="card-estimate-hours" className="w-full max-w-40">
                   <SelectValue placeholder="No estimate" />
@@ -1002,11 +1032,6 @@ function CardDetailDialogBody({
                   ))}
                 </SelectContent>
               </Select>
-              {card.completedAt ? (
-                <span className="text-xs text-muted-foreground">
-                  Locked after first completion.
-                </span>
-              ) : null}
             </div>
           </div>
         </div>
@@ -1196,11 +1221,8 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
                         : "text-popover-foreground",
                     )}
                   >
-                    <MemberAvatar name={member.name} image={member.image} size="sm" />
+                    <MemberAvatar seed={member.id} name={member.name} image={member.image} size="sm" />
                     <span className="flex-1 truncate">{member.name}</span>
-                    <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-                      {member.role}
-                    </span>
                   </div>
                 ))
               )}
@@ -1230,56 +1252,36 @@ type CommentItemProps = {
 function renderMentionContent(content: string, memberNames: string[]) {
   if (!memberNames.length) return content;
 
-  const lowerNames = memberNames.map((n) => n.toLowerCase());
+  // Share the single mention resolver (lib/mention.ts) with the notify path so
+  // what is highlighted and what is notified never diverge.
+  const matches = resolveMentions(
+    content,
+    memberNames.map((name) => ({ name })),
+  );
+  if (!matches.length) return content;
+
   const result: React.ReactNode[] = [];
-  let i = 0;
   let plainStart = 0;
 
-  function flushPlain(end: number) {
-    if (end > plainStart) {
-      result.push(content.slice(plainStart, end));
-      plainStart = end;
+  for (const match of matches) {
+    if (match.start > plainStart) {
+      result.push(content.slice(plainStart, match.start));
     }
+    result.push(
+      <span
+        key={match.start}
+        className="rounded bg-[var(--chart-2)]/10 px-0.5 font-medium text-[var(--chart-2)]"
+      >
+        @{match.member.name}
+      </span>
+    );
+    plainStart = match.end;
   }
 
-  while (i < content.length) {
-    if (content[i] === "@" && i + 1 < content.length) {
-      let bestMatch: { name: string; endIndex: number } | null = null;
-
-      for (let j = 0; j < memberNames.length; j++) {
-        const name = memberNames[j];
-        const lowerName = lowerNames[j];
-        const afterAt = content.slice(i + 1);
-        if (afterAt.toLowerCase().startsWith(lowerName)) {
-          const endIdx = i + 1 + name.length;
-          const nextChar = content[endIdx];
-          if (!nextChar || !/[a-zA-Z]/.test(nextChar)) {
-            if (!bestMatch || name.length > bestMatch.name.length) {
-              bestMatch = { name, endIndex: endIdx };
-            }
-          }
-        }
-      }
-
-      if (bestMatch) {
-        flushPlain(i);
-        result.push(
-          <span
-            key={i}
-            className="rounded bg-[var(--chart-2)]/10 px-0.5 font-medium text-[var(--chart-2)]"
-          >
-            @{bestMatch.name}
-          </span>
-        );
-        i = bestMatch.endIndex;
-        plainStart = i;
-        continue;
-      }
-    }
-    i++;
+  if (plainStart < content.length) {
+    result.push(content.slice(plainStart));
   }
 
-  flushPlain(content.length);
   return result;
 }
 
@@ -1293,7 +1295,7 @@ function CommentItem({ comment, memberNames }: CommentItemProps) {
 
   return (
     <div className="flex items-start gap-3">
-      <MemberAvatar name={comment.user.name} image={comment.user.image} />
+      <MemberAvatar seed={comment.user.id} name={comment.user.name} image={comment.user.image} />
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">{comment.user.name}</span>
@@ -1323,7 +1325,7 @@ function ActivityItem({ activity }: ActivityItemProps) {
 
   return (
     <div className="flex items-start gap-3">
-      <MemberAvatar name={activity.user.name} image={activity.user.image} />
+      <MemberAvatar seed={activity.user.id} name={activity.user.name} image={activity.user.image} />
       <div className="min-w-0 flex-1 space-y-1">
         <p className="text-sm">
           <span className="font-medium">{activity.user.name}</span> {actionLabel}

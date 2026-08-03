@@ -15,6 +15,8 @@ story packet + decision when warranted).
 - `realtime-sync.md` — Socket.io live updates and the drag-aware deferral rule.
 - `notifications.md` — in-app, email, and socket notifications.
 - `analytics.md` — the workspace analytics dashboard and its metrics.
+- `automation.md` — Butler-style rules (triggers → ordered actions), the inline
+  transaction boundary, loop prevention, and system-actor attribution.
 
 ## Update Rule
 

@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 export type ChecklistItemData = {
@@ -171,16 +172,16 @@ export function CardChecklistsSection({
                         disabled={!canEdit || isPending}
                         onCheckedChange={() => toggleItem(item.id, item.isCompleted)}
                       />
-                      <label
+                      <Label
                         htmlFor={`checklist-item-${item.id}`}
                         className={cn(
-                          "flex-1 text-sm",
+                          "flex-1 text-sm font-normal cursor-pointer select-text",
                           canEdit && !isPending ? "cursor-pointer" : "cursor-default",
                           item.isCompleted && "text-muted-foreground line-through",
                         )}
                       >
                         {item.title}
-                      </label>
+                      </Label>
                     </div>
                     {canEdit ? (
                       <Button
@@ -219,6 +220,7 @@ export function CardChecklistsSection({
                     }))
                   }
                   placeholder="Add an item…"
+                  aria-label="Add an item"
                   disabled={isPending}
                   className="h-9"
                 />
@@ -247,6 +249,7 @@ export function CardChecklistsSection({
             value={newChecklistTitle}
             onChange={(event) => setNewChecklistTitle(event.target.value)}
             placeholder="Checklist title"
+            aria-label="Checklist title"
             disabled={isPending}
             autoFocus
             className="h-9"

@@ -19,7 +19,6 @@ export interface ListSnapshot {
   id: string;
   title: string;
   boardId: string;
-  isDone: boolean;
   position: number;
 }
 
@@ -27,21 +26,31 @@ export interface ListCreatedPayload extends BoardEventPayload {
   list: ListSnapshot;
 }
 
+export interface ListRestoredPayload extends BoardEventPayload {
+  list: ListSnapshot;
+}
+
 export interface ListUpdatedPayload extends BoardEventPayload {
   listId: string;
   title?: string;
-  isDone?: boolean;
 }
 
 export interface ListDeletedPayload extends BoardEventPayload {
   listId: string;
 }
 
+export type CardPriority = "URGENT" | "HIGH" | "MEDIUM" | "LOW";
+
 export interface CardSnapshot {
   id: string;
   listId: string;
   title: string;
   position: number;
+  // US-083 W7: quick-captured cards carry due date + priority fidelity to
+  // observer clients. Optional so pre-W7 emitters/payloads stay valid — the
+  // receiver falls back to null when absent.
+  dueDate?: string | null;
+  priority?: CardPriority | null;
 }
 
 export interface CardCreatedPayload extends BoardEventPayload {
@@ -55,6 +64,15 @@ export interface CardUpdatedPayload extends BoardEventPayload {
 
 export interface CardArchivedPayload extends BoardEventPayload {
   cardId: string;
+}
+
+// In-place / live (not structural): a card's completion flag flipped. Carries
+// completedAt (ISO string, or null when reopened) — not a bare boolean — so the
+// receiver recomputes due-status. Safe to apply mid-drag: it never reorders the
+// list array (mirrors card:labels-updated). US-045.
+export interface CardCompletionUpdatedPayload extends BoardEventPayload {
+  cardId: string;
+  completedAt: string | null;
 }
 
 export interface CardLabelSnapshot {
@@ -115,6 +133,14 @@ export interface NotificationNewPayload {
   createdAt: string;
 }
 
+// Minimal, non-sensitive live-arrival signal (US-083 W2): the invitee's own
+// user-room event carries only the invitation's public id — the header bumps
+// the badge; the inbox re-fetches authoritative state from the invitation
+// table when opened. No workspace/inviter details ride the wire.
+export interface InvitationNewPayload {
+  invitationId: string;
+}
+
 // Board-independent display fields, resolved once per socket connection.
 export interface UserProfile {
   id: string;
@@ -147,16 +173,19 @@ export type ServerToClientEvents = {
   "card:moved": (payload: CardMovedPayload) => void;
   "list:moved": (payload: ListMovedPayload) => void;
   "list:created": (payload: ListCreatedPayload) => void;
+  "list:restored": (payload: ListRestoredPayload) => void;
   "list:updated": (payload: ListUpdatedPayload) => void;
   "list:deleted": (payload: ListDeletedPayload) => void;
   "card:created": (payload: CardCreatedPayload) => void;
   "card:updated": (payload: CardUpdatedPayload) => void;
   "card:archived": (payload: CardArchivedPayload) => void;
+  "card:completion-updated": (payload: CardCompletionUpdatedPayload) => void;
   "card:labels-updated": (payload: CardLabelsUpdatedPayload) => void;
   "card:members-updated": (payload: CardMembersUpdatedPayload) => void;
   "comment:created": (payload: CommentCreatedPayload) => void;
   "board:presence": (payload: BoardPresencePayload) => void;
   "notification:new": (payload: NotificationNewPayload) => void;
+  "invitation:new": (payload: InvitationNewPayload) => void;
   "analytics:refresh": (payload: AnalyticsRefreshPayload) => void;
   "board:error": (payload: { message: string }) => void;
 };

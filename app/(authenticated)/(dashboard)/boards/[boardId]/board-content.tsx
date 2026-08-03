@@ -15,7 +15,6 @@ import {
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
 import { AddListButton } from "@/components/boards/add-list-button";
 import { ListColumn } from "@/components/boards/list-column";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { translateCardDrop, translateListDrop } from "@/lib/dnd/apply-drop";
 import { useBoardStore } from "./board-store";
 
@@ -25,7 +24,6 @@ type BoardContentProps = {
     id: string;
     title: string;
     boardId: string;
-    isDone: boolean;
     position: number;
     cards: Array<{
       id: string;
@@ -36,6 +34,7 @@ type BoardContentProps = {
       priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
       dueDate: Date | null;
       completedAt: Date | null;
+      updatedAt: Date;
       labels: Array<{ id: string; name: string; color: string }>;
       members: Array<{ id: string; name: string; image: string | null }>;
       memberCount: number;
@@ -203,7 +202,12 @@ export function BoardContent({
 
   return (
     <DragDropContext onDragStart={onDragStart} onDragEnd={onDragEnd}>
-      <ScrollArea className="flex-1" showHorizontalScrollbar>
+      {/* Native horizontal scroller (not Radix ScrollArea): Radix wraps children
+          in a display:table element that breaks the h-full height chain, so the
+          columns can't learn the board height and the whole board scrolls
+          vertically. A plain overflow-x container preserves the chain — each
+          column caps at the board bottom and scrolls its own cards instead. */}
+      <div className="themed-scrollbar min-h-0 flex-1 overflow-x-auto overflow-y-hidden">
         {error ? (
           <p className="px-4 pt-4 text-sm text-destructive">{error}</p>
         ) : null}
@@ -215,10 +219,15 @@ export function BoardContent({
           isDropDisabled={!canEdit}
         >
           {(provided) => (
+            // No flex `gap` between lists: like the cards, @hello-pangea/dnd
+            // sizes its horizontal list placeholder from the dragged column's
+            // box (margins included) but not from this row's flex gap, so a gap
+            // made the row shrink/shift mid-drag. Spacing now lives as mr-4 on
+            // each ListColumn's draggable wrapper.
             <div
               ref={provided.innerRef}
               {...provided.droppableProps}
-              className="flex w-max min-w-full items-start gap-4 p-3 sm:p-4"
+              className="flex h-full w-max min-w-full items-start p-3 sm:p-4"
             >
               {boardLists.map((list, index) => (
                 <ListColumn
@@ -240,7 +249,7 @@ export function BoardContent({
             </div>
           )}
         </Droppable>
-      </ScrollArea>
+      </div>
     </DragDropContext>
   );
 }

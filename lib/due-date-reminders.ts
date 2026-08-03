@@ -90,6 +90,8 @@ export function buildCardSelectionWhere(now: Date) {
     completedAt: null,
     archivedAt: null,
     deletedAt: null,
+    // US-074 Slice B2: exclude cards whose parent list is archived.
+    list: { archivedAt: null },
     OR: [
       {
         // DUE_SOON: dueDate - 24h <= now < dueDate  (dueDate strictly in the future)

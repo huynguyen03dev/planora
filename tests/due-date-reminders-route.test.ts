@@ -18,9 +18,15 @@ const mockDb = vi.hoisted(() => ({
 }));
 
 const mockNotifyDueDate = vi.hoisted(() => vi.fn());
+const mockMaxApproachWindowMinutes = vi.hoisted(() => vi.fn().mockResolvedValue(null));
+const mockEvaluateScheduledCard = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/prisma", () => ({ default: mockDb, db: mockDb }));
 vi.mock("@/lib/notification", () => ({ notifyDueDate: mockNotifyDueDate }));
+vi.mock("@/lib/automation/scheduled", () => ({
+  maxApproachWindowMinutes: mockMaxApproachWindowMinutes,
+  evaluateScheduledCard: mockEvaluateScheduledCard,
+}));
 vi.mock("@/lib/email", () => ({ sendEmail: vi.fn() }));
 vi.mock("@/lib/realtime/server", () => ({ emitNotificationNew: vi.fn() }));
 vi.mock("@/emails/due-date-email", () => ({ DueDateEmail: vi.fn(() => null) }));
@@ -269,5 +275,66 @@ describe("idempotency — two overlapping ticks", () => {
     expect(body.notified).toBe(0);
     expect(body.skipped).toBe(tick1Notified); // Same count as what was notified in tick 1
     expect(body.errors).toBe(0);
+  });
+});
+
+describe("scheduled pass — US-074 Slice B2 (list archivedAt:null filter)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("queries scheduled cards with list: { archivedAt: null } when maxApproachWindowMinutes > 0", async () => {
+    const now = new Date();
+    const dueSoon = new Date(now.getTime() + 30 * 60 * 1000); // 30min from now
+
+    // Reset modules so the route re-imports the mocked scheduled module
+    vi.resetModules();
+
+    // Set up mocks fresh for this test
+    const scheduledCard = {
+      id: "card-scheduled-1",
+      dueDate: dueSoon,
+      priority: "MEDIUM",
+      list: { id: "list-1", boardId: "board-1", board: { workspaceId: "ws-1" } },
+    };
+
+    // Override the local mock values via the hoisted references
+    mockMaxApproachWindowMinutes.mockResolvedValue(120); // 2h window
+    mockEvaluateScheduledCard.mockResolvedValue({
+      applied: 1,
+      notified: 0,
+      skipped: 0,
+      errors: 0,
+    });
+
+    // First findMany (reminder scan) returns empty; second findMany (scheduled
+    // scan) returns one card. Use mockImplementation to track both calls.
+    const findManyCalls: Array<{ where: Record<string, unknown> }> = [];
+    mockDb.card.findMany.mockImplementation(async (args: { where: Record<string, unknown> }) => {
+      findManyCalls.push(args);
+      // First call (reminder scan) → empty
+      // Second call (scheduled scan) → one card
+      return findManyCalls.length === 1 ? [] : [scheduledCard];
+    });
+    mockDb.board.findMany.mockResolvedValue([{ id: "board-1", title: "Board" }]);
+
+    const response = await callRoute({ cronSecret: "test-secret", bearerToken: "test-secret" });
+    const body = await response.json();
+
+    // Assert the route ran and the scheduled pass produced results
+    expect(body.processed).toBe(0); // reminder scan returned 0 cards
+    expect(body.scheduledApplied).toBe(1); // scheduled pass applied
+    expect(body.scheduledErrors).toBe(0);
+
+    // The second findMany call is the scheduled scan; it must include list archive filter
+    const scheduledCall = findManyCalls[1];
+    expect(scheduledCall).toBeDefined();
+    // The scheduled scan where clause must include list: { archivedAt: null }
+    expect(scheduledCall.where).toHaveProperty("list");
+    expect(scheduledCall.where.list).toEqual({ archivedAt: null });
+
+    // Rebuild the original module states for subsequent tests
+    vi.resetModules();
+    mockMaxApproachWindowMinutes.mockResolvedValue(null);
   });
 });

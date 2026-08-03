@@ -68,7 +68,12 @@ const h = vi.hoisted(() => {
     createActivityEntry: fn(),
     uploadToCloudinary: fn(),
     db: {
+      $transaction: vi.fn(),
       card: { update: vi.fn() },
+    },
+    cloudinaryV2: {
+      uploader: { destroy: vi.fn() },
+      config: vi.fn(),
     },
     emit: {
       emitAnalyticsRefresh: fn(),
@@ -94,7 +99,6 @@ vi.mock("@/lib/list", () => ({
   getListWithBoard: vi.fn(),
   createList: vi.fn(),
   updateListTitle: vi.fn(),
-  updateListIsDone: vi.fn(),
   reorderListByNeighbors: vi.fn(),
 }));
 vi.mock("@/lib/card", () => ({
@@ -135,6 +139,7 @@ vi.mock("@/lib/cloudinary", () => ({
 vi.mock("@/lib/realtime/server", () => ({ ...h.emit }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/headers", () => ({ headers: vi.fn(async () => new Headers()) }));
+vi.mock("cloudinary", () => ({ v2: h.cloudinaryV2 }));
 
 h.checkRef.fn = (ws, perms) => {
   const role = h.state.membership.get(`${h.state.callerId}:${ws}`);
@@ -314,7 +319,7 @@ describe("setCardCoverAction", () => {
     expectNoWrites(...writeSeams);
   });
 
-  it("allow: WS-A editor uploads, attaches, and sets the returned secure URL as cover", async () => {
+  it("allow: WS-A editor uploads, attaches, and sets the returned secure URL as cover (via tx with FOR UPDATE)", async () => {
     signInAs("u", WS_A, "editor");
     h.uploadToCloudinary.mockResolvedValue({
       secureUrl: OWN_URL,
@@ -323,11 +328,84 @@ describe("setCardCoverAction", () => {
     });
     h.createAttachment.mockResolvedValue({ id: "att-1", fileUrl: OWN_URL });
     h.updateCardCover.mockResolvedValue({ id: CARD_ID, coverImage: OWN_URL });
+    h.createActivityEntry.mockResolvedValue({ id: "a" });
+    // Mock $transaction to execute callback with a minimal tx
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: "list-1", archivedAt: null }]),
+      attachment: { create: (...args: unknown[]) => h.createAttachment(...args) },
+      activity: { create: (...args: unknown[]) => h.createActivityEntry(...args) },
+      card: { update: (...args: unknown[]) => h.updateCardCover(...args) },
+    };
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
 
     const result = await setCardCoverAction(fileForm());
     expect(h.uploadToCloudinary).toHaveBeenCalled();
     expect(h.createAttachment).toHaveBeenCalled();
-    expect(h.updateCardCover).toHaveBeenCalledWith(CARD_ID, OWN_URL);
+    expect(h.updateCardCover).toHaveBeenCalledWith(CARD_ID, OWN_URL, expect.any(Object));
     expect(result.success).toBe(true);
+    expect(tx.$queryRaw).toHaveBeenCalled();
+  });
+
+  // ── Revalidation failure + compensation ───────────────────────────────
+
+  it("revalidation failure: active list gone between Cloudinary upload and tx — compensates and returns Card not found", async () => {
+    signInAs("u", WS_A, "editor");
+    h.uploadToCloudinary.mockResolvedValue({
+      secureUrl: OWN_URL,
+      publicId: "comp-pid",
+      resourceType: "image",
+    });
+    // Reset the destroy spy so we can assert precisely
+    h.cloudinaryV2.uploader.destroy.mockClear();
+
+    // $transaction callback mock — $queryRaw returns empty (list gone)
+    const tx = {
+      $queryRaw: vi.fn(async () => []),
+      attachment: { create: vi.fn() },
+      activity: { create: vi.fn() },
+      card: { update: vi.fn() },
+    };
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+
+    const result = await setCardCoverAction(fileForm());
+
+    // Must fail with "Card not found" (existing card-layer posture)
+    expect(result).toEqual({ success: false, error: "Card not found" });
+
+    // No attachment, activity, or cover writes
+    expect(h.createAttachment).not.toHaveBeenCalled();
+    expect(h.createActivityEntry).not.toHaveBeenCalled();
+    expect(h.updateCardCover).not.toHaveBeenCalled();
+
+    // Compensation: destroy called with the exact uploaded publicId + resourceType
+    expect(h.cloudinaryV2.uploader.destroy).toHaveBeenCalledWith("comp-pid", {
+      resource_type: "image",
+    });
+  });
+
+  it("success path does not compensate (no destroy call)", async () => {
+    signInAs("u", WS_A, "editor");
+    h.uploadToCloudinary.mockResolvedValue({
+      secureUrl: OWN_URL,
+      publicId: "pid",
+      resourceType: "image",
+    });
+    h.createAttachment.mockResolvedValue({ id: "att-1", fileUrl: OWN_URL });
+    h.updateCardCover.mockResolvedValue({ id: CARD_ID, coverImage: OWN_URL });
+    h.createActivityEntry.mockResolvedValue({ id: "a" });
+    h.cloudinaryV2.uploader.destroy.mockClear();
+
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: "list-1", archivedAt: null }]),
+      attachment: { create: (...args: unknown[]) => h.createAttachment(...args) },
+      activity: { create: (...args: unknown[]) => h.createActivityEntry(...args) },
+      card: { update: (...args: unknown[]) => h.updateCardCover(...args) },
+    };
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+
+    const result = await setCardCoverAction(fileForm());
+    expect(result.success).toBe(true);
+    // Compensation must NOT fire on success
+    expect(h.cloudinaryV2.uploader.destroy).not.toHaveBeenCalled();
   });
 });

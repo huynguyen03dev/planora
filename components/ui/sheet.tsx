@@ -36,7 +36,12 @@ function SheetOverlay({
   return (
     <DialogPrimitive.Overlay
       data-slot="sheet-overlay"
-      className={cn("fixed inset-0 z-50 bg-black/50", className)}
+      // customized: animate overlay fade in/out (DESIGN.md §Motion + dialog pattern)
+      className={cn(
+        "fixed inset-0 z-50 bg-black/50",
+        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0",
+        className,
+      )}
       {...props}
     />
   )
@@ -56,8 +61,17 @@ function SheetContent({
       <DialogPrimitive.Content
         data-slot="sheet-content"
         data-side={side}
+        // customized: animate sheet slide in/out per side (DESIGN.md §Motion
+        // + dialog/alert-dialog pattern). Each side slides from/to its
+        // corresponding direction; duration-200 matches the 200ms recommendation.
         className={cn(
           "fixed z-50 bg-background p-6 shadow-lg transition",
+          "duration-200",
+          "data-[state=open]:animate-in data-[state=closed]:animate-out",
+          "data-[side=right]:data-[state=open]:slide-in-from-right data-[side=right]:data-[state=closed]:slide-out-to-right",
+          "data-[side=left]:data-[state=open]:slide-in-from-left data-[side=left]:data-[state=closed]:slide-out-to-left",
+          "data-[side=top]:data-[state=open]:slide-in-from-top data-[side=top]:data-[state=closed]:slide-out-to-top",
+          "data-[side=bottom]:data-[state=open]:slide-in-from-bottom data-[side=bottom]:data-[state=closed]:slide-out-to-bottom",
           "data-[side=right]:inset-y-0 data-[side=right]:right-0 data-[side=right]:h-full data-[side=right]:w-3/4 data-[side=right]:border-l sm:data-[side=right]:max-w-sm",
           "data-[side=left]:inset-y-0 data-[side=left]:left-0 data-[side=left]:h-full data-[side=left]:w-3/4 data-[side=left]:border-r sm:data-[side=left]:max-w-sm",
           "data-[side=top]:inset-x-0 data-[side=top]:top-0 data-[side=top]:border-b",

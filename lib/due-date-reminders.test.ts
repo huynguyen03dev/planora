@@ -137,4 +137,9 @@ describe("buildCardSelectionWhere", () => {
     const where = buildCardSelectionWhere(NOW);
     expect(where.OR).toHaveLength(2);
   });
+
+  it("excludes cards whose parent list is archived (US-074 Slice B2)", () => {
+    const where = buildCardSelectionWhere(NOW);
+    expect(where.list).toEqual({ archivedAt: null });
+  });
 });

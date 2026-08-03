@@ -30,11 +30,11 @@ carry rich metadata. All mutations are Server Actions under
 
 - Ordered columns on a board, ordered by `position Float`, unique per
   `(boardId, position)`.
-- Actions: `createListAction`, `updateListAction` (rename),
-  `updateListIsDoneAction` (toggle completion column), `deleteListAction`,
-  `reorderListAction`.
-- `isDone` marks the completion column: **moving a card into an isDone list
-  auto-sets the card's `completedAt`**; moving it out reopens it.
+- Actions: `createListAction`, `updateListAction` (rename), `deleteListAction` (legacy alias for `archiveListAction`), `archiveListAction`, `reorderListAction`, `restoreListAction` (pending in Slice C: `permanentlyDeleteListAction`).
+- Lists carry **no** completion flag. Completion is a property of the card, not
+  of its column (decision 0020) — a list named "Done" is an ordinary list and may
+  hold a mix of complete and incomplete cards.
+- **Safe List Lifecycle (US-074, Decision 0026 Accepted):** Slices A & B implemented — archiving (`archiveListAction` / `deleteListAction`) soft-deletes the list (`archivedAt = now()`), hiding it and its cards from active board queries. Slice B adds list discovery & restore. Slice B2 adds archived-list boundary hardening: central resolver guards (`getListWithBoard`, `getCardWithListAndBoard`, `getCardWithListAndMembers`) reject mutations on cards under archived lists; checklist scopes expose `listArchived`; due-date reminders and scheduled automation exclude archived-list cards. Slice C (admin permanent delete) pending.
 
 ## Cards
 
@@ -42,13 +42,22 @@ carry rich metadata. All mutations are Server Actions under
   (`URGENT|HIGH|MEDIUM|LOW`), `dueDate`, `estimateHours`, `completedAt`,
   cover image, `archivedAt` (soft delete).
 - Actions: `createCardAction`, `updateCardDetailsAction` (title/description),
-  `updateCardEstimateAction`, `updateCardDueDateAction`, `archiveCardAction`,
+  `updateCardEstimateAction`, `updateCardDueDateAction`,
+  `toggleCardCompletionAction` (mark complete / reopen), `archiveCardAction`,
   `restoreCardAction`, `reorderCardAction`, `moveCardAction`.
-- **Estimate rule:** once a card has completed once, its estimate cannot be
-  changed (audited as `ESTIMATE_CHANGED` history). Workspaces may require an
-  estimate before a card can be marked done (`requireEstimateBeforeDone`).
-- **Move semantics:** `moveCardAction` relocates a card across lists and applies
-  the auto-completion/reopen logic based on the target list's `isDone`.
+- **Completion:** `Card.completedAt` is the single source of truth, written only
+  by `toggleCardCompletionAction` (a card-owned checkbox — Trello-style, decision
+  0020). Completing writes `completedAt`, reopening clears it; each transition
+  records a `CARD_COMPLETED` / `CARD_REOPENED` history event and broadcasts a
+  dedicated `card:completion-updated` realtime event. **Dragging never changes
+  completion.**
+- **Estimate rule:** the estimate stays editable through complete/reopen cycles
+  (no lock — the event log preserves estimate-at-completion for analytics,
+  decision 0020). Workspaces may still require an estimate before a card can be
+  marked complete (`requireEstimateBeforeDone`), enforced by the completion
+  toggle and surfaced inline.
+- **Move semantics:** `moveCardAction` relocates a card across lists + positions
+  only. It never touches `completedAt` and emits no completion/reopen history.
 - **Archive & restore:** `archiveCardAction` soft-archives (sets `archivedAt`,
   records a `CARD_ARCHIVED` history event, emits `card:archived` to remove it
   live). `restoreCardAction` is the inverse — it clears `archivedAt`, records a
@@ -59,8 +68,27 @@ carry rich metadata. All mutations are Server Actions under
   default `getCardWithListAndBoard` filters archived cards out. The board header
   exposes an **Archived cards** view (editor/admin only) listing the board's
   archived cards with their original list and a Restore button (US-016).
-  Cards-only for now — list and board (closed-boards) restore are deferred
-  follow-ups; permanent (hard) delete from the archive view is not yet built.
+  Permanent delete from the archive view is implemented for archived lists
+  (Slice C: `permanentlyDeleteListAction`, admin-only via
+  `organization:["update"]`, with exact title confirmation, Cloudinary attachment
+  guard (decision 0029), and active-cards force option).
+- **Bounded undo (US-083 W8, decision 0031):** after **card archive** and
+  **list archive** succeed, a transient snackbar offers Undo (8s, dismissible,
+  navigation-dismissed; DESIGN.md Transient Feedback). Undo calls the real
+  `restoreCardAction` / `restoreListAction` — same-row restore, existing
+  permission/isolation gates; the action result is the source of truth (no
+  optimistic pseudo-restore). Success is a polite status; failure is an
+  assertive alert with the action's own message. **Parent-list-archived race:**
+  if the archived card's parent list is archived before Undo, the restore
+  fails safely with the dedicated "Restore the list first." outcome — the card
+  is never restored into an invisible list. The check runs BOTH in the
+  archived-aware resolver (sequential case, discriminated only for authorized
+  callers — no existence leak) and inside the restore transaction under
+  `SELECT ... FOR UPDATE` (true race, same pattern as US-074), so a concurrent
+  list archival between pre-read and commit can never slip a restore through.
+  Undo is exactly two surfaces: permanent list deletion, member removal, rule/
+  label deletion, and board/workspace deletion offer no undo (non-goal
+  matrix, decision 0031).
 
 ## Card metadata
 
@@ -98,6 +126,14 @@ normalizes positions on overflow. The neighbour math is pure and unit-tested in
 
 - Implemented with `@hello-pangea/dnd`; both lists and cards are draggable,
   within and across lists.
+- The drag handle is the surface itself, Trello-style (US-069): a **card** drags
+  from anywhere on its body (its interactive controls — completion toggle,
+  actions menu, label toggle — stop propagation so they still click), and the
+  card body doubles as the open affordance (click / focus + Enter opens the
+  detail sheet; there is no title button). A **list** drags from its header bar,
+  while clicking the title still enters inline rename (the movement threshold
+  disambiguates). Both handles carry the keyboard drag entry point (focus +
+  Space to lift). There are no separate grip-icon buttons.
 - The drop produces an optimistic local update, then a `reorder*`/`moveCard`
   Server Action persists the new position and emits a socket event.
 - Remote structural events are **deferred during an active drag** and resynced
@@ -113,29 +149,42 @@ normalizes positions on overflow. The neighbour math is pure and unit-tested in
 
 ## Filtering & search
 
-- Two board-header controls narrow the visible cards, client-side and per-viewer:
-  a **label filter** (US-013) and a **title search** (US-014). Both are live with
-  no reload, no server round-trip, and no Server Action; neither mutates data nor
-  is shared with other viewers.
-- **Label filter:** options are the labels actually in use on the board; selecting
-  one or more shows only cards carrying at least one of them (OR). The control is
-  hidden when the board has no labels.
-- **Search:** a header box narrows to cards whose **title** contains the typed
-  text (case-insensitive substring), live as you type; a clear (✕) button resets
-  it. Search is **title-only** in slice 1 — the board-view card payload carries
-  `title` and `labels` but not `description` (that lives in the detail sheet), so
-  searching the description is a follow-up that first enriches the card payload.
-- **Composition:** search and the label filter combine via **AND** — a card is
-  visible only if it matches the query *and* the active label filter.
+- A single board-header **Filter popover** narrows the visible cards, client-side
+  and per-viewer (US-065, consolidating the original label filter US-013 and title
+  search US-014). It is live with no reload, no server round-trip, and no Server
+  Action; it never mutates data nor is shared with other viewers. There is **no
+  standalone header search box** — the keyword search lives inside the popover.
+- **Keyword search** (top of the popover) filters cards by **title**
+  (case-insensitive substring), **debounced ~250ms** so the board is not
+  re-filtered on every keystroke (the input updates instantly). While a keyword is
+  present the other dimensions are **suspended and hidden** — the keyword alone
+  governs card visibility, and the popover collapses to just the search box, a
+  short "clear the search to use the filters" hint, and (when nothing matches) a
+  "No cards match your search" message, so there is no greyed, non-interactive
+  dimension list taking up space. Search is title-only (the board-view card
+  carries `title`/`labels` but not `description`).
+- **Filter dimensions:**
+  - **Members** — cards assigned to any selected member (OR); options are members
+    actually assigned on the board, **minus the current viewer** (covered by the
+    "Assigned to me" quick option) plus "No members" (unassigned).
+  - **Card status** — Complete (`completedAt` set) or Not complete (per US-045).
+  - **Due date** — Overdue / next day / next week / next month + "No due date" (OR),
+    computed by **calendar day**: a card due **today** is never "Overdue" (Overdue
+    = a strictly past day) — it falls into the forward windows, matching the
+    card-face badge.
+  - **Labels** — cards carrying any selected label (OR); hidden when the board has
+    no labels.
+  - **Activity** — cards updated in the last 1 / 2 / 4 weeks (card `updatedAt`, OR).
+- **Composition:** within a dimension options combine via **OR**; across dimensions
+  via **AND** — a card is visible only if it satisfies every active dimension
+  (except while a keyword is active, which suspends the dimensions).
+- **Empty state:** when a keyword matches no card titles, the popover shows "No
+  cards match your search. Try another keyword."
 - Non-matching cards are **hidden (CSS), not removed** from the rendered list, so
   `@hello-pangea/dnd`'s index space stays aligned with the store's `cards` array
   and drop positions are never corrupted (see `lib/dnd/apply-drop.ts`).
-- A list whose cards are all narrowed out (by filter and/or search) shows a
-  "No cards match" hint instead of the empty "No cards yet" placeholder.
-- Filtering by **assignee** and **due date** is a planned follow-up slice. The
-  board-view card payload now carries `dueDate` and a capped `assignees` list
-  (plus checklist progress and comment count) for the card face (US-030), so the
-  data those filters need already exists — only the filter UI/logic remains.
+- A list whose cards are all narrowed out shows a "No cards match" hint instead of
+  the empty "No cards yet" placeholder.
 
 ## Responsive / mobile (US-021)
 
@@ -164,3 +213,28 @@ Every action: `verifySession()` → workspace permission check
 (`lib/schemas/`) → Prisma (transaction for multi-row position writes) → emit.
 `viewer` role cannot mutate structure; `editor` can CRUD content but not delete
 boards or manage members; `admin` has full control.
+
+## Automation attribution
+
+Several card actions — `createCardAction`, `moveCardAction`,
+`toggleCardCompletionAction`, `addCardLabelAction`, `assignCardMemberAction` —
+are **automation triggers**: they evaluate workspace rules **inside their own
+Prisma transaction** (after their write + history, before commit), so
+rule-driven card mutations (move, label, priority, member, completion) are atomic
+with the human edit that fired them. A failing rule action rolls back the whole
+transaction, including the user's edit. Rule-driven mutations are attributed to
+the seeded **"Planora Automation"** system user with `metadata: { ruleId }` on
+their history events, so they never inflate a real user's counts. See
+`automation.md` and decision 0022.
+
+## Personal Productivity & Capture (Roadmap IN-04)
+
+- **Today / My Work View (US-083 W6, formerly US-077):** A unified personal dashboard (`/today`) aggregating cards assigned to the current user across **every workspace the user is a member of**, grouped into the locked sections **Overdue, Due Today, Due This Week, and Later** (exact calendar-day predicates, viewer-local time; the older "Today/Upcoming/Unscheduled" naming is retired). Workspace scope is derived server-side from the user's memberships — never client-supplied. This is strictly a **read model** over existing `Card`, `CardMember`, `dueDate`, `priority`, and `archivedAt` data; no new domain table is introduced. The US-077 packet's acceptance criteria are retained there and incorporated by exact reference.
+- **Global Quick Capture (US-083 W7, formerly US-078):** A low-friction modal accessible from any page via a global authenticated chrome button or the keyboard shortcuts `C` (bare — the reliable demo path) and `Cmd/Ctrl+K` (implemented and tested, but browser chrome reserves this chord in some browsers — portability is not claimed). The dialog opens immediately and lazily loads its scope on first open through one read-only authenticated Server Action (`getQuickCaptureOptionsAction`): only **editor/admin-creatable workspaces** (membership-derived server-side, never client-supplied), active boards, and active lists, in a deterministic membership/board order. Defaults: current `/boards/{boardId}` route if creatable → last successful capture destination (localStorage, per-field validity — a still-creatable saved board is kept even when its saved list was archived) → first creatable board; the list defaults to the saved valid list for that board or its left-most live list, and a board with no lists stays selected with an honestly disabled submit (never silently jumps). Workspaces are implied via the board selector's group labels. The dialog submits through the existing `createCardAction` — title (required, trimmed 1..160) plus optional description / due date / priority persist atomically in the same transaction; `card:created` carries dueDate/priority fidelity for observer clients. Success shows a self-contained accessible status toast with a direct "View Card on Board" deep link (`/boards/{boardId}?cardId={cardId}`); errors are inline alerts. No new capture entity, no Notification row, no app-wide toast framework. The US-078 packet's acceptance criteria are retained there and incorporated by exact reference.
+- **Per-Board Capture & Triage (US-079):** Kanbans designate an inbox list (defaults to left-most column) for receiving quick-captured cards. Includes a triage toolbar for rapid one-click moves, assignments, and due-date settings. Uses standard cards. Escalate to high-risk if schema additions are required.
+- **External Intake Deferral (Decision 0028 Accepted):** External email (`support@`) and public web form intake are explicitly deferred and out of scope. Intake is strictly first-party via authenticated workspace sessions.
+
+## Reusable Workflows (Roadmap IN-04)
+
+- **Card Templates (US-081):** Standalone vertical slice allowing workspace members to define templates (pre-configured title, description skeleton, priority, labels, checklist structures) and instantiate new active cards from templates. Data model decision gate (dedicated template tables vs `isTemplate` flag) is recorded inside the packet.
+- **Recurring Cards (US-082):** Scheduled template instantiation on recurring intervals (daily, weekly, monthly) using `/api/cron` and atomic deduplication keys (`<scheduleId>:<date>`). Depends on US-081. Scheduler/dedup decision gate is recorded inside the packet.

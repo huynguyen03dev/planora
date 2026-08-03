@@ -48,9 +48,11 @@ labels** that expand to text on demand.
   `useState`, which can flicker on the per-drag-tick `memo` re-render of all cards.
   If a per-card toggle is chosen instead, it must be proven not to reset during a
   drag. Record where the preference is stored.
-- The expand **control has a ≥24×24px hit target** (WCAG 2.5.8) and is
-  **keyboard-operable** with a defined key; it must **not hijack** the card's
-  open-detail click (the title button) or the drag handle.
+- The expand **control is the card-face labels themselves** (Trello parity): the
+  wrapped labels are a `<button>` — a plain click flips the board-level
+  preference, it is **keyboard-operable**, and it must **not hijack** the card's
+  open-detail click (the title button) or block the drag. (An earlier standalone
+  toolbar "Labels" button was removed in favour of this on-card toggle.)
 - Card content padding tightens to **`p-2`** (8px); the label/title/footer stack
   loses the extra vertical room.
 - **Priority already lives in the meta footer** (`list-card-item.tsx`) — keep it
@@ -120,13 +122,17 @@ When updating durable proof status, use numeric booleans:
   `useState` — so it survives realtime re-renders and cannot flicker on the
   per-drag-tick `memo` re-render. `ListCardItem` reads it via a store selector;
   the value is constant during a drag, so it adds no drag-time re-renders.
-- **The control** is a single toolbar button (`board-label-toggle.tsx`, beside
-  Filter), `size="sm"` (h-8 = 32px ≥ 24×24 hit target, WCAG 2.5.8), fully
-  keyboard-operable, with pressed state carried by **`aria-pressed` + filled
-  (secondary) vs outline variant** — never color-only. It is placed in the
-  toolbar (not on the card) so it provably cannot hijack the card's open-detail
-  click or the drag handle, and is one decision shared by all cards. It hides
-  when no card on the board carries a label.
+- **The control is the card-face labels themselves (Trello parity).** The wrapped
+  labels on each card are a `<button>` (`list-card-item.tsx`) carrying
+  `aria-pressed` + a dynamic `aria-label` ("Expand labels to show names" /
+  "Collapse labels to color bars") — never color-only — and a
+  `focus-visible:ring`. A plain click flips the board-wide `expandLabels`, so
+  clicking any card's labels expands/collapses every card at once. It does not
+  hijack the card's open-detail click (that lives on the separate title button)
+  and it does not block dragging: the `Draggable` sets
+  `disableInteractiveElementBlocking`, so a press-drag on the label area still
+  moves the card while a click still toggles. (The earlier standalone toolbar
+  "Labels" button, `board-label-toggle.tsx`, was removed.)
 - **Tighter spacing.** `CardContent` padding `px-3 py-3` → `p-2`, stack
   `space-y-2` → `space-y-1.5`. Removed `size="sm"` from the card `<Card>`: its
   `data-[size=sm]:py-4` is a *variant* class that the `py-0` override could not
@@ -156,9 +162,11 @@ Both well under the AC targets (~36–48px plain, ≤~76px labeled).
 
 - `.ui-review/us-044-collapsed-bars.png` — compact textured bars, distinct
   per-color patterns (green dotted, blue solid, purple/orange diagonal stripes),
-  cards visibly shorter; **Labels** toggle in the toolbar.
-- `.ui-review/us-044-expanded-pills.png` — one toggle click expands **every**
-  card board-wide to text pills (Feature/Backend, Bug/Feature/Design/Urgent).
+  cards visibly shorter.
+- `.ui-review/us-044-expanded-pills.png` — clicking one card's labels expands
+  **every** card board-wide to text pills (Feature/Backend, Bug/Feature/Design/Urgent).
+  (Revised post-US-065: the toggle is now the on-card labels, Trello-style; the
+  standalone toolbar "Labels" button was removed.)
 - `.ui-review/us-044-dark-bars.png` — dark mode (forced `.dark`, since US-046
   ships the switcher): dark card surfaces, readable text, textures stay legible.
 - 375px: no horizontal overflow (`scrollWidth === innerWidth`). No console

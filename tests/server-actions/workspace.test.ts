@@ -32,11 +32,12 @@ const h = vi.hoisted(() => {
     createInvitation: fn(),
     notifyInvited: fn(),
     emitAnalyticsRefresh: fn(),
+    emitInvitationNew: fn(),
     db: {
       workspace: { update: vi.fn(), findUnique: vi.fn() },
       workspaceMember: { findFirst: vi.fn() },
       invitation: { findFirst: vi.fn() },
-      user: { findUnique: vi.fn() },
+      user: { findUnique: vi.fn(), findFirst: vi.fn() },
     },
   };
 });
@@ -47,7 +48,7 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({ default: h.db, db: h.db }));
 vi.mock("@/lib/notification", () => ({ notifyInvited: h.notifyInvited }));
-vi.mock("@/lib/realtime/server", () => ({ emitAnalyticsRefresh: h.emitAnalyticsRefresh }));
+vi.mock("@/lib/realtime/server", () => ({ emitAnalyticsRefresh: h.emitAnalyticsRefresh, emitInvitationNew: h.emitInvitationNew }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/headers", () => ({ headers: vi.fn(async () => new Headers()) }));
 
@@ -84,6 +85,10 @@ beforeEach(() => {
   h.state.membership.clear();
   h.db.workspaceMember.findFirst.mockResolvedValue(null);
   h.db.invitation.findFirst.mockResolvedValue(null);
+  h.db.user.findUnique.mockReset();
+  h.db.user.findFirst.mockReset();
+  h.db.user.findFirst.mockResolvedValue(null);
+  h.emitInvitationNew.mockReset();
 });
 
 describe("inviteMemberAction (invitation:create — admin only)", () => {
@@ -117,6 +122,50 @@ describe("inviteMemberAction (invitation:create — admin only)", () => {
     h.db.workspace.findUnique.mockResolvedValue({ name: "W" });
     expect(await inviteMemberAction(form(WS_A))).toEqual({ success: true, invitationId: "inv" });
     expect(h.createInvitation).toHaveBeenCalled();
+  });
+
+  it("W2: a registered invitee gets the live arrival emit (case-insensitive email)", async () => {
+    signInAs("u", WS_A, "admin");
+    h.createInvitation.mockResolvedValue({ id: "inv" });
+    h.db.user.findUnique.mockResolvedValue({ name: "U" });
+    h.db.workspace.findUnique.mockResolvedValue({ name: "W" });
+    // Better Auth lowercases user emails at sign-up (verified: sign-up.mjs
+    // normalizes) and invitation emails on create, so the insensitive lookup
+    // is a defensive superset — the resolution must not depend on exact-case
+    // matches for mixed-case input at the invite boundary.
+    h.db.user.findFirst.mockResolvedValue({ id: "invitee-user-id" });
+
+    expect(await inviteMemberAction(form(WS_A))).toEqual({ success: true, invitationId: "inv" });
+
+    expect(h.db.user.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { email: { equals: "new@user.com", mode: "insensitive" } },
+      }),
+    );
+    expect(h.emitInvitationNew).toHaveBeenCalledWith("invitee-user-id", {
+      invitationId: "inv",
+    });
+  });
+
+  it("W2: an unregistered email invites successfully with no realtime signal", async () => {
+    signInAs("u", WS_A, "admin");
+    h.createInvitation.mockResolvedValue({ id: "inv" });
+    h.db.user.findUnique.mockResolvedValue({ name: "U" });
+    h.db.workspace.findUnique.mockResolvedValue({ name: "W" });
+    h.db.user.findFirst.mockResolvedValue(null);
+
+    expect(await inviteMemberAction(form(WS_A))).toEqual({ success: true, invitationId: "inv" });
+    expect(h.emitInvitationNew).not.toHaveBeenCalled();
+  });
+
+  it("W2: a user-lookup failure never fails the invite (best-effort emit)", async () => {
+    signInAs("u", WS_A, "admin");
+    h.createInvitation.mockResolvedValue({ id: "inv" });
+    h.db.user.findUnique.mockResolvedValue({ name: "U" });
+    h.db.workspace.findUnique.mockResolvedValue({ name: "W" });
+    h.db.user.findFirst.mockRejectedValue(new Error("db hiccup"));
+
+    expect(await inviteMemberAction(form(WS_A))).toEqual({ success: true, invitationId: "inv" });
   });
 });
 

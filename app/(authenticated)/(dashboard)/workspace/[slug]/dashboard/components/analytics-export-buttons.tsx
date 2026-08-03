@@ -2,10 +2,8 @@
 
 import { useState, useTransition } from "react";
 
-import {
-  exportWorkspaceAnalyticsAction,
-  generateAnalyticsCSV,
-} from "../actions";
+import { exportWorkspaceAnalyticsAction } from "../actions";
+import { generateAnalyticsCSV } from "@/lib/analytics/csv-export";
 import type { AnalyticsFilters } from "@/lib/analytics/types";
 import { Button } from "@/components/ui/button";
 
@@ -75,7 +73,7 @@ export function AnalyticsExportButtons({
         return;
       }
 
-      const csv = await generateAnalyticsCSV(result.data);
+      const csv = generateAnalyticsCSV(result.data);
       downloadFile("workspace-analytics.csv", csv, "text/csv");
     });
   }

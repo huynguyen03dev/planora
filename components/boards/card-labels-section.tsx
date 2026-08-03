@@ -10,7 +10,17 @@ import {
   removeCardLabelAction,
   updateLabelAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -95,15 +105,17 @@ export function CardLabelsSection({
           >
             {label.name}
             {canEdit ? (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
                 aria-label={`Remove ${label.name}`}
-                className="opacity-70 hover:opacity-100 disabled:opacity-50"
+                className="h-4 w-4 p-0 rounded-full hover:bg-transparent opacity-70 hover:opacity-100"
                 disabled={isPending}
                 onClick={() => toggleAttached(label.id, true)}
               >
                 ×
-              </button>
+              </Button>
             ) : null}
           </span>
         ))
@@ -127,10 +139,11 @@ export function CardLabelsSection({
                 <ul className="space-y-1.5">
                   {boardLabels.map((label) => (
                     <li key={label.id}>
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
                         className={cn(
-                          "flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left text-sm disabled:opacity-50",
+                          "flex w-full h-auto justify-start gap-2 rounded-md border px-2 py-1.5 text-left text-sm font-normal disabled:opacity-50 hover:bg-muted",
                           attachedIds.has(label.id) ? "font-semibold" : "font-normal",
                         )}
                         disabled={isPending}
@@ -141,13 +154,14 @@ export function CardLabelsSection({
                       >
                         <span
                           className="h-4 w-6 rounded-sm border"
+                          aria-hidden="true"
                           style={labelSwatchStyle(label.color)}
                         />
                         <span className="flex-1">{label.name}</span>
                         <span className="text-xs text-muted-foreground">
                           {attachedIds.has(label.id) ? "On" : "Off"}
                         </span>
-                      </button>
+                      </Button>
                     </li>
                   ))}
                 </ul>
@@ -180,6 +194,7 @@ function ManageLabelsDialog({ boardId, boardLabels }: ManageLabelsDialogProps) {
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [deleteConfirmLabel, setDeleteConfirmLabel] = useState<LabelChip | null>(null);
 
   function run(action: () => Promise<{ success: boolean; error?: string }>) {
     if (isPending) {
@@ -198,6 +213,26 @@ function ManageLabelsDialog({ boardId, boardLabels }: ManageLabelsDialogProps) {
     });
   }
 
+  function handleDeleteConfirm() {
+    if (!deleteConfirmLabel || isPending) {
+      return;
+    }
+    setError("");
+    const formData = new FormData();
+    formData.set("labelId", deleteConfirmLabel.id);
+    startTransition(async () => {
+      const result = await deleteLabelAction(formData);
+      if (!result.success) {
+        setError(result.error ?? "Something went wrong.");
+        return;
+      }
+      setEditingId(null);
+      setCreating(false);
+      setDeleteConfirmLabel(null);
+      router.refresh();
+    });
+  }
+
   return (
     <Dialog
       open={open}
@@ -207,6 +242,7 @@ function ManageLabelsDialog({ boardId, boardLabels }: ManageLabelsDialogProps) {
           setEditingId(null);
           setCreating(false);
           setError("");
+          setDeleteConfirmLabel(null);
         }
       }}
     >
@@ -257,6 +293,7 @@ function ManageLabelsDialog({ boardId, boardLabels }: ManageLabelsDialogProps) {
                 >
                   <span
                     className="h-4 w-6 rounded-sm border"
+                    aria-hidden="true"
                     style={labelSwatchStyle(label.color)}
                   />
                   <span className="flex-1 text-sm">{label.name}</span>
@@ -275,9 +312,8 @@ function ManageLabelsDialog({ boardId, boardLabels }: ManageLabelsDialogProps) {
                     size="sm"
                     disabled={isPending}
                     onClick={() => {
-                      const formData = new FormData();
-                      formData.set("labelId", label.id);
-                      run(() => deleteLabelAction(formData));
+                      setError("");
+                      setDeleteConfirmLabel(label);
                     }}
                   >
                     Delete
@@ -315,6 +351,54 @@ function ManageLabelsDialog({ boardId, boardLabels }: ManageLabelsDialogProps) {
           </Button>
         )}
       </DialogContent>
+
+      <AlertDialog
+        open={deleteConfirmLabel !== null}
+        onOpenChange={(next) => {
+          if (isPending) {
+            return;
+          }
+          if (!next) {
+            setDeleteConfirmLabel(null);
+            setError("");
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete &quot;{deleteConfirmLabel?.name}&quot;?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove this label from every card on this board. Cards
+              that currently use this label will no longer have it assigned.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {error && deleteConfirmLabel ? (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              className={buttonVariants({ variant: "outline" })}
+              disabled={isPending}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className={buttonVariants({ variant: "destructive" })}
+              onClick={(event) => {
+                event.preventDefault();
+                handleDeleteConfirm();
+              }}
+              disabled={isPending}
+            >
+              {isPending ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

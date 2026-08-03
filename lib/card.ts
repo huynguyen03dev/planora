@@ -1,9 +1,18 @@
 import "server-only";
 
+import type { Prisma } from "@/app/generated/prisma/client";
+
 import db from "@/lib/prisma";
 
-const CARD_POSITION_GAP = 16384;
-const MIN_POSITION_GAP = 0.0001;
+import {
+  CARD_POSITION_GAP,
+  LIVE_CARD_SCOPE,
+  PositionSpaceExhaustedError,
+  StaleNeighborError,
+  normalizeCardPositions,
+  resolveCardPosition,
+} from "@/lib/ordering";
+
 const MAX_REORDER_CARD_RETRIES = 3;
 
 function isUniqueConstraintError(error: unknown): error is { code: string } {
@@ -72,6 +81,19 @@ export type CardWithListBoardRecord = {
   };
 };
 
+/**
+ * W8 shape of `getArchivedCardWithListAndBoard`: the existing record plus the
+ * parent-list discriminator. `parentListArchived: true` means the card exists
+ * and remains archived but its parent list is archived — restoring it would
+ * create a live card inside an invisible list. The resolver deliberately does
+ * NOT hide this case behind null: the action needs the workspace/board scope
+ * to run the permission gate BEFORE surfacing the dedicated message, so the
+ * discrimination can never leak existence to unauthorized callers.
+ */
+export type ArchivedCardWithListBoardResult = CardWithListBoardRecord & {
+  parentListArchived: boolean;
+};
+
 export async function createCard(data: {
   listId: string;
   title: string;
@@ -80,7 +102,7 @@ export async function createCard(data: {
   const lastCard = await db.card.findFirst({
     where: {
       listId: data.listId,
-      archivedAt: null,
+      ...LIVE_CARD_SCOPE,
     },
     orderBy: [{ position: "desc" }, { createdAt: "desc" }],
     select: { position: true },
@@ -127,145 +149,99 @@ export async function archiveCard(cardId: string): Promise<void> {
   });
 }
 
-async function resolveCardPosition(data: {
-  targetListId: string;
-  prevCardId?: string | null;
-  nextCardId?: string | null;
-}): Promise<number> {
-  const [prevCard, nextCard] = await Promise.all([
-    data.prevCardId
-      ? db.card.findUnique({
-          where: { id: data.prevCardId, archivedAt: null },
-          select: { id: true, listId: true, position: true },
-        })
-      : null,
-    data.nextCardId
-      ? db.card.findUnique({
-          where: { id: data.nextCardId, archivedAt: null },
-          select: { id: true, listId: true, position: true },
-        })
-      : null,
-  ]);
-
-  if (data.prevCardId && (!prevCard || prevCard.listId !== data.targetListId)) {
-    throw new Error("Invalid prevCardId");
-  }
-
-  if (data.nextCardId && (!nextCard || nextCard.listId !== data.targetListId)) {
-    throw new Error("Invalid nextCardId");
-  }
-
-  if (prevCard && nextCard) {
-    const lower = Math.min(prevCard.position, nextCard.position);
-    const upper = Math.max(prevCard.position, nextCard.position);
-    return (lower + upper) / 2;
-  }
-
-  if (prevCard) {
-    return prevCard.position + CARD_POSITION_GAP;
-  }
-
-  if (nextCard) {
-    return nextCard.position - CARD_POSITION_GAP;
-  }
-
-  const lastCard = await db.card.findFirst({
-    where: {
-      listId: data.targetListId,
-      archivedAt: null,
-    },
-    orderBy: [{ position: "desc" }, { createdAt: "desc" }],
-    select: { position: true },
-  });
-
-  return lastCard ? lastCard.position + CARD_POSITION_GAP : CARD_POSITION_GAP;
-}
-
-async function normalizeCardPositions(listId: string): Promise<void> {
-  const cards = await db.card.findMany({
-    where: { listId, archivedAt: null },
-    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
-    select: { id: true },
-  });
-
-  if (cards.length === 0) {
-    return;
-  }
-
-  await db.$transaction(
-    cards.map((card, index) =>
-      db.card.update({
-        where: { id: card.id },
-        data: { position: CARD_POSITION_GAP * (index + 1) },
-      }),
-    ),
-  );
-}
-
 export async function reorderCardWithinListByNeighbors(data: {
   cardId: string;
   prevCardId?: string | null;
   nextCardId?: string | null;
 }): Promise<CardRecord> {
+  // Hints are mutable across retries: a StaleNeighborError drops the offending
+  // side so the next attempt re-anchors on the surviving neighbour (or appends).
+  let prevHint = data.prevCardId ?? null;
+  let nextHint = data.nextCardId ?? null;
+
   for (let attempt = 0; attempt < MAX_REORDER_CARD_RETRIES; attempt += 1) {
-    const existingCard = await db.card.findUnique({
-      where: {
-        id: data.cardId,
-        archivedAt: null,
-      },
-      select: {
-        id: true,
-        listId: true,
-        position: true,
-      },
-    });
-
-    if (!existingCard) {
-      throw new Error("Card not found");
-    }
-
-    const nextPosition = await resolveCardPosition({
-      targetListId: existingCard.listId,
-      prevCardId: data.prevCardId,
-      nextCardId: data.nextCardId,
-    });
-
-    const gapToCurrent = Math.abs(nextPosition - existingCard.position);
-    if (gapToCurrent < MIN_POSITION_GAP) {
-      await normalizeCardPositions(existingCard.listId);
-      continue;
-    }
+    // Retained across the catch so a collision can renumber the right list
+    // before the next attempt; set once the card is read inside the tx.
+    let listIdForRetry: string | null = null;
 
     try {
-      return await db.card.update({
-        where: {
-          id: data.cardId,
-          archivedAt: null,
-        },
-        data: {
-          position: nextPosition,
-        },
-        select: {
-          id: true,
-          listId: true,
-          title: true,
-          description: true,
-          position: true,
-          priority: true,
-          dueDate: true,
-          estimateHours: true,
-          completedAt: true,
-          deletedAt: true,
-          coverImage: true,
-          archivedAt: true,
-          createdById: true,
-          createdAt: true,
-          updatedAt: true,
-        },
+      return await db.$transaction(async (tx) => {
+        const existingCard = await tx.card.findUnique({
+          where: {
+            id: data.cardId,
+            ...LIVE_CARD_SCOPE,
+          },
+          select: {
+            id: true,
+            listId: true,
+            position: true,
+          },
+        });
+
+        if (!existingCard) {
+          throw new Error("Card not found");
+        }
+
+        listIdForRetry = existingCard.listId;
+
+        // Exclude the card being moved so the adjacency search bisects against
+        // the real occupants, not the mover's own (stale) slot.
+        const nextPosition = await resolveCardPosition(tx, {
+          targetListId: existingCard.listId,
+          prevCardId: prevHint,
+          nextCardId: nextHint,
+          excludeCardId: data.cardId,
+        });
+
+        return await tx.card.update({
+          where: {
+            id: data.cardId,
+            ...LIVE_CARD_SCOPE,
+          },
+          data: {
+            position: nextPosition,
+          },
+          select: {
+            id: true,
+            listId: true,
+            title: true,
+            description: true,
+            position: true,
+            priority: true,
+            dueDate: true,
+            estimateHours: true,
+            completedAt: true,
+            deletedAt: true,
+            coverImage: true,
+            archivedAt: true,
+            createdById: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
       });
     } catch (error) {
-      if (isUniqueConstraintError(error) && attempt < MAX_REORDER_CARD_RETRIES - 1) {
-        await normalizeCardPositions(existingCard.listId);
+      // A stale neighbour hint is recoverable without a renumber: drop that side
+      // and retry so the move re-anchors on the surviving neighbour / appends.
+      if (error instanceof StaleNeighborError && attempt < MAX_REORDER_CARD_RETRIES - 1) {
+        if (error.side === "prev") {
+          prevHint = null;
+        } else {
+          nextHint = null;
+        }
+        continue;
+      }
+
+      // A P2002 (a rival grabbed the slot) or a PositionSpaceExhaustedError (no
+      // gap left to bisect) both mean: renumber the list to restore full gaps,
+      // then retry the reorder against the fresh layout.
+      if (
+        (isUniqueConstraintError(error) || error instanceof PositionSpaceExhaustedError) &&
+        attempt < MAX_REORDER_CARD_RETRIES - 1 &&
+        listIdForRetry
+      ) {
+        const listId = listIdForRetry;
+        await db.$transaction((tx) => normalizeCardPositions(tx, listId));
         continue;
       }
 
@@ -274,73 +250,6 @@ export async function reorderCardWithinListByNeighbors(data: {
   }
 
   throw new Error("Failed to reorder card after retries");
-}
-
-export async function moveCardToListByNeighbors(data: {
-  cardId: string;
-  targetListId: string;
-  prevCardId?: string | null;
-  nextCardId?: string | null;
-}): Promise<CardRecord> {
-  for (let attempt = 0; attempt < MAX_REORDER_CARD_RETRIES; attempt += 1) {
-    const nextPosition = await resolveCardPosition({
-      targetListId: data.targetListId,
-      prevCardId: data.prevCardId,
-      nextCardId: data.nextCardId,
-    });
-
-    const existingCard = await db.card.findUnique({
-      where: { id: data.cardId, archivedAt: null },
-      select: { position: true, listId: true },
-    });
-
-    if (existingCard && existingCard.listId === data.targetListId) {
-      const gapToCurrent = Math.abs(nextPosition - existingCard.position);
-      if (gapToCurrent < MIN_POSITION_GAP) {
-        await normalizeCardPositions(data.targetListId);
-        continue;
-      }
-    }
-
-    try {
-      return await db.card.update({
-        where: {
-          id: data.cardId,
-          archivedAt: null,
-        },
-        data: {
-          listId: data.targetListId,
-          position: nextPosition,
-        },
-        select: {
-          id: true,
-          listId: true,
-          title: true,
-          description: true,
-          position: true,
-          priority: true,
-          dueDate: true,
-          estimateHours: true,
-          completedAt: true,
-          deletedAt: true,
-          coverImage: true,
-          archivedAt: true,
-          createdById: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      });
-    } catch (error) {
-      if (isUniqueConstraintError(error) && attempt < MAX_REORDER_CARD_RETRIES - 1) {
-        await normalizeCardPositions(data.targetListId);
-        continue;
-      }
-
-      throw error;
-    }
-  }
-
-  throw new Error("Failed to move card after retries");
 }
 
 export async function getCardWithListAndBoard(
@@ -371,6 +280,7 @@ export async function getCardWithListAndBoard(
         select: {
           id: true,
           boardId: true,
+          archivedAt: true,
           board: {
             select: {
               id: true,
@@ -384,6 +294,14 @@ export async function getCardWithListAndBoard(
   });
 
   if (!card) {
+    return null;
+  }
+
+  // US-074 Slice B2: reject if the parent list is archived, making the card
+  // immutable through all ordinary card/checklist/comment/member/label/attachment
+  // actions. Only archive-aware flows (getArchivedCardWithListAndBoard,
+  // getArchivedCards) resolve cards under archived lists.
+  if (card.list.archivedAt !== null) {
     return null;
   }
 
@@ -510,26 +428,55 @@ export async function updateCardDueDate(
 }
 
 /**
- * Mark a card as completed (first completion only).
- * Sets completedAt if not already set.
+ * Resolve the next `completedAt` for a completion toggle (US-045). Pure: complete
+ * writes a fresh timestamp, reopen clears it. A re-complete of an already-complete
+ * card preserves the existing timestamp so the current-streak anchor (US-064) is
+ * stable; a complete after a reopen sets a new timestamp (the reopen already
+ * cleared it). `now` is injected so the transition is deterministic under test.
  */
-export async function completeCard(cardId: string): Promise<CardRecord> {
-  const card = await db.card.findUnique({
-    where: { id: cardId },
-    select: { completedAt: true },
-  });
+export function resolveCompletedAt(
+  complete: boolean,
+  existingCompletedAt: Date | null,
+  now: Date,
+): Date | null {
+  return complete ? (existingCompletedAt ?? now) : null;
+}
 
-  // Only set completedAt if not already set (first completion only)
-  const completedAt = card?.completedAt ?? new Date();
+/**
+ * Set a card's completion state (US-045). Completion is card-owned and freely
+ * toggleable; dragging never calls this — list membership no longer derives
+ * completion (decision 0020). Accepts a transaction client so the caller can
+ * write the completion and its `CARD_COMPLETED`/`CARD_REOPENED` history event
+ * atomically. Returns the updated card row.
+ */
+export async function setCardCompletion(
+  client: Prisma.TransactionClient | typeof db,
+  cardId: string,
+  complete: boolean,
+  existingCompletedAt: Date | null,
+  now: Date = new Date(),
+): Promise<{ card: CardRecord; transitioned: boolean }> {
+  const completedAt = resolveCompletedAt(complete, existingCompletedAt, now);
 
-  return db.card.update({
+  // Compare-and-set: flip only a card still in its pre-toggle state. Under two
+  // concurrent toggles the loser's WHERE matches zero rows, so exactly one caller
+  // sees `transitioned: true` — the CARD_COMPLETED / CARD_REOPENED history event
+  // is never double-written for one streak (decision 0021). A re-complete of an
+  // already-complete card likewise matches zero rows, preserving the original
+  // timestamp (the US-064 streak anchor) with no redundant write.
+  const { count } = await client.card.updateMany({
     where: {
       id: cardId,
       archivedAt: null,
+      completedAt: complete ? null : { not: null },
     },
     data: {
       completedAt,
     },
+  });
+
+  const card = await client.card.findUniqueOrThrow({
+    where: { id: cardId },
     select: {
       id: true,
       listId: true,
@@ -548,6 +495,8 @@ export async function completeCard(cardId: string): Promise<CardRecord> {
       updatedAt: true,
     },
   });
+
+  return { card, transitioned: count === 1 };
 }
 
 /**
@@ -556,7 +505,7 @@ export async function completeCard(cardId: string): Promise<CardRecord> {
  */
 export async function getCardWithListAndMembers(cardId: string): Promise<{
   card: CardRecord;
-  list: { id: string; boardId: string; isDone: boolean };
+  list: { id: string; boardId: string };
   board: { id: string; workspaceId: string };
   memberIds: string[];
 } | null> {
@@ -585,7 +534,7 @@ export async function getCardWithListAndMembers(cardId: string): Promise<{
         select: {
           id: true,
           boardId: true,
-          isDone: true,
+          archivedAt: true,
           board: {
             select: {
               id: true,
@@ -606,49 +555,21 @@ export async function getCardWithListAndMembers(cardId: string): Promise<{
     return null;
   }
 
+  // US-074 Slice B2: reject if the parent list is archived.
+  if (card.list.archivedAt !== null) {
+    return null;
+  }
+
   const { list, members, ...cardData } = card;
   return {
     card: cardData,
     list: {
       id: list.id,
       boardId: list.boardId,
-      isDone: list.isDone,
     },
     board: list.board,
     memberIds: members.map((m) => m.userId),
   };
-}
-
-/**
- * Soft delete a card (sets deletedAt).
- * Used for analytics tracking before hard delete.
- */
-export async function softDeleteCard(cardId: string): Promise<CardRecord> {
-  return db.card.update({
-    where: {
-      id: cardId,
-    },
-    data: {
-      deletedAt: new Date(),
-    },
-    select: {
-      id: true,
-      listId: true,
-      title: true,
-      description: true,
-      position: true,
-      priority: true,
-      dueDate: true,
-      estimateHours: true,
-      completedAt: true,
-      deletedAt: true,
-      coverImage: true,
-      archivedAt: true,
-      createdById: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  });
 }
 
 /**
@@ -674,6 +595,7 @@ export async function getArchivedCards(
       archivedAt: { not: null },
       list: {
         boardId,
+        archivedAt: null,
         board: { archivedAt: null },
       },
     },
@@ -707,7 +629,7 @@ export async function getArchivedCards(
  */
 export async function getArchivedCardWithListAndBoard(
   cardId: string,
-): Promise<CardWithListBoardRecord | null> {
+): Promise<ArchivedCardWithListBoardResult | null> {
   const card = await db.card.findFirst({
     where: {
       id: cardId,
@@ -733,6 +655,7 @@ export async function getArchivedCardWithListAndBoard(
         select: {
           id: true,
           boardId: true,
+          archivedAt: true,
           board: {
             select: {
               id: true,
@@ -749,6 +672,13 @@ export async function getArchivedCardWithListAndBoard(
     return null;
   }
 
+  // US-074 Slice B2 + US-083 W8: a card can only be restored if its parent
+  // list is active. Instead of collapsing the archived-parent case to null
+  // (which would lose the workspace/board scope needed to gate the dedicated
+  // "restore the list first" outcome), flag it: restoreCardAction checks the
+  // permission first, then discriminates. The in-transaction FOR UPDATE
+  // revalidation (restoreCardAction) re-checks the same condition against the
+  // true race where the list is archived between this read and the commit.
   const { list, ...cardData } = card;
   return {
     card: cardData,
@@ -757,6 +687,7 @@ export async function getArchivedCardWithListAndBoard(
       boardId: list.boardId,
     },
     board: list.board,
+    parentListArchived: card.list.archivedAt !== null,
   };
 }
 
@@ -764,8 +695,10 @@ export async function getArchivedCardWithListAndBoard(
 export async function updateCardCover(
   cardId: string,
   coverImage: string | null,
+  client?: Prisma.TransactionClient,
 ): Promise<CardDetailRecord> {
-  return db.card.update({
+  const c = client ?? db;
+  return c.card.update({
     where: { id: cardId, archivedAt: null },
     data: { coverImage },
     select: CARD_DETAIL_SELECT,
@@ -775,8 +708,9 @@ export async function updateCardCover(
 export async function updateCardPriority(
   cardId: string,
   priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null,
+  client: Prisma.TransactionClient | typeof db = db,
 ): Promise<CardDetailRecord> {
-  return db.card.update({
+  return client.card.update({
     where: { id: cardId, archivedAt: null },
     data: { priority },
     select: CARD_DETAIL_SELECT,

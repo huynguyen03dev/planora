@@ -84,6 +84,43 @@ export async function getCardListId(cardId: string): Promise<string | undefined>
 }
 
 /**
+ * A card's current archivedAt (null = live). Used by the W8 undo spec to
+ * assert the restore committed (or, in the race, did NOT commit) server-side.
+ * Fail-closed: a missing row (permanent delete / wrong id) must never be
+ * conflated with a live card — exactly one row is expected.
+ */
+export async function getCardArchivedAt(cardId: string): Promise<Date | null> {
+  const { rows } = await pool().query<{ archivedAt: Date | null }>(
+    `SELECT "archivedAt" FROM "card" WHERE id = $1`,
+    [cardId],
+  );
+  if (rows.length !== 1) {
+    throw new Error(
+      `getCardArchivedAt: expected exactly 1 card row for ${cardId}, got ${rows.length}`,
+    );
+  }
+  return rows[0].archivedAt;
+}
+
+/** A list's current archivedAt (null = active). */
+export async function getListArchivedAt(listId: string): Promise<Date | null> {
+  const { rows } = await pool().query<{ archivedAt: Date | null }>(
+    `SELECT "archivedAt" FROM "list" WHERE id = $1`,
+    [listId],
+  );
+  return rows[0]?.archivedAt ?? null;
+}
+
+/** Whether a list row still exists (false after permanent deletion). */
+export async function listExists(listId: string): Promise<boolean> {
+  const { rows } = await pool().query<{ id: string }>(
+    `SELECT id FROM "list" WHERE id = $1`,
+    [listId],
+  );
+  return rows.length > 0;
+}
+
+/**
  * Seed a board label directly (arrange step, not under test) and return its id.
  * The label-CRUD *realtime* propagation is what the spec proves; getting a label
  * onto the board is a precondition, so we insert it rather than drive the create
@@ -125,6 +162,46 @@ export async function addWorkspaceMember(
 }
 
 /**
+ * A workspace's slug — the dashboard route is `/workspace/{slug}/dashboard`,
+ * and the create-workspace UI only surfaces the id (createWorkspace returns
+ * the id from the URL).
+ */
+export async function getWorkspaceSlug(workspaceId: string): Promise<string> {
+  const { rows } = await pool().query<{ slug: string }>(
+    `SELECT slug FROM "workspace" WHERE id = $1`,
+    [workspaceId],
+  );
+  if (!rows[0]) throw new Error(`No workspace found for ${workspaceId}`);
+  return rows[0].slug;
+}
+
+/** True when the user holds a membership row in the workspace (W2 accept proof — DB source of truth). */
+export async function isWorkspaceMember(
+  organizationId: string,
+  userId: string,
+): Promise<boolean> {
+  const { rows } = await pool().query<{ id: string }>(
+    `SELECT id FROM "workspaceMember" WHERE "organizationId" = $1 AND "userId" = $2 LIMIT 1`,
+    [organizationId, userId],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * The stored email of a user. Records Better Auth's actual email-casing/
+ * storage behavior for the W2 invitee-resolution contract (verified at
+ * sign-up.mjs: BA lowercases user emails at sign-up, so the stored value is
+ * always the lowercase form).
+ */
+export async function getStoredEmail(userId: string): Promise<string | null> {
+  const { rows } = await pool().query<{ email: string }>(
+    `SELECT email FROM "user" WHERE id = $1 LIMIT 1`,
+    [userId],
+  );
+  return rows[0]?.email ?? null;
+}
+
+/**
  * Best-effort teardown: delete the workspace (cascades members, boards, lists,
  * cards) and the listed users (cascades sessions/accounts). Swallows errors so a
  * cleanup hiccup never masks a real test result.
@@ -140,6 +217,30 @@ export async function cleanup(opts: { workspaceId?: string; emails: string[] }):
   } catch {
     // ignore — teardown must not fail the run
   }
+}
+
+/**
+ * Set a card's due date directly (arrange step for the US-083 W6 `/today`
+ * spec — the four buckets are seeded in DB time, not driven through the
+ * date-picker UI; mirroring the `addLabel` arrange-step precedent).
+ */
+export async function setCardDueDate(cardId: string, dueDate: Date): Promise<void> {
+  await pool().query(`UPDATE "card" SET "dueDate" = $1 WHERE id = $2`, [
+    dueDate,
+    cardId,
+  ]);
+}
+
+/**
+ * Assign a card to a user directly (arrange step — same precedent; the
+ * assign UI + realtime path is proven elsewhere, US-011).
+ */
+export async function assignCardMember(cardId: string, userId: string): Promise<void> {
+  await pool().query(
+    `INSERT INTO "cardMember" ("cardId", "userId", "assignedAt")
+     VALUES ($1, $2, now())`,
+    [cardId, userId],
+  );
 }
 
 /**

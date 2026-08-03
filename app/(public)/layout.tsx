@@ -2,7 +2,8 @@ import Link from "next/link";
 import { headers } from "next/headers";
 
 import { auth } from "@/lib/auth";
-import { Button } from "@/components/ui/button";
+
+import { AuthHeaderActions } from "./auth-header-actions";
 
 export default async function PublicLayout({
   children,
@@ -16,20 +17,7 @@ export default async function PublicLayout({
           Planora
         </Link>
         <div className="flex items-center gap-2">
-          {session ? (
-            <Button size="sm" asChild>
-              <Link href="/boards">Open app</Link>
-            </Button>
-          ) : (
-            <>
-              <Button variant="ghost" size="sm" asChild>
-                <Link href="/sign-in">Sign In</Link>
-              </Button>
-              <Button size="sm" asChild>
-                <Link href="/sign-up">Sign Up</Link>
-              </Button>
-            </>
-          )}
+          <AuthHeaderActions hasSession={!!session} />
         </div>
       </header>
       <main className="flex flex-1 flex-col">{children}</main>

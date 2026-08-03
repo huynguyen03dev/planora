@@ -2,6 +2,8 @@ import "dotenv/config";
 
 import { defineConfig, devices } from "@playwright/test";
 
+import { shouldReuseExistingE2eServer } from "@/lib/e2e-server-policy";
+
 /**
  * E2E config for the two-client realtime harness (US-009).
  *
@@ -13,6 +15,7 @@ import { defineConfig, devices } from "@playwright/test";
  */
 const PORT = 3000;
 const BASE_URL = `http://localhost:${PORT}`;
+const reuseExistingServer = shouldReuseExistingE2eServer(process.env);
 
 export default defineConfig({
   testDir: "./e2e",
@@ -35,7 +38,9 @@ export default defineConfig({
   webServer: {
     command: "npm run dev",
     url: BASE_URL,
-    reuseExistingServer: !process.env.CI,
+    // Fresh by default so local runs cannot silently attach to a stale
+    // server.ts process. `npm run test:e2e:reuse` is the explicit escape hatch.
+    reuseExistingServer,
     timeout: 120_000,
     stdout: "pipe",
     stderr: "pipe",

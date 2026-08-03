@@ -7,13 +7,17 @@
  * mocked one layer below `hasWorkspacePermission`, so the real resource→workspace
  * derivation runs.
  *
- * Positive controls here assert the action *reached its write seam* (the lib
- * mutation or `db.$transaction`) once permission is granted — not the full
- * success payload. That keeps the suite focused on the security boundary without
- * deep-mocking every transaction body, while still proving denials aren't
- * vacuous (an allowed caller really does proceed to write).
+ * Positive controls assert the action *reached its write seam* once permission
+ * is granted — proving denials aren't vacuous (an allowed caller really does
+ * proceed to write). For actions whose write lives inside `db.$transaction`,
+ * a representative set (createCard, deleteList, moveCard, assign/removeCardMember)
+ * goes further: `$transaction` runs the real callback against a fake tx so the
+ * transaction body (position math, multi-row writes) is exercised and its DB
+ * effects are asserted — not merely that `$transaction` was called (US-062 tg2).
+ * Reorder-lib seams (reorderCard/ListByNeighbors) stay mocked; their bodies are
+ * unit-tested in lib/ordering.test.ts, lib/card.test.ts, lib/list.test.ts.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   cardWithListAndBoardFixture,
@@ -63,12 +67,13 @@ const h = vi.hoisted(() => {
     getLabelWithBoard: fn(),
     getCardLabels: fn(),
     getCardIdsWithLabel: fn(),
+    getCardMembers: fn(),
     // lib write seams
     createList: fn(),
     updateListTitle: fn(),
-    updateListIsDone: fn(),
     reorderListByNeighbors: fn(),
     updateCardDetails: fn(),
+    setCardCompletion: fn(),
     reorderCardWithinListByNeighbors: fn(),
     createComment: fn(),
     createAttachment: fn(),
@@ -81,6 +86,10 @@ const h = vi.hoisted(() => {
     removeCardLabel: fn(),
     validateFileForUpload: fn(),
     uploadToCloudinary: fn(),
+    cloudinaryV2: {
+      uploader: { destroy: vi.fn() },
+      config: vi.fn(),
+    },
     // prisma spies
     db: {
       $transaction: vi.fn(),
@@ -103,7 +112,9 @@ const h = vi.hoisted(() => {
       emitCardCreated: fn(),
       emitCardUpdated: fn(),
       emitCardArchived: fn(),
+      emitCardCompletionUpdated: fn(),
       emitCardLabelsUpdated: fn(),
+      emitCardMembersUpdated: fn(),
       emitCommentCreated: fn(),
     },
   };
@@ -117,7 +128,6 @@ vi.mock("@/lib/list", () => ({
   getListWithBoard: h.getListWithBoard,
   createList: h.createList,
   updateListTitle: h.updateListTitle,
-  updateListIsDone: h.updateListIsDone,
   reorderListByNeighbors: h.reorderListByNeighbors,
 }));
 vi.mock("@/lib/card", () => ({
@@ -125,6 +135,7 @@ vi.mock("@/lib/card", () => ({
   getArchivedCardWithListAndBoard: h.getArchivedCardWithListAndBoard,
   getCardWithListAndMembers: h.getCardWithListAndMembers,
   updateCardDetails: h.updateCardDetails,
+  setCardCompletion: h.setCardCompletion,
   reorderCardWithinListByNeighbors: h.reorderCardWithinListByNeighbors,
 }));
 vi.mock("@/lib/label", () => ({
@@ -137,6 +148,7 @@ vi.mock("@/lib/label", () => ({
   addCardLabel: h.addCardLabel,
   removeCardLabel: h.removeCardLabel,
 }));
+vi.mock("@/lib/card-member", () => ({ getCardMembers: h.getCardMembers }));
 vi.mock("@/lib/comment", () => ({ createComment: h.createComment }));
 vi.mock("@/lib/attachment", () => ({ createAttachment: h.createAttachment }));
 vi.mock("@/lib/activity", () => ({ createActivityEntry: h.createActivityEntry }));
@@ -144,10 +156,12 @@ vi.mock("@/lib/notification", () => ({ notifyCardAssigned: vi.fn(), notifyCommen
 vi.mock("@/lib/cloudinary", () => ({
   validateFileForUpload: h.validateFileForUpload,
   uploadToCloudinary: h.uploadToCloudinary,
+  getCloudinaryConfig: vi.fn(() => ({ cloudName: "c", apiKey: "k", apiSecret: "s" })),
 }));
 vi.mock("@/lib/realtime/server", () => ({ ...h.emit }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/headers", () => ({ headers: vi.fn(async () => new Headers()) }));
+vi.mock("cloudinary", () => ({ v2: h.cloudinaryV2 }));
 
 h.checkRef.fn = (ws, perms) => {
   const role = h.state.membership.get(`${h.state.callerId}:${ws}`);
@@ -157,7 +171,7 @@ h.checkRef.fn = (ws, perms) => {
 import {
   createListAction,
   updateListAction,
-  updateListIsDoneAction,
+  toggleCardCompletionAction,
   deleteListAction,
   createCardAction,
   archiveCardAction,
@@ -177,17 +191,76 @@ import {
   deleteLabelAction,
   addCardLabelAction,
   removeCardLabelAction,
+  updateCardPriorityAction,
+  updateCardCoverAction,
+  setCardCoverAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
 
 // Every mutation/emit seam. A denied path must touch NONE of these.
 const writeSeams = [
-  h.createList, h.updateListTitle, h.updateListIsDone, h.reorderListByNeighbors,
-  h.updateCardDetails, h.reorderCardWithinListByNeighbors, h.createComment,
+  h.createList, h.updateListTitle, h.reorderListByNeighbors,
+  h.updateCardDetails, h.setCardCompletion, h.reorderCardWithinListByNeighbors, h.createComment,
   h.createAttachment, h.createActivityEntry, h.createLabel, h.updateLabel,
   h.deleteLabel, h.addCardLabel, h.removeCardLabel,
   h.db.$transaction, h.db.card.update,
   ...Object.values(h.emit),
 ];
+
+/**
+ * A permissive in-memory `Prisma.TransactionClient` stand-in (tg2). Every method
+ * an inline `db.$transaction` body calls is a spy with a sensible default so the
+ * body runs to completion; individual tests assert on the relevant spy. Wire it
+ * with `h.db.$transaction.mockImplementation((cb) => cb(tx))`.
+ */
+function makeTx() {
+  return {
+    card: {
+      findMany: vi.fn(async () => [] as unknown[]),
+      findFirst: vi.fn(async () => null),
+      findUnique: vi.fn(async () => null),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        id: "new-card",
+        listId: data.listId,
+        title: data.title,
+        position: data.position,
+        estimateHours: null,
+        dueDate: null,
+        completedAt: data.completedAt ?? null,
+        archivedAt: null,
+        deletedAt: null,
+      })),
+      update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        id: CARD_ID,
+        listId: data.listId ?? LIST_ID,
+        position: typeof data.position === "number" ? data.position : 1,
+        estimateHours: data.estimateHours ?? null,
+        dueDate: data.dueDate ?? null,
+        completedAt: data.completedAt ?? null,
+      })),
+    },
+    list: {
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+    },
+    cardReminder: { deleteMany: vi.fn(async () => ({ count: 0 })) },
+    cardMember: {
+      findMany: vi.fn(async () => [] as unknown[]),
+      findUnique: vi.fn(async () => null),
+      create: vi.fn(async () => ({
+        user: { id: "target-user", name: "Target", image: null, email: "t@x.io" },
+      })),
+      deleteMany: vi.fn(async () => ({ count: 1 })),
+    },
+    user: { findUnique: vi.fn(async () => ({ name: "Target" })) },
+    activity: { create: vi.fn(async () => ({ id: "act" })) },
+    cardHistoryEvent: { createMany: vi.fn(async () => ({ count: 0 })) },
+    // Automation (US-066): the trigger tx bodies now evaluate rules. With no
+    // enabled rules the evaluator is a no-op, so these positive controls still
+    // assert only the pre-automation transaction seams.
+    rule: { findMany: vi.fn(async () => [] as unknown[]) },
+    ruleExecutionLog: { create: vi.fn(async () => ({ id: "log" })) },
+  };
+}
 
 function signInAs(userId: string, ws: string, role: Role) {
   h.state.authed = true;
@@ -240,7 +313,7 @@ describe("createListAction", () => {
   it("allow: WS-A editor reaches the write seam", async () => {
     signInAs("u", WS_A, "editor");
     h.getBoardById.mockResolvedValue({ id: BOARD_A, workspaceId: WS_A, archivedAt: null });
-    h.createList.mockResolvedValue({ id: "l", boardId: BOARD_A, title: "List", isDone: false, position: 1 });
+    h.createList.mockResolvedValue({ id: "l", boardId: BOARD_A, title: "List", position: 1 });
     const r = await createListAction(form());
     expect(r).toEqual({ success: true, listId: "l" });
     expect(h.createList).toHaveBeenCalled();
@@ -275,31 +348,130 @@ describe("updateListAction", () => {
   });
 });
 
-describe("updateListIsDoneAction", () => {
-  const form = () => formData({ listId: LIST_ID, isDone: "true" });
-  it("A1 auth", async () => {
+describe("toggleCardCompletionAction (card-owned completion — US-045)", () => {
+  const form = (complete = "true") => formData({ cardId: CARD_ID, complete });
+
+  it("A1 auth: signed out → throws, no write", async () => {
     signOut();
-    await expect(updateListIsDoneAction(form())).rejects.toThrow();
+    await expect(toggleCardCompletionAction(form())).rejects.toThrow();
     expectNoWrites(...writeSeams);
   });
-  it("A2 viewer denied", async () => {
+
+  it("A2 permission: viewer denied", async () => {
     signInAs("u", WS_A, "viewer");
-    h.getListWithBoard.mockResolvedValue(listWithBoardFixture(WS_A));
-    expect(await updateListIsDoneAction(form())).toEqual({ success: false, error: "List not found" });
+    h.getCardWithListAndMembers.mockResolvedValue(cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID }));
+    expect(await toggleCardCompletionAction(form())).toEqual({ success: false, error: "Card not found" });
     expectNoWrites(...writeSeams);
   });
-  it("A3 WS-B editor denied on WS-A list", async () => {
+
+  it("A3 isolation: WS-B editor cannot complete a WS-A card", async () => {
     signInAs("u", WS_B, "editor");
-    h.getListWithBoard.mockResolvedValue(listWithBoardFixture(WS_A));
-    expect(await updateListIsDoneAction(form())).toEqual({ success: false, error: "List not found" });
+    h.getCardWithListAndMembers.mockResolvedValue(cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID }));
+    expect(await toggleCardCompletionAction(form())).toEqual({ success: false, error: "Card not found" });
+    expect(h.hasPermission).toHaveBeenCalledWith(
+      expect.objectContaining({ body: expect.objectContaining({ organizationId: WS_A }) }),
+    );
     expectNoWrites(...writeSeams);
   });
-  it("allow", async () => {
+
+  it("estimate gate: blocks completion when requireEstimateBeforeDone and no estimate", async () => {
     signInAs("u", WS_A, "editor");
-    h.getListWithBoard.mockResolvedValue(listWithBoardFixture(WS_A));
-    h.updateListIsDone.mockResolvedValue(undefined);
-    expect(await updateListIsDoneAction(form())).toEqual({ success: true });
-    expect(h.updateListIsDone).toHaveBeenCalled();
+    h.getCardWithListAndMembers.mockResolvedValue(cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID }));
+    h.db.workspace.findUnique.mockResolvedValue({ requireEstimateBeforeDone: true });
+    const r = await toggleCardCompletionAction(form("true"));
+    expect(r).toEqual({ success: false, error: "Set an estimate before marking this card complete" });
+    expectNoWrites(h.setCardCompletion, h.db.$transaction, ...Object.values(h.emit));
+  });
+
+  it("allow: editor completes → writes completion + CARD_COMPLETED, emits completion", async () => {
+    signInAs("u", WS_A, "editor");
+    h.getCardWithListAndMembers.mockResolvedValue(cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID }));
+    h.db.workspace.findUnique.mockResolvedValue({ requireEstimateBeforeDone: false });
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (tx: unknown) => unknown) => cb(tx));
+    const completedAt = new Date("2026-07-03T00:00:00.000Z");
+    h.setCardCompletion.mockResolvedValue({
+      card: {
+        id: CARD_ID, listId: LIST_ID, title: "Card", description: null, position: 1,
+        priority: null, dueDate: null, estimateHours: null, completedAt,
+        deletedAt: null, coverImage: null, archivedAt: null, createdById: "u",
+        createdAt: completedAt, updatedAt: completedAt,
+      },
+      transitioned: true,
+    });
+
+    const r = await toggleCardCompletionAction(form("true"));
+
+    expect(r.success).toBe(true);
+    expect(h.setCardCompletion).toHaveBeenCalledWith(tx, CARD_ID, true, null);
+    // A real transition records exactly one history event...
+    expect(tx.cardHistoryEvent.createMany).toHaveBeenCalledTimes(1);
+    // ...and broadcasts the completion flip (carrying completedAt, not a boolean).
+    expect(h.emit.emitCardCompletionUpdated).toHaveBeenCalledWith(
+      "board-1",
+      { cardId: CARD_ID, completedAt: completedAt.toISOString() },
+    );
+  });
+
+  it("no-op: re-completing an already-complete card succeeds, writes no event, still emits state", async () => {
+    signInAs("u", WS_A, "editor");
+    const already = new Date("2026-07-01T00:00:00.000Z");
+    const fx = cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID });
+    fx.card.completedAt = already;
+    h.getCardWithListAndMembers.mockResolvedValue(fx);
+    // requireEstimateBeforeDone must NOT block a no-op (it isn't a transition) —
+    // decision 0021's "at most one completion per streak" leans on this guard.
+    h.db.workspace.findUnique.mockResolvedValue({ requireEstimateBeforeDone: true });
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (tx: unknown) => unknown) => cb(tx));
+    h.setCardCompletion.mockResolvedValue({
+      card: {
+        id: CARD_ID, listId: LIST_ID, title: "Card", description: null, position: 1,
+        priority: null, dueDate: null, estimateHours: null, completedAt: already,
+        deletedAt: null, coverImage: null, archivedAt: null, createdById: "u",
+        createdAt: already, updatedAt: already,
+      },
+      transitioned: false,
+    });
+
+    const r = await toggleCardCompletionAction(form("true"));
+
+    expect(r.success).toBe(true);
+    // No transition → no history event, and the estimate gate never fired.
+    expect(tx.cardHistoryEvent.createMany).not.toHaveBeenCalled();
+    expect(h.emit.emitCardCompletionUpdated).toHaveBeenCalledWith(
+      "board-1",
+      { cardId: CARD_ID, completedAt: already.toISOString() },
+    );
+  });
+
+  it("allow: editor reopens a complete card → writes CARD_REOPENED, emits completedAt null", async () => {
+    signInAs("u", WS_A, "editor");
+    const already = new Date("2026-07-01T00:00:00.000Z");
+    const fx = cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID });
+    fx.card.completedAt = already;
+    h.getCardWithListAndMembers.mockResolvedValue(fx);
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (tx: unknown) => unknown) => cb(tx));
+    h.setCardCompletion.mockResolvedValue({
+      card: {
+        id: CARD_ID, listId: LIST_ID, title: "Card", description: null, position: 1,
+        priority: null, dueDate: null, estimateHours: null, completedAt: null,
+        deletedAt: null, coverImage: null, archivedAt: null, createdById: "u",
+        createdAt: already, updatedAt: already,
+      },
+      transitioned: true,
+    });
+
+    const r = await toggleCardCompletionAction(form("false"));
+
+    expect(r.success).toBe(true);
+    expect(h.setCardCompletion).toHaveBeenCalledWith(tx, CARD_ID, false, already);
+    expect(tx.cardHistoryEvent.createMany).toHaveBeenCalledTimes(1);
+    expect(h.emit.emitCardCompletionUpdated).toHaveBeenCalledWith(
+      "board-1",
+      { cardId: CARD_ID, completedAt: null },
+    );
   });
 });
 
@@ -322,11 +494,17 @@ describe("deleteListAction (delete is editor+admin)", () => {
     expect(await deleteListAction(form())).toEqual({ success: false, error: "List not found" });
     expectNoWrites(...writeSeams);
   });
-  it("allow: WS-A editor reaches $transaction", async () => {
+  it("allow: WS-A editor — transaction body archives the list", async () => {
     signInAs("u", WS_A, "editor");
     h.getListWithBoard.mockResolvedValue(listWithBoardFixture(WS_A));
-    await deleteListAction(form());
-    expect(h.db.$transaction).toHaveBeenCalled();
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+    expect(await deleteListAction(form())).toEqual({ success: true });
+    // The body ran end-to-end and issued the archive (soft delete) on the right list.
+    expect(tx.list.update).toHaveBeenCalledWith({
+      where: { id: LIST_ID },
+      data: { archivedAt: expect.any(Date) },
+    });
   });
 });
 
@@ -351,11 +529,21 @@ describe("createCardAction", () => {
     expect(await createCardAction(form())).toEqual({ success: false, error: "List not found" });
     expectNoWrites(...writeSeams);
   });
-  it("allow: WS-A editor reaches $transaction", async () => {
+  it("allow: WS-A editor — transaction body creates the card at a gap position", async () => {
     signInAs("u", WS_A, "editor");
     h.getListWithBoard.mockResolvedValue(listWithBoardFixture(WS_A));
-    await createCardAction(form());
-    expect(h.db.$transaction).toHaveBeenCalled();
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+    const r = await createCardAction(form());
+    expect(r).toEqual({ success: true, cardId: "new-card" });
+    // The body ran: it read the last card (none) and inserted at the first gap.
+    expect(tx.card.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ listId: LIST_ID, title: "Card", position: 16384 }),
+      }),
+    );
+    // Creation history was captured in the same transaction.
+    expect(tx.cardHistoryEvent.createMany).toHaveBeenCalled();
   });
 });
 
@@ -593,11 +781,21 @@ describe("moveCardAction (two-workspace — the sharpest case)", () => {
     expectNoWrites(...writeSeams);
   });
 
-  it("allow: WS-A editor, same board → reaches $transaction", async () => {
+  it("allow: WS-A editor, same board → transaction body relocates the card to the target list", async () => {
     signInAs("u", WS_A, "editor");
     sameBoardSetup();
-    await moveCardAction(form());
-    expect(h.db.$transaction).toHaveBeenCalled();
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+    expect(await moveCardAction(form())).toEqual({ success: true });
+    // The body ran the real position resolver (no neighbours → append) and wrote
+    // the card into the target list at a concrete numeric position.
+    expect(tx.card.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: CARD_ID }),
+        data: expect.objectContaining({ listId: TARGET_LIST, position: 16384 }),
+      }),
+    );
+    expect(tx.cardHistoryEvent.createMany).toHaveBeenCalled();
   });
 });
 
@@ -713,15 +911,86 @@ describe("uploadAttachmentAction (card:update)", () => {
     expect(h.uploadToCloudinary).not.toHaveBeenCalled();
     expectNoWrites(...writeSeams);
   });
-  it("allow: WS-A editor reaches the attachment write", async () => {
+  it("allow: WS-A editor reaches the attachment write (via tx with FOR UPDATE lock)", async () => {
     signInAs("u", WS_A, "editor");
-    h.getCardWithListAndBoard.mockResolvedValue(cardWithListAndBoardFixture(WS_A));
+    const cardResult = cardWithListAndBoardFixture(WS_A);
+    h.getCardWithListAndBoard.mockResolvedValue(cardResult);
     h.validateFileForUpload.mockReturnValue({ valid: true });
     h.uploadToCloudinary.mockResolvedValue({ secureUrl: "u", publicId: "p", resourceType: "image" });
     h.createAttachment.mockResolvedValue({ id: "att" });
     h.createActivityEntry.mockResolvedValue({ id: "a" });
+    // Mock $transaction to execute the callback with a minimal tx that
+    // has $queryRaw (FOR UPDATE) and delegates attachment/activity to the
+    // existing lib mocks (h.createAttachment, h.createActivityEntry).
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: cardResult.list.id, archivedAt: null }]),
+      attachment: { create: (...args: unknown[]) => h.createAttachment(...args) },
+      activity: { create: (...args: unknown[]) => h.createActivityEntry(...args) },
+      card: { update: vi.fn(async () => ({ id: "card-1", coverImage: "u" })) },
+    };
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
     expect(await uploadAttachmentAction(form())).toEqual({ success: true, attachmentId: "att" });
     expect(h.createAttachment).toHaveBeenCalled();
+    expect(tx.$queryRaw).toHaveBeenCalled();
+  });
+
+  it("revalidation failure: list archived between Cloudinary upload and tx — compensates and returns Card not found", async () => {
+    signInAs("u", WS_A, "editor");
+    const cardResult = cardWithListAndBoardFixture(WS_A);
+    h.getCardWithListAndBoard.mockResolvedValue(cardResult);
+    h.validateFileForUpload.mockReturnValue({ valid: true });
+    h.uploadToCloudinary.mockResolvedValue({
+      secureUrl: "u",
+      publicId: "comp-pid-upload",
+      resourceType: "image",
+    });
+    h.cloudinaryV2.uploader.destroy.mockClear();
+
+    // $transaction mock — $queryRaw returns empty (list deleted/purged)
+    const tx = {
+      $queryRaw: vi.fn(async () => []),
+      attachment: { create: vi.fn() },
+      activity: { create: vi.fn() },
+    };
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+
+    const result = await uploadAttachmentAction(form());
+
+    // Must fail with "Card not found" (existing card-layer posture)
+    expect(result).toEqual({ success: false, error: "Card not found" });
+
+    // No attachment or activity writes
+    expect(h.createAttachment).not.toHaveBeenCalled();
+    expect(h.createActivityEntry).not.toHaveBeenCalled();
+
+    // Compensation: destroy called with the exact uploaded publicId + resourceType
+    expect(h.cloudinaryV2.uploader.destroy).toHaveBeenCalledWith("comp-pid-upload", {
+      resource_type: "image",
+    });
+  });
+
+  it("success path does not compensate for uploadAttachmentAction", async () => {
+    signInAs("u", WS_A, "editor");
+    const cardResult = cardWithListAndBoardFixture(WS_A);
+    h.getCardWithListAndBoard.mockResolvedValue(cardResult);
+    h.validateFileForUpload.mockReturnValue({ valid: true });
+    h.uploadToCloudinary.mockResolvedValue({ secureUrl: "u", publicId: "p", resourceType: "image" });
+    h.createAttachment.mockResolvedValue({ id: "att" });
+    h.createActivityEntry.mockResolvedValue({ id: "a" });
+    h.cloudinaryV2.uploader.destroy.mockClear();
+
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: cardResult.list.id, archivedAt: null }]),
+      attachment: { create: (...args: unknown[]) => h.createAttachment(...args) },
+      activity: { create: (...args: unknown[]) => h.createActivityEntry(...args) },
+      card: { update: vi.fn() },
+    };
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+
+    const result = await uploadAttachmentAction(form());
+    expect(result.success).toBe(true);
+    // Compensation must NOT fire on success
+    expect(h.cloudinaryV2.uploader.destroy).not.toHaveBeenCalled();
   });
 });
 
@@ -746,13 +1015,23 @@ describe("assignCardMemberAction", () => {
     expect(await assignCardMemberAction(form())).toEqual({ success: false, error: "Card not found" });
     expectNoWrites(...writeSeams);
   });
-  it("allow: WS-A editor reaches $transaction", async () => {
+  it("allow: WS-A editor — transaction body creates the card-member assignment", async () => {
     signInAs("u", WS_A, "editor");
     h.getCardWithListAndBoard.mockResolvedValue(cardWithListAndBoardFixture(WS_A));
     h.db.workspaceMember.findFirst.mockResolvedValue({ id: "m" });
-    h.db.$transaction.mockResolvedValue({ changed: false, member: { id: "x", name: "N", image: null, email: "e@x" } });
-    await assignCardMemberAction(form());
-    expect(h.db.$transaction).toHaveBeenCalled();
+    const tx = makeTx(); // cardMember.findUnique → null (not yet assigned) → create path
+    h.getCardMembers.mockResolvedValue([]); // live-broadcast fan-out after commit
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+    const r = await assignCardMemberAction(form());
+    expect(r).toEqual(
+      expect.objectContaining({ success: true, changed: true }),
+    );
+    expect(tx.cardMember.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ cardId: CARD_ID, userId: "target-user" }),
+      }),
+    );
+    expect(tx.cardHistoryEvent.createMany).toHaveBeenCalled();
   });
 });
 
@@ -775,12 +1054,18 @@ describe("removeCardMemberAction", () => {
     expect(await removeCardMemberAction(form())).toEqual({ success: false, error: "Card not found" });
     expectNoWrites(...writeSeams);
   });
-  it("allow: WS-A editor reaches $transaction", async () => {
+  it("allow: WS-A editor — transaction body deletes the card-member assignment", async () => {
     signInAs("u", WS_A, "editor");
     h.getCardWithListAndBoard.mockResolvedValue(cardWithListAndBoardFixture(WS_A));
-    h.db.$transaction.mockResolvedValue({ changed: false });
-    await removeCardMemberAction(form());
-    expect(h.db.$transaction).toHaveBeenCalled();
+    const tx = makeTx(); // cardMember.deleteMany → { count: 1 } → removed path
+    h.getCardMembers.mockResolvedValue([]); // live-broadcast fan-out after commit
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+    const r = await removeCardMemberAction(form());
+    expect(r).toEqual(expect.objectContaining({ success: true, changed: true }));
+    expect(tx.cardMember.deleteMany).toHaveBeenCalledWith({
+      where: { cardId: CARD_ID, userId: "target-user" },
+    });
+    expect(tx.cardHistoryEvent.createMany).toHaveBeenCalled();
   });
 });
 
@@ -897,6 +1182,8 @@ describe("addCardLabelAction (card:update)", () => {
     h.getLabelWithBoard.mockResolvedValue(labelWithBoardFixture(WS_A, { boardId: BOARD_A, labelId: LABEL_ID }));
     h.addCardLabel.mockResolvedValue({ changed: true });
     h.getCardLabels.mockResolvedValue([]);
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
     await addCardLabelAction(form());
     expect(h.addCardLabel).toHaveBeenCalled();
   });
@@ -928,5 +1215,177 @@ describe("removeCardLabelAction (card:update)", () => {
     h.getCardLabels.mockResolvedValue([]);
     await removeCardLabelAction(form());
     expect(h.removeCardLabel).toHaveBeenCalled();
+  });
+});
+
+describe("US-074 Slice B2 — archived list rejection", () => {
+  const formCard = () => formData({ cardId: CARD_ID });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    signInAs("u", WS_A, "editor");
+  });
+
+  describe("createCardAction (getListWithBoard returns null for archived list)", () => {
+    it("rejects when target list is archived (resolver returns null)", async () => {
+      h.getListWithBoard.mockResolvedValue(null);
+      const r = await createCardAction(formData({ listId: LIST_ID, title: "New" }));
+      expect(r).toEqual({ success: false, error: "List not found" });
+      expectNoWrites(...writeSeams);
+    });
+  });
+
+  describe("archiveCardAction / reorderCardAction / updateCardDetailsAction / " +
+    "createCommentAction / assignCardMemberAction / removeCardMemberAction / " +
+    "addCardLabelAction / removeCardLabelAction / updateCardPriorityAction / " +
+    "updateCardCoverAction (getCardWithListAndBoard returns null for archived parent list)",
+    () => {
+      beforeAll(() => {
+        h.getCardWithListAndBoard.mockResolvedValue(null);
+      });
+
+      // Each action that uses getCardWithListAndBoard should reject when it returns null
+      it("archiveCardAction → Card not found", async () => {
+        const r = await archiveCardAction(formCard());
+        expect(r).toEqual({ success: false, error: "Card not found" });
+      });
+
+      it("reorderCardAction → Card not found", async () => {
+        const r = await reorderCardAction(
+          formData({ cardId: CARD_ID, prevCardId: "p", nextCardId: "n" }),
+        );
+        expect(r).toEqual({ success: false, error: "Card not found" });
+      });
+
+      it("updateCardDetailsAction → Card not found", async () => {
+        const r = await updateCardDetailsAction(
+          formData({ cardId: CARD_ID, title: "X", description: "" }),
+        );
+        expect(r).toEqual({ success: false, error: "Card not found" });
+      });
+
+      it("createCommentAction → Card not found", async () => {
+        const r = await createCommentAction(formData({ cardId: CARD_ID, content: "Hi" }));
+        expect(r).toEqual({ success: false, error: "Card not found" });
+      });
+
+      it("assignCardMemberAction → Card not found", async () => {
+        const r = await assignCardMemberAction(formData({ cardId: CARD_ID, userId: "u2" }));
+        expect(r).toEqual({ success: false, error: "Card not found" });
+      });
+
+      it("removeCardMemberAction → Card not found", async () => {
+        const r = await removeCardMemberAction(formData({ cardId: CARD_ID, userId: "u2" }));
+        expect(r).toEqual({ success: false, error: "Card not found" });
+      });
+
+      it("addCardLabelAction → Card not found", async () => {
+        const r = await addCardLabelAction(formData({ cardId: CARD_ID, labelId: LABEL_ID }));
+        expect(r).toEqual({ success: false, error: "Card not found" });
+      });
+
+      it("removeCardLabelAction → Card not found", async () => {
+        const r = await removeCardLabelAction(formData({ cardId: CARD_ID, labelId: LABEL_ID }));
+        expect(r).toEqual({ success: false, error: "Card not found" });
+      });
+
+      it("updateCardPriorityAction → Card not found", async () => {
+        const r = await updateCardPriorityAction(
+          formData({ cardId: CARD_ID, priority: "HIGH" }),
+        );
+        expect(r).toEqual({ success: false, error: "Card not found" });
+      });
+
+      it("updateCardCoverAction → Card not found", async () => {
+        const r = await updateCardCoverAction(formData({ cardId: CARD_ID, coverImage: "" }));
+        expect(r).toEqual({ success: false, error: "Card not found" });
+      });
+    },
+  );
+
+  describe("moveCardAction — source or target archived", () => {
+    const TARGET_LIST_UUID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+    const moveForm = (overrides: Record<string, string> = {}) =>
+      formData({ cardId: CARD_ID, targetListId: TARGET_LIST_UUID, ...overrides });
+
+    it("rejects source card when its parent list is archived (getCardWithListAndBoard → null)", async () => {
+      h.getCardWithListAndBoard.mockResolvedValue(null);
+      const r = await moveCardAction(moveForm());
+      expect(r).toEqual({ success: false, error: "Card not found" });
+      expectNoWrites(...writeSeams);
+    });
+
+    it("rejects when target list is archived (getListWithBoard → null)", async () => {
+      h.getCardWithListAndBoard.mockResolvedValue(cardWithListAndBoardFixture(WS_A));
+      h.getListWithBoard.mockResolvedValue(null);
+      const r = await moveCardAction(moveForm());
+      expect(r).toEqual({ success: false, error: "List not found" });
+      expectNoWrites(...writeSeams);
+    });
+  });
+
+  // US-083 W8: the resolver no longer nulls the archived-parent case — it
+  // flags it (see undo-restore.test.ts for the dedicated outcome). A NULL
+  // resolver now means missing/foreign/already-restored: the action must keep
+  // the generic not-found contract for those (no existence leak).
+  describe("restoreCardAction — null resolver (missing/foreign/already-restored) keeps generic not-found",
+    () => {
+      it("rejects restore when the resolver finds nothing", async () => {
+        h.getArchivedCardWithListAndBoard.mockResolvedValue(null);
+        const r = await restoreCardAction(formCard());
+        expect(r).toEqual({ success: false, error: "Card not found" });
+        expectNoWrites(...writeSeams);
+      });
+    });
+
+  describe("completion / estimate / due-date — getCardWithListAndMembers returns null for archived parent list",
+    () => {
+      beforeAll(() => {
+        h.getCardWithListAndMembers.mockResolvedValue(null);
+      });
+
+      it("toggleCardCompletionAction → Card not found", async () => {
+        const r = await toggleCardCompletionAction(
+          formData({ cardId: CARD_ID, complete: "true" }),
+        );
+        expect(r).toEqual({ success: false, error: "Card not found" });
+      });
+
+      it("updateCardEstimateAction → Card not found", async () => {
+        const r = await updateCardEstimateAction(
+          formData({ cardId: CARD_ID, estimateHours: "4" }),
+        );
+        expect(r).toEqual({ success: false, error: "Card not found" });
+      });
+
+      it("updateCardDueDateAction → Card not found", async () => {
+        const r = await updateCardDueDateAction(
+          formData({ cardId: CARD_ID, dueDate: "2025-12-31T00:00:00.000Z" }),
+        );
+        expect(r).toEqual({ success: false, error: "Card not found" });
+      });
+    });
+
+  describe("uploadAttachmentAction — getCardWithListAndBoard returns null", () => {
+    it("uploadAttachmentAction → Card not found (archived parent list)", async () => {
+      h.getCardWithListAndBoard.mockResolvedValue(null);
+      h.validateFileForUpload.mockReturnValue({ valid: true });
+      h.uploadToCloudinary.mockResolvedValue({ secureUrl: "https://example.com/x", publicId: "x", resourceType: "image" });
+      const fd = new FormData();
+      fd.set("cardId", CARD_ID);
+      fd.set("file", new File(["x"], "x.txt", { type: "text/plain" }));
+      const r = await uploadAttachmentAction(fd);
+      expect(r.success).toBe(false);
+    });
+
+    it("setCardCoverAction → Card not found (archived parent list)", async () => {
+      h.getCardWithListAndBoard.mockResolvedValue(null);
+      h.uploadToCloudinary.mockResolvedValue({ secureUrl: "https://ex.com/x", publicId: "x", resourceType: "image" });
+      const fd = new FormData();
+      fd.set("cardId", CARD_ID);
+      fd.set("file", new File(["x"], "x.png", { type: "image/png" }));
+      const r = await setCardCoverAction(fd);
+      expect(r.success).toBe(false);
+    });
   });
 });

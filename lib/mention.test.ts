@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parseMentions, mentionMatchesName, extractMentionQuery } from "./mention";
+import {
+  parseMentions,
+  mentionMatchesName,
+  extractMentionQuery,
+  resolveMentions,
+} from "./mention";
 
 describe("parseMentions", () => {
   it("extracts @mentions from content", () => {
@@ -83,6 +88,73 @@ describe("mentionMatchesName", () => {
 
   it("does NOT match wrong concatenated mention", () => {
     expect(mentionMatchesName("bobuser", "Test User")).toBe(false);
+  });
+});
+
+describe("resolveMentions", () => {
+  const members = [
+    { userId: "u1", name: "Alice" },
+    { userId: "u2", name: "Bob" },
+    { userId: "u3", name: "Bob Smith" },
+  ];
+
+  function resolvedNames(content: string) {
+    return resolveMentions(content, members).map((m) => m.member.name);
+  }
+
+  it("resolves a full-name mention", () => {
+    expect(resolvedNames("@Alice look at this")).toEqual(["Alice"]);
+  });
+
+  it("resolves multiple mentions in document order", () => {
+    expect(resolvedNames("Hey @Bob and @Alice!")).toEqual(["Bob", "Alice"]);
+  });
+
+  it("prefers the longest matching name (multi-word display names resolve)", () => {
+    // "@Bob Smith" must resolve to "Bob Smith", not the shorter "Bob".
+    expect(resolvedNames("ping @Bob Smith please")).toEqual(["Bob Smith"]);
+  });
+
+  it("does NOT resolve a partial/prefix mention (full-name matching preserved)", () => {
+    // "@Bo" must notify no one — this is the intentional no-behavior-change
+    // rule; partial resolution is an autocomplete-only affordance.
+    expect(resolveMentions("@Bo where are you", members)).toEqual([]);
+  });
+
+  it("does not match when the name runs into another letter", () => {
+    // "@Bobby" must not resolve to "Bob".
+    expect(resolveMentions("@Bobby", members)).toEqual([]);
+  });
+
+  it("matches when followed by punctuation or end of string", () => {
+    expect(resolvedNames("@Alice, hi")).toEqual(["Alice"]);
+    expect(resolvedNames("@Alice")).toEqual(["Alice"]);
+  });
+
+  it("is case-insensitive but reports the canonical member name", () => {
+    const matches = resolveMentions("@alice", members);
+    expect(matches.map((m) => m.member.name)).toEqual(["Alice"]);
+  });
+
+  it("reports boundaries spanning the '@' through the end of the name", () => {
+    const [match] = resolveMentions("hi @Alice!", members);
+    expect(match.start).toBe(3);
+    expect("hi @Alice!".slice(match.start, match.end)).toBe("@Alice");
+  });
+
+  it("ignores members without a name", () => {
+    expect(resolveMentions("@Alice", [{ userId: "x", name: "" }])).toEqual([]);
+  });
+
+  it("resolves duplicate display names to the LAST member (pre-US-057 parity)", () => {
+    // The old name-keyed Map kept the last-inserted member for identical names;
+    // resolveMentions preserves that so notify recipients don't silently swap.
+    const dupes = [
+      { userId: "first", name: "Sam" },
+      { userId: "second", name: "Sam" },
+    ];
+    const [match] = resolveMentions("@Sam ping", dupes);
+    expect(match.member.userId).toBe("second");
   });
 });
 

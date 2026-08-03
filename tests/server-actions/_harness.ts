@@ -80,7 +80,7 @@ export function boardFixture(
 /** Shaped like `getListWithBoard(listId)` — the `{ list, board }` envelope. */
 export function listWithBoardFixture(
   workspaceId: string,
-  opts: { boardId?: string; listId?: string; isDone?: boolean } = {},
+  opts: { boardId?: string; listId?: string } = {},
 ) {
   const boardId = opts.boardId ?? "board-1";
   return {
@@ -89,9 +89,9 @@ export function listWithBoardFixture(
       boardId,
       title: "List",
       position: 16384,
-      isDone: opts.isDone ?? false,
+      archivedAt: null as Date | null,
     },
-    board: { id: boardId, workspaceId, archivedAt: null },
+    board: { id: boardId, workspaceId, archivedAt: null as Date | null },
   };
 }
 
@@ -111,7 +111,7 @@ export function cardWithListAndBoardFixture(
 /** Shaped like `getCardWithListAndMembers(cardId)`. */
 export function cardWithListAndMembersFixture(
   workspaceId: string,
-  opts: { boardId?: string; cardId?: string; isDone?: boolean } = {},
+  opts: { boardId?: string; cardId?: string } = {},
 ) {
   const boardId = opts.boardId ?? "board-1";
   return {
@@ -121,7 +121,7 @@ export function cardWithListAndMembersFixture(
       estimateHours: null as number | null,
       dueDate: null as Date | null,
     },
-    list: { id: "list-1", isDone: opts.isDone ?? false },
+    list: { id: "list-1", boardId },
     board: { id: boardId, workspaceId },
     memberIds: [] as string[],
   };

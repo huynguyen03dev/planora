@@ -2,6 +2,7 @@
 
 import { getWorkspaceAnalytics } from "@/lib/analytics/engine";
 import type {
+  AnalyticsExportPayload,
   AnalyticsFilters,
   WorkspaceAnalyticsPayload,
 } from "@/lib/analytics/types";
@@ -12,45 +13,6 @@ import { verifySession } from "@/lib/dal";
 export type AnalyticsActionResult<T> =
   | { success: true; data: T }
   | { success: false; error: string };
-
-export type AnalyticsExportPayload = {
-  burndown: {
-    date: string;
-    remainingHours: number;
-    idealHours: number | null;
-  }[];
-  kpis: {
-    remainingHours: { current: number; previous: number; change: number };
-    medianLeadTimeHours: { current: number; previous: number; change: number };
-    averageLeadTimeHours: { current: number; previous: number; change: number };
-    overdueCount: { current: number; previous: number; change: number };
-    completedLateCount: { current: number; previous: number; change: number };
-    reopenRatePercent: { current: number; previous: number; change: number };
-    estimationCoveragePercent: {
-      current: number;
-      estimatedCount: number;
-      unestimatedCount: number;
-    };
-  };
-  leadTimeRows: {
-    cardId: string;
-    cardTitle: string;
-    createdAt: string;
-    completedAt: string;
-    leadTimeHours: number;
-    wasLate: boolean;
-  }[];
-  metadata: {
-    workspaceId: string;
-    workspaceTimezone: string;
-    from: string;
-    to: string;
-    boardId: string | null;
-    memberId: string | null;
-    includeArchivedBoards: boolean;
-    exportedAt: string;
-  };
-};
 
 /**
  * Resolve workspace by slug.
@@ -186,83 +148,4 @@ export async function exportWorkspaceAnalyticsAction(
     console.error("Failed to export workspace analytics:", error);
     return { success: false, error: "Failed to export analytics" };
   }
-}
-
-function csvCell(value: string | number | boolean | null): string {
-  const text = value == null ? "" : String(value);
-  return /[",\n\r]/.test(text) ? `"${text.replaceAll("\"", "\"\"")}"` : text;
-}
-
-/**
- * Generate CSV content for analytics export.
- * Note: This is an async function because it's in a server actions file.
- */
-export async function generateAnalyticsCSV(payload: AnalyticsExportPayload): Promise<string> {
-  const lines: string[] = [];
-
-  // Header
-  lines.push("Analytics Export");
-  lines.push(`Workspace ID,${payload.metadata.workspaceId}`);
-  lines.push(`Timezone,${payload.metadata.workspaceTimezone}`);
-  lines.push(`From,${payload.metadata.from}`);
-  lines.push(`To,${payload.metadata.to}`);
-  lines.push(`Board ID,${payload.metadata.boardId ?? ""}`);
-  lines.push(`Member ID,${payload.metadata.memberId ?? ""}`);
-  lines.push(`Include Archived Boards,${payload.metadata.includeArchivedBoards}`);
-  lines.push(`Exported At,${payload.metadata.exportedAt}`);
-  lines.push("");
-
-  // Burndown section
-  lines.push("Burndown");
-  lines.push("Date,Remaining Hours,Ideal Hours");
-  for (const point of payload.burndown) {
-    lines.push(
-      `${point.date},${point.remainingHours},${point.idealHours ?? ""}`,
-    );
-  }
-  lines.push("");
-
-  // KPIs section
-  lines.push("KPIs");
-  lines.push("Metric,Current,Previous,Change");
-  lines.push(
-    `Remaining Hours,${payload.kpis.remainingHours.current},${payload.kpis.remainingHours.previous},${payload.kpis.remainingHours.change.toFixed(2)}%`,
-  );
-  lines.push(
-    `Median Lead Time (hours),${payload.kpis.medianLeadTimeHours.current.toFixed(2)},${payload.kpis.medianLeadTimeHours.previous.toFixed(2)},${payload.kpis.medianLeadTimeHours.change.toFixed(2)}%`,
-  );
-  lines.push(
-    `Average Lead Time (hours),${payload.kpis.averageLeadTimeHours.current.toFixed(2)},${payload.kpis.averageLeadTimeHours.previous.toFixed(2)},${payload.kpis.averageLeadTimeHours.change.toFixed(2)}%`,
-  );
-  lines.push(
-    `Overdue Count,${payload.kpis.overdueCount.current},${payload.kpis.overdueCount.previous},${payload.kpis.overdueCount.change.toFixed(2)}%`,
-  );
-  lines.push(
-    `Completed Late Count,${payload.kpis.completedLateCount.current},${payload.kpis.completedLateCount.previous},${payload.kpis.completedLateCount.change.toFixed(2)}%`,
-  );
-  lines.push(
-    `Reopen Rate (%),${payload.kpis.reopenRatePercent.current.toFixed(2)},${payload.kpis.reopenRatePercent.previous.toFixed(2)},${payload.kpis.reopenRatePercent.change.toFixed(2)}%`,
-  );
-  lines.push(
-    `Estimation Coverage (%),${payload.kpis.estimationCoveragePercent.current.toFixed(2)},-,Estimated: ${payload.kpis.estimationCoveragePercent.estimatedCount}, Unestimated: ${payload.kpis.estimationCoveragePercent.unestimatedCount}`,
-  );
-  lines.push("");
-
-  // Lead time detail section
-  lines.push("Lead Time Detail");
-  lines.push("Card ID,Card Title,Created At,Completed At,Lead Time (hours),Was Late");
-  for (const row of payload.leadTimeRows) {
-    lines.push(
-      [
-        row.cardId,
-        row.cardTitle,
-        row.createdAt,
-        row.completedAt,
-        row.leadTimeHours.toFixed(2),
-        row.wasLate,
-      ].map(csvCell).join(","),
-    );
-  }
-
-  return lines.join("\n");
 }

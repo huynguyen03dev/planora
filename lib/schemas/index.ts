@@ -13,13 +13,17 @@ export {
   createListSchema,
   updateListSchema,
   deleteListSchema,
+  archiveListSchema,
+  restoreListSchema,
   reorderListSchema,
-  updateListIsDoneSchema,
+  permanentDeleteListSchema,
   type CreateListInput,
   type UpdateListInput,
   type DeleteListInput,
+  type ArchiveListInput,
+  type RestoreListInput,
   type ReorderListInput,
-  type UpdateListIsDoneInput,
+  type PermanentDeleteListInput,
 } from "./list";
 export {
   createCardSchema,
@@ -31,6 +35,8 @@ export {
   updateCardEstimateSchema,
   updateCardDueDateSchema,
   updateCardPrioritySchema,
+  toggleCardCompletionSchema,
+  type ToggleCardCompletionInput,
   type UpdateCardPriorityInput,
   updateCardCoverSchema,
   setCardCoverSchema,
@@ -52,10 +58,23 @@ export {
   inviteMemberSchema,
   acceptInvitationSchema,
   declineInvitationSchema,
+  workspaceIdSchema,
+  invitationIdSchema,
   type InviteMemberInput,
   type AcceptInvitationInput,
   type DeclineInvitationInput,
 } from "./invitation";
+
+export {
+  removeMemberSchema,
+  updateMemberRoleSchema,
+  leaveWorkspaceSchema,
+  cancelInvitationSchema,
+  type RemoveMemberInput,
+  type UpdateMemberRoleInput,
+  type LeaveWorkspaceInput,
+  type CancelInvitationInput,
+} from "./member";
 
 export {
   createCommentSchema,
@@ -105,3 +124,29 @@ export {
   type AddCardLabelInput,
   type RemoveCardLabelInput,
 } from "./label";
+
+export {
+  TRIGGER_TYPES,
+  triggerTypeSchema,
+  triggerConfigSchema,
+  actionStepSchema,
+  actionsSchema,
+  createRuleSchema,
+  updateRuleSchema,
+  deleteRuleSchema,
+  toggleRuleEnabledSchema,
+  listRulesSchema,
+  ruleExecutionLogSchema,
+  dryRunRulesSchema,
+  type TriggerType,
+  type TriggerConfig,
+  type ActionStep,
+  type Actions,
+  type CreateRuleInput,
+  type UpdateRuleInput,
+  type DeleteRuleInput,
+  type ToggleRuleEnabledInput,
+  type ListRulesInput,
+  type RuleExecutionLogInput,
+  type DryRunRulesInput,
+} from "./automation";

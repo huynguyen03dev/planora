@@ -35,6 +35,8 @@ export type ChecklistScopeRecord = {
   cardId: string;
   boardId: string;
   cardArchived: boolean;
+  /** US-074 Slice B2: true when the parent list is archived. */
+  listArchived: boolean;
   board: { id: string; workspaceId: string; archivedAt: Date | null };
 };
 
@@ -74,6 +76,7 @@ function toScope(row: {
   card: {
     archivedAt: Date | null;
     list: {
+      archivedAt: Date | null;
       boardId: string;
       board: { id: string; workspaceId: string; archivedAt: Date | null };
     };
@@ -84,6 +87,7 @@ function toScope(row: {
     cardId: row.cardId,
     boardId: row.card.list.boardId,
     cardArchived: row.card.archivedAt !== null,
+    listArchived: row.card.list.archivedAt !== null,
     board: row.card.list.board,
   };
 }
@@ -92,6 +96,7 @@ const SCOPE_CARD_SELECT = {
   archivedAt: true,
   list: {
     select: {
+      archivedAt: true,
       boardId: true,
       board: { select: { id: true, workspaceId: true, archivedAt: true } },
     },

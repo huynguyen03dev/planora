@@ -3,10 +3,11 @@ import { z } from "zod";
 
 // Schema for assigning a member to a card
 export const assignCardMemberSchema = z.object({
-  // Better Auth generates 32-char alphanumeric IDs (nanoid-style), not UUIDs
   cardId: z
     .string({ message: "Card ID is required" })
     .uuid("Invalid card ID"),
+  // Better Auth generates 32-char alphanumeric IDs (nanoid-style), not UUIDs, so
+  // userId is bounded by length rather than parsed as a UUID.
   userId: z
     .string({ message: "User ID is required" })
     .min(1, "User ID is required")
@@ -15,10 +16,11 @@ export const assignCardMemberSchema = z.object({
 
 // Schema for removing a member from a card
 export const removeCardMemberSchema = z.object({
-  // Better Auth generates 32-char alphanumeric IDs (nanoid-style), not UUIDs
   cardId: z
     .string({ message: "Card ID is required" })
     .uuid("Invalid card ID"),
+  // Better Auth generates 32-char alphanumeric IDs (nanoid-style), not UUIDs, so
+  // userId is bounded by length rather than parsed as a UUID.
   userId: z
     .string({ message: "User ID is required" })
     .min(1, "User ID is required")

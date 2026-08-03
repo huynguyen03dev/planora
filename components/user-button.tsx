@@ -11,6 +11,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { avatarColorClass } from "@/lib/avatar";
 
 type UserButtonProps = {
   onCreateWorkspace?: () => void;
@@ -59,8 +61,17 @@ export function UserButton({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex size-8 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground outline-none ring-offset-background transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-        {isPending ? null : initials}
+      <DropdownMenuTrigger className="rounded-full outline-none ring-offset-background transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+        <Avatar className="size-8">
+          {user?.image ? (
+            <AvatarImage src={user.image} alt={user.name ?? "User"} />
+          ) : null}
+          <AvatarFallback
+            className={`${avatarColorClass(user?.id ?? user?.name ?? "")} text-xs font-medium`}
+          >
+            {isPending ? null : initials}
+          </AvatarFallback>
+        </Avatar>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         {user && (

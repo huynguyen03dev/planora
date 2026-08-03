@@ -1,6 +1,7 @@
 import "server-only";
 
 import { headers } from "next/headers";
+import { APIError } from "better-auth";
 
 import { auth } from "@/lib/auth";
 import db from "@/lib/prisma";
@@ -27,6 +28,8 @@ export type BoardPagePermissions = {
   canEditCard: boolean;
   canArchiveCard: boolean;
   canComment: boolean;
+  // Admin-only permanent delete affordance (US-074 Slice C).
+  canPermanentDelete: boolean;
 };
 
 const rolePermissionMap: Record<WorkspaceRole, BoardPagePermissions> = {
@@ -40,6 +43,7 @@ const rolePermissionMap: Record<WorkspaceRole, BoardPagePermissions> = {
     canEditCard: true,
     canArchiveCard: true,
     canComment: true,
+    canPermanentDelete: true,
   },
   editor: {
     canEditBoard: true,
@@ -51,6 +55,7 @@ const rolePermissionMap: Record<WorkspaceRole, BoardPagePermissions> = {
     canEditCard: true,
     canArchiveCard: true,
     canComment: true,
+    canPermanentDelete: false,
   },
   viewer: {
     canEditBoard: false,
@@ -62,6 +67,7 @@ const rolePermissionMap: Record<WorkspaceRole, BoardPagePermissions> = {
     canEditCard: false,
     canArchiveCard: false,
     canComment: true,
+    canPermanentDelete: false,
   },
 };
 
@@ -116,13 +122,26 @@ export async function hasWorkspacePermission(
   workspaceId: string,
   permissions: PermissionRequest,
 ): Promise<boolean> {
-  const result = await auth.api.hasPermission({
-    headers: await headers(),
-    body: {
-      organizationId: workspaceId,
-      permissions,
-    },
-  });
+  try {
+    const result = await auth.api.hasPermission({
+      headers: await headers(),
+      body: {
+        organizationId: workspaceId,
+        permissions,
+      },
+    });
 
-  return result.success;
+    return result.success;
+  } catch (err) {
+    // Better Auth's organization plugin throws UNAUTHORIZED for a caller who
+    // is not a member of the organization, instead of returning
+    // { success: false }. Normalize that one case to a soft deny. Anything
+    // else (e.g. INTERNAL_SERVER_ERROR from a misconfigured role/AC) must
+    // keep propagating — swallowing it would mask a config bug as a deny.
+    if (err instanceof APIError && err.status === "UNAUTHORIZED") {
+      return false;
+    }
+
+    throw err;
+  }
 }

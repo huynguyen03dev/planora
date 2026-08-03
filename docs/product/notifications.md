@@ -58,14 +58,28 @@ notifications instead of living in a separate boards-only sidebar entry.
 - **Badge:** `computeInboxBadgeCount` = unread notifications + pending
   invitations, so a standing decision signals on every page. The count is owned
   by `authenticated-header-actions.tsx`; `notification-bell.tsx` is presentational.
+- **Live arrival (US-083 W2):** `inviteMemberAction` resolves an already-
+  registered invitee by normalized email (Better Auth lowercases user and
+  invitation emails — verified at sign-up.mjs / createInvitation) and pushes
+  the typed `invitation:new` event (payload: `{ invitationId }` — minimal,
+  non-sensitive) to the invitee's own `user:${userId}` socket room
+  (`emitInvitationNew`, `lib/realtime/server.ts`). The header's `invitation:new`
+  handler increments the invitation portion of the badge live — no reload, no
+  polling. The socket is the session-long one auto-joined to the user room
+  (`server.ts`); no client-controlled room join is involved. An unregistered
+  email gets no realtime signal — the persisted invitation + email flow still
+  succeeds. On socket (re)connect the header resyncs BOTH badge halves
+  (unread + invitations) from the DB in one Server Action
+  (`getInboxBadgeCountsAction`, `app/(authenticated)/actions.ts`), so a
+  reconnect heals drift rather than trusting increment-only counters (extends
+  US-062 mn8). The inbox itself always re-reads the `invitation` table when
+  opened, so its content is DB-truth.
 - **Inline actions:** each invitation card renders Accept / Decline wired to the
   existing `acceptInvitationAction` / `declineInvitationAction` Server Actions
   (Better Auth `acceptInvitation` / `rejectInvitation`, email-match guarded).
   Accept navigates to `/boards?workspace=…`; decline removes the card and
   decrements the badge. The `/invitations` page remains the accept landing.
-- **Known limitation:** a newly-arrived invitation does not push a live badge
-  increment (no socket event for invitations); the count refreshes on the next
-  load/navigation. Accepted/declined cards update optimistically.
+  Accepted/declined cards update optimistically.
 
 ## Scheduler
 
@@ -127,6 +141,23 @@ The in-process `setInterval` assumes one server process. Do not run the app
 in PM2 cluster / multi-replica mode with the in-process driver enabled.
 For multi-instance deployments, use external cron driving the idempotent
 HTTP route instead.
+
+## Automation notifications
+
+An automation rule's `notify-member` action (see `automation.md`) creates
+notifications through the **same** `createNotification` + `sendEmail` path, but
+**post-commit** (after the triggering transaction commits) and attributed to the
+seeded **"Planora Automation"** system user — recipients see "Planora Automation
+assigned you…". The `recipient` may be a fixed member or a dynamic token
+(`card-assignees` / `card-creator`) resolved at fire time.
+
+A `notify-member` step on a `due-date-approaching` rule **deduplicates against
+the built-in reminder** via the same `CardReminder` `@@unique([cardId, userId,
+milestone])` claim, so a member never receives both a due-date reminder and a
+rule notification for the same milestone (decision 0022 R3). The built-in
+reminder stays the canonical due-date notifier. `notify-member` currently reuses
+the `ASSIGNED` notification type; a dedicated `AUTOMATION` type is a tracked
+follow-up.
 
 ## Email
 

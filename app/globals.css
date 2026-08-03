@@ -3,6 +3,7 @@
 @import "shadcn/tailwind.css";
 
 @custom-variant dark (&:is(.dark *));
+@custom-variant pointer-coarse (@media (pointer: coarse));
 
 @theme inline {
   --color-background: var(--background);
@@ -60,6 +61,31 @@
   --color-label-gray-fg: var(--label-gray-fg);
   --color-label-teal: var(--label-teal);
   --color-label-teal-fg: var(--label-teal-fg);
+  /* Per-user avatar fill (theme-independent) + same-hue border (theme-tuned). */
+  --color-avatar-blue: var(--avatar-blue);
+  --color-avatar-blue-border: var(--avatar-blue-border);
+  --color-avatar-green: var(--avatar-green);
+  --color-avatar-green-border: var(--avatar-green-border);
+  --color-avatar-orange: var(--avatar-orange);
+  --color-avatar-orange-border: var(--avatar-orange-border);
+  --color-avatar-red: var(--avatar-red);
+  --color-avatar-red-border: var(--avatar-red-border);
+  --color-avatar-purple: var(--avatar-purple);
+  --color-avatar-purple-border: var(--avatar-purple-border);
+  --color-avatar-pink: var(--avatar-pink);
+  --color-avatar-pink-border: var(--avatar-pink-border);
+  --color-avatar-teal: var(--avatar-teal);
+  --color-avatar-teal-border: var(--avatar-teal-border);
+  --color-avatar-gray: var(--avatar-gray);
+  --color-avatar-gray-border: var(--avatar-gray-border);
+  --color-avatar-blue-ring: var(--avatar-blue-ring);
+  --color-avatar-green-ring: var(--avatar-green-ring);
+  --color-avatar-orange-ring: var(--avatar-orange-ring);
+  --color-avatar-red-ring: var(--avatar-red-ring);
+  --color-avatar-purple-ring: var(--avatar-purple-ring);
+  --color-avatar-pink-ring: var(--avatar-pink-ring);
+  --color-avatar-teal-ring: var(--avatar-teal-ring);
+  --color-avatar-gray-ring: var(--avatar-gray-ring);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
@@ -140,6 +166,41 @@
   --label-gray-fg: oklch(0.522 0.107 231.775);
   --label-teal: oklch(0.95 0.038 215.909);
   --label-teal-fg: oklch(0.522 0.093 215.909);
+  /* Per-user avatar palette — solid fill + white initials, one hue per user
+     (hashed from their id) so a person reads as the same color everywhere,
+     mirroring Trello's assignee/presence coloring. Fills are theme-independent
+     (a blue avatar is blue in both modes; contrast is white-on-fill, which does
+     not depend on the page surface). White-on-fill contrast measured (AA
+     ≥4.5:1 normal): blue 5.15 · green 5.02 · orange 5.30 · red 5.09 ·
+     purple 5.73 · pink 5.11 · teal 5.25 · gray 5.25. The *-border is the same
+     hue mixed toward black (light) for a subtly darker, raised edge. The *-ring
+     is the same hue mixed toward white — a lighter tint that separates
+     overlapping presence discs softly (Trello-style) instead of a hard white
+     ring. Fill and ring are theme-independent; only the *-border is theme-tuned. */
+  --avatar-blue: oklch(0.52 0.15 244.952);
+  --avatar-green: oklch(0.52 0.13 138.637);
+  --avatar-orange: oklch(0.53 0.145 55);
+  --avatar-red: oklch(0.55 0.18 27);
+  --avatar-purple: oklch(0.52 0.16 313.63);
+  --avatar-pink: oklch(0.55 0.17 352.7);
+  --avatar-teal: oklch(0.5 0.11 200);
+  --avatar-gray: oklch(0.52 0.02 231.775);
+  --avatar-blue-border: color-mix(in oklch, var(--avatar-blue), black 22%);
+  --avatar-green-border: color-mix(in oklch, var(--avatar-green), black 22%);
+  --avatar-orange-border: color-mix(in oklch, var(--avatar-orange), black 22%);
+  --avatar-red-border: color-mix(in oklch, var(--avatar-red), black 22%);
+  --avatar-purple-border: color-mix(in oklch, var(--avatar-purple), black 22%);
+  --avatar-pink-border: color-mix(in oklch, var(--avatar-pink), black 22%);
+  --avatar-teal-border: color-mix(in oklch, var(--avatar-teal), black 22%);
+  --avatar-gray-border: color-mix(in oklch, var(--avatar-gray), black 22%);
+  --avatar-blue-ring: color-mix(in oklch, var(--avatar-blue), white 45%);
+  --avatar-green-ring: color-mix(in oklch, var(--avatar-green), white 45%);
+  --avatar-orange-ring: color-mix(in oklch, var(--avatar-orange), white 45%);
+  --avatar-red-ring: color-mix(in oklch, var(--avatar-red), white 45%);
+  --avatar-purple-ring: color-mix(in oklch, var(--avatar-purple), white 45%);
+  --avatar-pink-ring: color-mix(in oklch, var(--avatar-pink), white 45%);
+  --avatar-teal-ring: color-mix(in oklch, var(--avatar-teal), white 45%);
+  --avatar-gray-ring: color-mix(in oklch, var(--avatar-gray), white 45%);
   --chart-1: oklch(0.809 0.105 251.813);
   --chart-2: oklch(0.623 0.214 259.815);
   --chart-3: oklch(0.546 0.245 262.881);
@@ -219,6 +280,16 @@
   --label-gray-fg: oklch(0.8 0.123 231.775);
   --label-teal: oklch(0.3 0.055 215.909);
   --label-teal-fg: oklch(0.8 0.13 215.909);
+  /* Avatar fills inherit from :root (theme-independent). In dark mode the
+     same-hue border lightens instead, for a raised edge on dark surfaces. */
+  --avatar-blue-border: color-mix(in oklch, var(--avatar-blue), white 30%);
+  --avatar-green-border: color-mix(in oklch, var(--avatar-green), white 30%);
+  --avatar-orange-border: color-mix(in oklch, var(--avatar-orange), white 30%);
+  --avatar-red-border: color-mix(in oklch, var(--avatar-red), white 30%);
+  --avatar-purple-border: color-mix(in oklch, var(--avatar-purple), white 30%);
+  --avatar-pink-border: color-mix(in oklch, var(--avatar-pink), white 30%);
+  --avatar-teal-border: color-mix(in oklch, var(--avatar-teal), white 30%);
+  --avatar-gray-border: color-mix(in oklch, var(--avatar-gray), white 30%);
   --chart-1: oklch(0.809 0.105 251.813);
   --chart-2: oklch(0.623 0.214 259.815);
   --chart-3: oklch(0.546 0.245 262.881);
@@ -244,4 +315,38 @@
   html {
     @apply font-sans;
   }
+}
+
+/* Themed scrollbar — token-driven so it matches both themes (replaces the
+   Radix ScrollArea thumb on native scroll containers, e.g. list card areas).
+   Thin, transparent track, `--border` thumb lifting to `--muted-foreground`
+   on hover; mirrors the old `bg-border` rounded thumb. */
+@utility themed-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  &::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  /* Gentle hover lift — a small step toward muted-foreground, not the full
+     (loud) value, to stay within the quiet neutral chrome (DESIGN.md ethos). */
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklch, var(--muted-foreground) 30%, transparent);
+  }
+}
+
+/* In dark theme `--muted-foreground` is a LIGHT gray (≈oklch(0.708), tuned for
+   text legibility), so the same 30% mix reads too bright on the dark column.
+   Pull the dark-mode hover down so the thumb stays a quiet, dim gray. */
+.dark .themed-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklch, var(--muted-foreground) 22%, transparent);
 }

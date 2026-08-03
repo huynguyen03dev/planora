@@ -19,11 +19,25 @@ jobs:
   verify:
     name: lint · typecheck · test
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: planora
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
-      # No real database is needed: lib/prisma builds its adapter lazily and
-      # every DB-touching test mocks @/lib/prisma. A syntactically valid URL is
-      # enough for `prisma generate` and for module load at test time.
-      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
+      # PostgreSQL service provides an isolated DB for fail-closed integration proofs
+      # (e.g. tests/db-index-proof.test.ts, which creates and cleans up ephemeral
+      # sandbox schemas). lib/prisma builds its adapter lazily for unit tests.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/planora?schema=public
     steps:
       - name: Checkout
         uses: actions/checkout@v5

@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { Prisma } from "@/app/generated/prisma/client";
+
 import db from "@/lib/prisma";
 
 type ActivityAction = "CREATED" | "UPDATED" | "MOVED" | "ARCHIVED" | "RESTORED" | "DELETED" | "COMMENTED";
@@ -56,16 +58,20 @@ export async function getActivityByCardId(
   });
 }
 
-export async function createActivityEntry(data: {
-  workspaceId: string;
-  boardId: string | null;
-  cardId: string | null;
-  userId: string;
-  action: ActivityAction;
-  entityType: ActivityEntityType;
-  metadata?: JsonValue | null;
-}): Promise<ActivityRecord> {
-  return db.activity.create({
+export async function createActivityEntry(
+  data: {
+    workspaceId: string;
+    boardId: string | null;
+    cardId: string | null;
+    userId: string;
+    action: ActivityAction;
+    entityType: ActivityEntityType;
+    metadata?: JsonValue | null;
+  },
+  client?: Prisma.TransactionClient,
+): Promise<ActivityRecord> {
+  const c = client ?? db;
+  return c.activity.create({
     data: {
       workspaceId: data.workspaceId,
       boardId: data.boardId,

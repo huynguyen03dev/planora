@@ -1,46 +1,31 @@
 "use client";
 
 import {
+  Archive02Icon,
   Calendar03Icon,
   CheckmarkSquare01Icon,
   Comment01Icon,
-  DragDropVerticalIcon,
   Flag01Icon,
-  MoreHorizontalIcon,
+  PencilEdit01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { memo, useState, useTransition } from "react";
+import { memo, useState } from "react";
 import { Draggable } from "@hello-pangea/dnd";
 
-import { archiveCardAction } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarGroup,
-  AvatarGroupCount,
-  AvatarImage,
-} from "@/components/ui/avatar";
+import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar";
+import { MemberAvatar } from "@/components/member-avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { ArchiveCardDialog } from "@/components/boards/archive-card-dialog";
+import { CardCompletionToggle } from "@/components/boards/card-completion-toggle";
 import { LabelMark } from "@/components/boards/label-mark";
-import { cn, getInitials } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+
+// How many assignee avatars the card face renders before collapsing the rest
+// into a "+N" chip. The store now carries the full assignee set (US-065 filter
+// needs it), so the cap is applied here at render rather than in the query.
+const MAX_CARD_FACE_AVATARS = 3;
 
 // Priority chip: soft tinted bg + tinted icon/text. Distinct from solid label
 // pills (different visual language) and accessible — icon + text, never
@@ -163,47 +148,89 @@ function ListCardItemComponent({
 
   // Board-wide "expand labels" preference (US-044). Read from the store, not local
   // state, so toggling it re-renders every card consistently and it never resets
-  // mid-drag (the memo'd card re-renders per drag tick).
+  // mid-drag (the memo'd card re-renders per drag tick). Trello-style, the toggle
+  // lives on the card face: clicking any card's labels flips the whole board
+  // between compact bars and named chips (there is no separate header control).
   const expandLabels = useBoardStore((s) => s.expandLabels);
+  const toggleExpandLabels = useBoardStore((s) => s.toggleExpandLabels);
 
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
-  const [isArchiving, startArchiveTransition] = useTransition();
 
+  const completed = card.completedAt !== null;
   const due = card.dueDate ? describeDueDate(card.dueDate, card.completedAt) : null;
-  const memberOverflow = Math.max(0, card.memberCount - card.members.length);
+  // `card.members` is the full assignee set (US-065 needs it for filtering); the
+  // face shows at most MAX_CARD_FACE_AVATARS and collapses the rest into "+N".
+  const visibleMembers = card.members.slice(0, MAX_CARD_FACE_AVATARS);
+  const memberOverflow = Math.max(0, card.memberCount - visibleMembers.length);
   const hasMeta =
     Boolean(card.priority) ||
     Boolean(due) ||
     card.checklistTotal > 0 ||
     card.commentCount > 0 ||
     card.memberCount > 0;
-
-  function handleArchive() {
-    const formData = new FormData();
-    formData.set("cardId", card.id);
-
-    startArchiveTransition(async () => {
-      const result = await archiveCardAction(formData);
-      if (!result.success) {
-        setError(result.error);
-        return;
-      }
-      setArchiveDialogOpen(false);
-    });
-  }
+  // Whether any hover quick-action (edit, or archive-on-completed) is offered.
+  // Viewers with no edit/archive rights get a clean, action-free card face.
+  const showQuickActions = canEdit || (canArchive && Boolean(card.completedAt));
 
   return (
     <>
-      <Draggable
-        draggableId={card.id}
-        index={index}
-        isDragDisabled={!canDrag}
-        disableInteractiveElementBlocking
-      >
+      <Draggable draggableId={card.id} index={index} isDragDisabled={!canDrag}>
         {(provided, snapshot) => (
           <div
             ref={provided.innerRef}
             {...provided.draggableProps}
+            // Whole-card drag (US-069): the card body IS the drag handle — no
+            // separate grip. `dragHandleProps` is null when isDragDisabled, so
+            // spreading it is safe for viewers. We intentionally do NOT set
+            // `disableInteractiveElementBlocking`: default blocking keeps drags
+            // from starting on the nested controls (completion toggle, actions
+            // menu, label toggle) so those stay clickable, while the rest of the
+            // body initiates a drag.
+            {...provided.dragHandleProps}
+            role="button"
+            tabIndex={0}
+            aria-label={`Open card ${card.title}`}
+            onClick={() => onOpenCard(card.id)}
+            onKeyDown={(event) => {
+              // Mid keyboard-drag the card div is still the focused target and
+              // dnd only preventDefault()s Enter (no stopPropagation), so this
+              // handler would still fire and open the sheet on top of an in-flight
+              // drag. Bail while dragging — dropping is Space, not Enter.
+              if (snapshot.isDragging) {
+                return;
+              }
+              // Only the card div itself opens on Enter — a keypress on a nested
+              // control (target !== currentTarget) must not also open the card.
+              // dnd's keyboard sensor (Space to lift, arrows to move) is bound
+              // globally, not via this handler, so Enter-to-open is additive and
+              // does not collide with Space-lift.
+              if (event.target !== event.currentTarget) {
+                return;
+              }
+              if (event.key === "Enter") {
+                event.preventDefault();
+                onOpenCard(card.id);
+              }
+            }}
+            // mb-2 (not a parent flex `gap`) is the inter-card spacing: it's
+            // part of the card's own box, so @hello-pangea/dnd's placeholder
+            // reserves it during a drag and the column height doesn't shift on
+            // lift/drop. See the sibling note in list-column.tsx.
+            className={cn(
+              // rounded-lg + focus-visible ring hug the inner Card so the keyboard
+              // open affordance (role=button, tabIndex=0) has a visible focus state
+              // (WCAG 1.4.11; DESIGN.md focus = ring-ring + glow). Before US-069 the
+              // grip button carried focus; the whole-card handle needs its own. Mouse
+              // clicks hit :focus (no ring); only keyboard focus shows the ring.
+              "mb-2 cursor-pointer rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+              // cursor-pointer signals the card is clickable (opens detail). We do
+              // NOT show cursor-grab on hover: a resting grab cursor over the whole
+              // card reads as misleading before a drag actually starts (the surface
+              // is also the click-to-open affordance). Grabbing appears only on
+              // mousedown (active:) — the moment a drag may begin — and only for
+              // users who can drag.
+              canDrag && "active:cursor-grabbing",
+            )}
             style={{
               ...provided.draggableProps.style,
               ...(hidden ? { display: "none" } : null),
@@ -216,7 +243,28 @@ function ListCardItemComponent({
               // tile. Without it, the explicit gap-0 / py-0 (+ CardContent p-2)
               // take effect, which is what makes the compact tile actually compact
               // (US-044).
-              className={cn("gap-0 overflow-hidden py-0 transition-transform", snapshot.isDragging && "scale-[1.02] shadow-md")}
+              className={cn(
+                // transition covers transform (drag scale), border-color (hover
+                // highlight) and box-shadow (drag shadow) so each state eases in
+                // over 150ms (DESIGN.md motion). Hover is a border highlight, NOT a
+                // bg fill: the list column behind is bg-muted, so a bg-muted /
+                // bg-secondary hover would equal the list surface and the card would
+                // visually merge into the list (worst in dark, where card / muted /
+                // secondary cluster within ~0.06 lightness). A neutral border lift is
+                // the DESIGN.md hierarchy tool and sidesteps the collision. Gated off
+                // while dragging. motion-reduce disables the transition.
+                "group gap-0 overflow-hidden py-0 transition-[transform,border-color,box-shadow] duration-150 ease-out motion-reduce:transition-none",
+                !snapshot.isDragging && "hover:border-muted-foreground/40",
+                snapshot.isDragging && "scale-[1.02] shadow-md",
+                // Completed cards stay in place, dimmed (Trello parity) — the
+                // filled completion check is the state indicator (US-045), so the
+                // dim is decorative, not the sole signal (WCAG 1.4.1). Kept at
+                // 0.75 (not 0.65) so small muted-foreground meta text stays close
+                // to its AA-secondary contrast; Platform verification measures the
+                // composited ratio. No auto-sort, no hiding: reordering would
+                // reintroduce the list-position/completion coupling removed in 0020.
+                card.completedAt && "opacity-75",
+              )}
             >
               {card.coverImage ? (
                 // Compact tiles (US-044): the cover shrinks from h-20 so an 80px
@@ -229,9 +277,79 @@ function ListCardItemComponent({
                   className="h-10 w-full object-cover"
                 />
               ) : null}
-              <CardContent className="space-y-1.5 p-2">
+              <CardContent className="relative space-y-1.5 p-2">
+                {/* Hover-only quick actions, overlaid top-right and kept OUT of
+                    flow so they never inflate the title row. That is what keeps a
+                    title-only card vertically balanced: the old always-visible
+                    size-8 "..." menu forced the row to 32px while title text is
+                    ~20px, leaving ~12px of dead space below the title (bottom
+                    heavier than top). Edit (pencil) opens the card; Archive is
+                    offered only on completed cards. opacity-0 (not display:none)
+                    keeps them focusable/clickable for keyboard — focus-within
+                    reveals them, group-hover reveals them on mouse hover. */}
+                {showQuickActions ? (
+                  <div
+                    className="absolute right-0.5 top-0.5 z-10 flex items-center gap-0.5 rounded-md bg-card/85 p-0.5 opacity-0 shadow-sm backdrop-blur-sm transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100 motion-reduce:transition-none"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    {canEdit ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Edit card ${card.title}`}
+                        title="Edit"
+                        onClick={() => onOpenCard(card.id)}
+                        className="text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                      >
+                        <HugeiconsIcon
+                          icon={PencilEdit01Icon}
+                          size={16}
+                          strokeWidth={2}
+                          className="text-current transition-colors"
+                        />
+                      </Button>
+                    ) : null}
+                    {canArchive && card.completedAt ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Archive card"
+                        title="Archive"
+                        onClick={() => setArchiveDialogOpen(true)}
+                        className="text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                      >
+                        <HugeiconsIcon
+                          icon={Archive02Icon}
+                          size={16}
+                          strokeWidth={2}
+                          className="text-current transition-colors"
+                        />
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 {card.labels.length > 0 ? (
-                  <div className="flex flex-wrap gap-1">
+                  // Trello parity: the labels themselves are the toggle. A plain
+                  // click flips the board-wide compact↔named preference. The card
+                  // is dragged from its dedicated grip handle (not here), so this
+                  // button only ever toggles.
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleExpandLabels();
+                    }}
+                    aria-label={
+                      expandLabels
+                        ? "Collapse labels to color bars"
+                        : "Expand labels to show names"
+                    }
+                    aria-pressed={expandLabels}
+                    className="flex w-fit max-w-full flex-wrap gap-1 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                  >
                     {card.labels.map((label) => (
                       <LabelMark
                         key={label.id}
@@ -239,75 +357,52 @@ function ListCardItemComponent({
                         variant={expandLabels ? "chip" : "bar"}
                       />
                     ))}
-                  </div>
+                  </button>
                 ) : null}
 
-                <div className="flex items-start justify-between gap-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onOpenCard(card.id)}
-                    className="h-auto flex-1 justify-start whitespace-normal break-words p-0 text-left text-sm font-normal hover:bg-transparent"
+                <div className="flex items-start">
+                  {/* Trello-style completion reveal: an unfinished card keeps
+                      the check collapsed (w-0/opacity-0) so a title-only tile
+                      reads clean; hovering the card — or focusing the check with
+                      the keyboard (group-focus-within) — slides it in (width +
+                      mr transition) and nudges the title right. A completed card
+                      always shows the filled check: it's the state indicator
+                      (US-045), so it's never hidden. Collapsing by width/opacity
+                      (not display:none) keeps the checkbox tab-reachable, mirroring
+                      the hover quick-actions overlay above. stopPropagation: a
+                      click on the toggle must not also open the card (the whole
+                      body is the open surface now). */}
+                  <span
+                    className={cn(
+                      "mt-0.5 flex shrink-0 overflow-hidden transition-[width,margin,opacity] duration-150 ease-out motion-reduce:transition-none",
+                      completed
+                        ? "mr-1.5 w-[18px] opacity-100"
+                        : // Collapsed until the card is hovered or the check is
+                          // keyboard-focused. On touch (no :hover, and a tap
+                          // resolves before focus-within) that would leave the
+                          // check unreachable — a US-045 regression — so
+                          // coarse-pointer devices keep it always shown.
+                          "w-0 opacity-0 group-hover:mr-1.5 group-hover:w-[18px] group-hover:opacity-100 group-focus-within:mr-1.5 group-focus-within:w-[18px] group-focus-within:opacity-100 [@media(hover:none)]:mr-1.5 [@media(hover:none)]:w-[18px] [@media(hover:none)]:opacity-100",
+                    )}
+                    onClick={(event) => event.stopPropagation()}
                   >
+                    <CardCompletionToggle
+                      cardId={card.id}
+                      completedAt={card.completedAt}
+                      canEdit={canEdit}
+                      variant="face"
+                      onError={setError}
+                    />
+                  </span>
+                  {/* Title is plain text (US-069): the whole card is the
+                      click/keyboard open + drag surface, so the title is no
+                      longer its own button. The hover quick-actions live in the
+                      absolute overlay above (out of flow), so this row no longer
+                      needs a right-side actions column — which is what keeps the
+                      tile vertically balanced when there's nothing else on it. */}
+                  <span className="min-w-0 flex-1 whitespace-normal break-words text-sm font-normal">
                     {card.title}
-                  </Button>
-
-                  {(canEdit || canArchive || canDrag) && (
-                    <div className="flex items-center gap-1">
-                      {canDrag ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label="Drag card"
-                          className="cursor-grab text-muted-foreground hover:bg-foreground/10 hover:text-foreground active:cursor-grabbing"
-                          {...provided.dragHandleProps}
-                        >
-                          <HugeiconsIcon
-                            icon={DragDropVerticalIcon}
-                            size={16}
-                            strokeWidth={2}
-                            className="text-current transition-colors"
-                          />
-                        </Button>
-                      ) : null}
-
-                      {(canEdit || canArchive) && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              aria-label="Card actions"
-                              className="text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-                            >
-                              <HugeiconsIcon
-                                icon={MoreHorizontalIcon}
-                                size={16}
-                                strokeWidth={2}
-                                className="text-current transition-colors"
-                              />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onSelect={() => onOpenCard(card.id)}>
-                              Open details
-                            </DropdownMenuItem>
-                            {canArchive && (
-                              <DropdownMenuItem
-                                onSelect={() => setArchiveDialogOpen(true)}
-                                className="text-destructive focus:text-destructive"
-                              >
-                                Archive
-                              </DropdownMenuItem>
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      )}
-                    </div>
-                  )}
+                  </span>
                 </div>
 
                 {hasMeta ? (
@@ -392,13 +487,14 @@ function ListCardItemComponent({
 
                     {card.memberCount > 0 ? (
                       <AvatarGroup className="shrink-0">
-                        {card.members.map((member) => (
-                          <Avatar key={member.id} size="sm">
-                            {member.image ? (
-                              <AvatarImage src={member.image} alt={member.name} />
-                            ) : null}
-                            <AvatarFallback>{getInitials(member.name)}</AvatarFallback>
-                          </Avatar>
+                        {visibleMembers.map((member) => (
+                          <MemberAvatar
+                            key={member.id}
+                            seed={member.id}
+                            name={member.name}
+                            image={member.image}
+                            size="sm"
+                          />
                         ))}
                         {memberOverflow > 0 ? (
                           <AvatarGroupCount
@@ -420,38 +516,13 @@ function ListCardItemComponent({
         )}
       </Draggable>
 
-      <AlertDialog
+      <ArchiveCardDialog
+        cardId={card.id}
+        cardTitle={card.title}
         open={archiveDialogOpen}
-        onOpenChange={(open) => {
-          if (isArchiving) {
-            return;
-          }
-          setArchiveDialogOpen(open);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Archive this card?</AlertDialogTitle>
-            <AlertDialogDescription>
-              &quot;{card.title}&quot; will be hidden from this board. You can
-              restore it later from the board&apos;s Archived cards view.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isArchiving}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(event) => {
-                event.preventDefault();
-                handleArchive();
-              }}
-              disabled={isArchiving}
-              className="bg-destructive hover:bg-destructive/90"
-            >
-              {isArchiving ? "Archiving..." : "Archive card"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onOpenChange={setArchiveDialogOpen}
+        onError={setError}
+      />
     </>
   );
 }

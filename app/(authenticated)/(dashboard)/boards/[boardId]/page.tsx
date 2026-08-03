@@ -4,6 +4,7 @@ import { BoardContent } from "@/app/(authenticated)/(dashboard)/boards/[boardId]
 import { BoardStoreProvider } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store-provider";
 import { BoardHeader } from "@/components/boards/board-header";
 import { CardDetailSheet } from "@/components/boards/card-detail-sheet";
+import { UndoHost } from "@/components/undo/undo-snackbar";
 import { getBoardById, getStarredBoardIds } from "@/lib/board";
 import {
   getBoardPagePermissionsForRole,
@@ -18,7 +19,9 @@ import { getActivityByCardId } from "@/lib/activity";
 import type { ActivityRecord } from "@/lib/activity";
 import { getBoardTheme } from "@/lib/constants";
 import { verifySession } from "@/lib/dal";
-import { getListsByBoardId } from "@/lib/list";
+import { getListsByBoardId, getArchivedLists } from "@/lib/list";
+import type { ArchivedListRecord } from "@/lib/list";
+import db from "@/lib/prisma";
 import { getCardMembers, getAssignableWorkspaceMembers } from "@/lib/card-member";
 import type { CardMemberRecord, AssignableWorkspaceMemberRecord } from "@/lib/card-member";
 import { getBoardLabels, getCardLabels } from "@/lib/label";
@@ -66,6 +69,7 @@ export default async function BoardPage({
     canEditCard,
     canArchiveCard,
     canComment,
+    canPermanentDelete,
   } = getBoardPagePermissionsForRole(role);
 
   const rawCardId = resolvedSearchParams.cardId;
@@ -75,16 +79,47 @@ export default async function BoardPage({
       : null;
 
   // Load lists + board labels first (needed regardless of card selection).
-  // Archived cards only matter to users who can restore them (editor/admin).
-  const [lists, boardLabels, archivedCards, starredBoardIds] = await Promise.all([
+  // Archived cards & lists only matter to users who can restore them (editor/admin).
+  const [lists, boardLabels, archivedCards, archivedLists, starredBoardIds] = await Promise.all([
     getListsByBoardId(boardId),
     getBoardLabels(boardId),
     canArchiveCard
       ? getArchivedCards(boardId)
       : Promise.resolve([] as ArchivedCardRecord[]),
+    canDeleteList
+      ? getArchivedLists(boardId)
+      : Promise.resolve([] as ArchivedListRecord[]),
     getStarredBoardIds(userId),
   ]);
   const isBoardStarred = starredBoardIds.includes(board.id);
+
+  // For admin users, batch-query live card counts and Cloudinary attachment
+  // presence for the permanent-delete UI (US-074 Slice C). Avoids N+1.
+  const listIds = canPermanentDelete ? archivedLists.map((l) => l.id) : [];
+  let liveCardCountByList: Map<string, number> | undefined;
+  const cloudinaryBlockedListIds = new Set<string>();
+  if (listIds.length > 0) {
+    const [cardGroups, cloudinaryAttachments] = await Promise.all([
+      db.card.groupBy({
+        by: ["listId"],
+        where: { listId: { in: listIds }, archivedAt: null, deletedAt: null },
+        _count: true,
+      }),
+      // Distinct list IDs with Cloudinary-backed attachments; no cap (the
+      // set deduplicates and handles any attachment count per list).
+      db.attachment.findMany({
+        where: {
+          card: { listId: { in: listIds } },
+          cloudinaryPublicId: { not: null },
+        },
+        select: { card: { select: { listId: true } } },
+      }),
+    ]);
+    liveCardCountByList = new Map(cardGroups.map((g) => [g.listId, g._count]));
+    for (const a of cloudinaryAttachments) {
+      cloudinaryBlockedListIds.add(a.card.listId);
+    }
+  }
 
   // Initialize data variables
   let selectedCard = null;
@@ -143,7 +178,6 @@ export default async function BoardPage({
     id: list.id,
     title: list.title,
     boardId: list.boardId,
-    isDone: list.isDone,
     position: list.position,
     cards: list.cards.map((card) => ({
       id: card.id,
@@ -154,6 +188,7 @@ export default async function BoardPage({
       priority: card.priority,
       dueDate: card.dueDate,
       completedAt: card.completedAt,
+      updatedAt: card.updatedAt,
       labels: card.labels,
       members: card.members,
       memberCount: card.memberCount,
@@ -228,7 +263,14 @@ export default async function BoardPage({
       canEditCard={canEditCard}
       canArchiveCard={canArchiveCard}
     >
-      <div className="flex h-full min-h-0 flex-1 flex-col p-3 sm:p-6">
+      {/* US-083 W8: the undo host is mounted at the stable board/provider level
+          (inside BoardStoreProvider, wrapping the board UI) so it survives the
+          archived entity's unmount and realtime/RSC re-renders, and its context
+          reaches both archive seams (card face/detail sheet, list column). */}
+      <UndoHost>
+        {/* Pin the board to the viewport minus the 56px (3.5rem) app header so the
+            page itself never scrolls; lists scroll their cards internally instead. */}
+        <div className="flex h-[calc(100vh-3.5rem)] min-h-0 flex-col overflow-hidden p-3 sm:p-6">
         <BoardHeader
           board={{
             id: board.id,
@@ -238,16 +280,25 @@ export default async function BoardPage({
           canEdit={canEditBoard}
           canDelete={canDeleteBoard}
           canArchiveCard={canArchiveCard}
+          canDeleteList={canDeleteList}
           archivedCards={archivedCards.map((card) => ({
             id: card.id,
             title: card.title,
             listTitle: card.listTitle,
           }))}
+          archivedLists={archivedLists.map((list) => ({
+            id: list.id,
+            title: list.title,
+            cardCount: list.cardCount,
+            liveCardCount: liveCardCountByList?.get(list.id) ?? 0,
+            cloudinaryBlocked: cloudinaryBlockedListIds.has(list.id),
+          }))}
+          canPermanentDelete={canPermanentDelete}
           starred={isBoardStarred}
         />
 
         <div
-          className="-mt-px flex flex-1 flex-col rounded-b-xl border border-t-0 border-white/20"
+          className="-mt-px flex min-h-0 flex-1 flex-col overflow-hidden rounded-b-xl border border-t-0 border-white/20"
           style={{ background: boardTheme.surface }}
         >
           <BoardContent
@@ -276,9 +327,11 @@ export default async function BoardPage({
           cardLabelIds={cardLabels.map((label) => label.id)}
           checklists={checklists}
           canEdit={canEditCard}
+          canArchive={canArchiveCard}
           canComment={canComment}
         />
-      </div>
+        </div>
+      </UndoHost>
     </BoardStoreProvider>
   );
 }

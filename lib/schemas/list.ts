@@ -2,11 +2,6 @@ import { z } from "zod";
 
 const MIN_LIST_TITLE_LENGTH = 1;
 const MAX_LIST_TITLE_LENGTH = 100;
-const formBooleanSchema = z.preprocess((value) => {
-  if (value === "true") return true;
-  if (value === "false") return false;
-  return value;
-}, z.boolean());
 
 export const createListSchema = z.object({
   boardId: z.string().uuid({ message: "Invalid board ID" }),
@@ -15,7 +10,6 @@ export const createListSchema = z.object({
     .trim()
     .min(MIN_LIST_TITLE_LENGTH, "Title is required")
     .max(MAX_LIST_TITLE_LENGTH, `Title must be ${MAX_LIST_TITLE_LENGTH} characters or less`),
-  isDone: formBooleanSchema.default(false),
 });
 
 export type CreateListInput = z.infer<typeof createListSchema>;
@@ -27,23 +21,35 @@ export const updateListSchema = z.object({
     .trim()
     .min(MIN_LIST_TITLE_LENGTH, "Title is required")
     .max(MAX_LIST_TITLE_LENGTH, `Title must be ${MAX_LIST_TITLE_LENGTH} characters or less`),
-  isDone: formBooleanSchema.optional(),
 });
 
 export type UpdateListInput = z.infer<typeof updateListSchema>;
-
-export const updateListIsDoneSchema = z.object({
-  listId: z.string().uuid({ message: "Invalid list ID" }),
-  isDone: formBooleanSchema,
-});
-
-export type UpdateListIsDoneInput = z.infer<typeof updateListIsDoneSchema>;
 
 export const deleteListSchema = z.object({
   listId: z.string().uuid({ message: "Invalid list ID" }),
 });
 
 export type DeleteListInput = z.infer<typeof deleteListSchema>;
+
+export const archiveListSchema = deleteListSchema;
+export type ArchiveListInput = DeleteListInput;
+
+export const restoreListSchema = deleteListSchema;
+export type RestoreListInput = DeleteListInput;
+
+export const permanentDeleteListSchema = z.object({
+  listId: z.string().uuid({ message: "Invalid list ID" }),
+  confirmationText: z
+    .string({ message: "Confirmation text is required" })
+    .min(1, "Confirmation text is required"),
+  force: z
+    .enum(["true", "false"])
+    .optional()
+    .default("false")
+    .transform((val) => val === "true"),
+});
+
+export type PermanentDeleteListInput = z.infer<typeof permanentDeleteListSchema>;
 
 const maybeListIdSchema = z
   .string({ message: "Invalid list ID" })

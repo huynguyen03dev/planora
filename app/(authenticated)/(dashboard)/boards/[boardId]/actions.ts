@@ -4,6 +4,14 @@ import { revalidatePath } from "next/cache";
 import type { Prisma } from "@/app/generated/prisma/client";
 
 import db from "@/lib/prisma";
+import {
+  CARD_POSITION_GAP,
+  LIVE_CARD_SCOPE,
+  PositionSpaceExhaustedError,
+  StaleNeighborError,
+  normalizeCardPositions,
+  resolveCardPosition,
+} from "@/lib/ordering";
 import { getBoardById } from "@/lib/board";
 import {
   updateCardDetails,
@@ -11,6 +19,7 @@ import {
   getArchivedCardWithListAndBoard,
   reorderCardWithinListByNeighbors,
   getCardWithListAndMembers,
+  setCardCompletion,
   type CardDetailRecord,
   updateCardCover,
   updateCardPriority,
@@ -42,8 +51,9 @@ import {
 import {
   createList,
   updateListTitle,
-  updateListIsDone,
   getListWithBoard,
+  getArchivedListWithBoard,
+  restoreList,
   reorderListByNeighbors,
 } from "@/lib/list";
 import { createActivityEntry } from "@/lib/activity";
@@ -58,6 +68,7 @@ import {
   emitCardMoved,
   emitListMoved,
   emitListCreated,
+  emitListRestored,
   emitListUpdated,
   emitListDeleted,
   emitCardCreated,
@@ -65,13 +76,20 @@ import {
   emitCardArchived,
   emitCardLabelsUpdated,
   emitCardMembersUpdated,
+  emitCardCompletionUpdated,
   emitCommentCreated,
 } from "@/lib/realtime/server";
 import { notifyCardAssigned, notifyCommentOnCard, notifyMentioned } from "@/lib/notification";
+import { evaluateRules } from "@/lib/automation/evaluator";
+import { RuleExecutionError } from "@/lib/automation/types";
+import { fireDeferredEffects, logRuleExecutionError } from "@/lib/automation/effects";
+import type { DeferredEffect } from "@/lib/automation/executor";
 import {
   createListSchema,
   updateListSchema,
-  deleteListSchema,
+  archiveListSchema,
+  restoreListSchema,
+  permanentDeleteListSchema,
   reorderListSchema,
   createCardSchema,
   archiveCardSchema,
@@ -83,7 +101,7 @@ import {
   assignCardMemberSchema,
   removeCardMemberSchema,
   uploadAttachmentSchema,
-  updateListIsDoneSchema,
+  toggleCardCompletionSchema,
   updateCardEstimateSchema,
   updateCardDueDateSchema,
   updateCardPrioritySchema,
@@ -104,21 +122,21 @@ import {
   buildCardArchivedEvent,
   buildCardRestoredEvent,
   buildCardCompletedEvent,
+  buildCardReopenedEvent,
   buildCardCreatedEvent,
-    buildCardDeletedEvent,
-    buildCardMemberAssignedEvent,
+  buildCardMemberAssignedEvent,
     buildCardMemberUnassignedEvent,
     buildCardMoveLifecycleEvents,
     buildDueDateChangedEvent,
     buildDueDateClearedEvent,
     buildDueDateSetEvent,
+  buildCardDeletedEvent,
   buildEstimateChangedEvent,
   buildEstimateSetEvent,
   recordCardHistoryEvents,
 } from "@/lib/card-history";
 import { validateFileForUpload, uploadToCloudinary } from "@/lib/cloudinary";
 
-const CARD_POSITION_GAP = 16384;
 const MAX_REORDER_CARD_RETRIES = 3;
 
 function toIsoOrNull(date: Date | null | undefined): string | null {
@@ -138,83 +156,6 @@ async function getMemberIdsForCard(
   return members.map((member) => member.userId);
 }
 
-async function resolveCardPositionForTx(
-  tx: Prisma.TransactionClient,
-  data: {
-    targetListId: string;
-    prevCardId?: string | null;
-    nextCardId?: string | null;
-  },
-): Promise<number> {
-  const [prevCard, nextCard] = await Promise.all([
-    data.prevCardId
-      ? tx.card.findUnique({
-          where: { id: data.prevCardId, archivedAt: null },
-          select: { id: true, listId: true, position: true },
-        })
-      : null,
-    data.nextCardId
-      ? tx.card.findUnique({
-          where: { id: data.nextCardId, archivedAt: null },
-          select: { id: true, listId: true, position: true },
-        })
-      : null,
-  ]);
-
-  if (data.prevCardId && (!prevCard || prevCard.listId !== data.targetListId)) {
-    throw new Error("Invalid prevCardId");
-  }
-
-  if (data.nextCardId && (!nextCard || nextCard.listId !== data.targetListId)) {
-    throw new Error("Invalid nextCardId");
-  }
-
-  if (prevCard && nextCard) {
-    const lower = Math.min(prevCard.position, nextCard.position);
-    const upper = Math.max(prevCard.position, nextCard.position);
-    return (lower + upper) / 2;
-  }
-
-  if (prevCard) {
-    return prevCard.position + CARD_POSITION_GAP;
-  }
-
-  if (nextCard) {
-    return nextCard.position - CARD_POSITION_GAP;
-  }
-
-  const lastCard = await tx.card.findFirst({
-    where: {
-      listId: data.targetListId,
-      archivedAt: null,
-    },
-    orderBy: [{ position: "desc" }, { createdAt: "desc" }],
-    select: { position: true },
-  });
-
-  return lastCard ? lastCard.position + CARD_POSITION_GAP : CARD_POSITION_GAP;
-}
-
-async function normalizeCardPositionsForTx(
-  tx: Prisma.TransactionClient,
-  listId: string,
-): Promise<void> {
-  const cards = await tx.card.findMany({
-    where: { listId, archivedAt: null },
-    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
-    select: { id: true },
-  });
-
-  await Promise.all(
-    cards.map((card, index) =>
-      tx.card.update({
-        where: { id: card.id },
-        data: { position: CARD_POSITION_GAP * (index + 1) },
-      }),
-    ),
-  );
-}
-
 function isUniqueConstraintError(error: unknown): error is { code: string } {
   return (
     typeof error === "object" &&
@@ -232,9 +173,15 @@ type UpdateListResult =
   | { success: true }
   | { success: false; error: string };
 
-type DeleteListResult =
+export type ArchiveListResult =
   | { success: true }
   | { success: false; error: string };
+
+export type RestoreListResult =
+  | { success: true }
+  | { success: false; error: string };
+
+export type DeleteListResult = ArchiveListResult;
 
 type CreateCardResult =
   | { success: true; cardId: string }
@@ -246,7 +193,22 @@ type ArchiveCardResult =
 
 type RestoreCardResult =
   | { success: true }
-  | { success: false; error: string };
+  | { success: false; error: string; code?: RestoreCardErrorCode };
+
+/**
+ * US-083 W8: the dedicated parent-list-archived outcome. Surfaced ONLY when
+ * the card exists, remains archived, its parent list is archived, the board
+ * is active, and the caller is authorized — missing/foreign/already-restored/
+ * permanently-removed/archived-board cases keep the generic not-found/failure
+ * contract (no existence leak).
+ *
+ * NOTE: deliberately NOT exported — this file is a "use server" module, which
+ * only allows async function exports. The constant is module-private; the
+ * public contract is the result shape (error string + code value) that
+ * callers receive at runtime.
+ */
+const PARENT_LIST_ARCHIVED_MESSAGE = "Restore the list first.";
+type RestoreCardErrorCode = "PARENT_LIST_ARCHIVED";
 
 type ReorderListResult =
   | { success: true }
@@ -260,8 +222,8 @@ type MoveCardResult =
   | { success: true }
   | { success: false; error: string };
 
-type UpdateListIsDoneResult =
-  | { success: true }
+type ToggleCardCompletionResult =
+  | { success: true; card: CardDetailRecord }
   | { success: false; error: string };
 
 type UpdateCardEstimateResult =
@@ -289,7 +251,7 @@ export async function createListAction(
 
   await verifySession();
 
-  const { boardId, title, isDone } = parsed.data;
+  const { boardId, title } = parsed.data;
 
   const board = await getBoardById(boardId);
   if (!board) {
@@ -305,14 +267,13 @@ export async function createListAction(
   }
 
   try {
-    const list = await createList({ boardId, title, isDone });
+    const list = await createList({ boardId, title });
     revalidatePath(`/boards/${boardId}`);
     emitListCreated(list.boardId, {
       list: {
         id: list.id,
         title: list.title,
         boardId: list.boardId,
-        isDone: list.isDone,
         position: list.position,
       },
     });
@@ -360,116 +321,253 @@ export async function updateListAction(
   }
 }
 
-export async function updateListIsDoneAction(
+export async function archiveListAction(
   formData: FormData,
-): Promise<UpdateListIsDoneResult> {
+): Promise<ArchiveListResult> {
   const rawData = Object.fromEntries(formData);
-  const parsed = updateListIsDoneSchema.safeParse(rawData);
+  const parsed = archiveListSchema.safeParse(rawData);
 
   if (!parsed.success) {
-    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
-    return { success: false, error: firstError || "Validation failed" };
+    return { success: false, error: "List not found" };
   }
 
   await verifySession();
 
-  const { listId, isDone } = parsed.data;
-
-  const result = await getListWithBoard(listId);
-  if (!result || result.board.archivedAt) {
-    return { success: false, error: "List not found" };
-  }
-
-  const canUpdateList = await hasWorkspacePermission(result.board.workspaceId, {
-    list: ["update"],
-  });
-
-  if (!canUpdateList) {
-    return { success: false, error: "List not found" };
-  }
-
-  try {
-    await updateListIsDone(listId, isDone);
-    revalidatePath(`/boards/${result.list.boardId}`);
-    emitListUpdated(result.list.boardId, { listId, isDone });
-    emitAnalyticsRefresh(result.board.workspaceId);
-    return { success: true };
-  } catch {
-    return { success: false, error: "Failed to update list. Please try again." };
-  }
-}
-
-export async function deleteListAction(
-  formData: FormData,
-): Promise<DeleteListResult> {
-  const rawData = Object.fromEntries(formData);
-  const parsed = deleteListSchema.safeParse(rawData);
-
-  if (!parsed.success) {
-    return { success: false, error: "List not found" };
-  }
-
-  const { userId } = await verifySession();
-
   const { listId } = parsed.data;
 
   const result = await getListWithBoard(listId);
-  if (!result || result.board.archivedAt) {
+  if (!result || result.board.archivedAt || result.list.archivedAt !== null) {
     return { success: false, error: "List not found" };
   }
 
-  const canDeleteList = await hasWorkspacePermission(result.board.workspaceId, {
+  const canArchiveList = await hasWorkspacePermission(result.board.workspaceId, {
     list: ["delete"],
   });
 
-  if (!canDeleteList) {
+  if (!canArchiveList) {
     return { success: false, error: "List not found" };
   }
 
   try {
     await db.$transaction(async (tx) => {
+      await tx.list.update({
+        where: { id: listId },
+        data: { archivedAt: new Date() },
+      });
+    });
+    revalidatePath(`/boards/${result.list.boardId}`);
+    // US-074 Slice A: reuse list:deleted as active-board view-removal signal
+    emitListDeleted(result.list.boardId, { listId });
+    emitAnalyticsRefresh(result.board.workspaceId);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to archive list. Please try again." };
+  }
+}
+
+/** Legacy export for deleteListAction (US-074 Slice A) */
+export const deleteListAction = archiveListAction;
+
+export async function restoreListAction(
+  formData: FormData,
+): Promise<RestoreListResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = restoreListSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    return { success: false, error: "List not found" };
+  }
+
+  await verifySession();
+
+  const { listId } = parsed.data;
+
+  const result = await getArchivedListWithBoard(listId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "List not found" };
+  }
+
+  const canRestoreList = await hasWorkspacePermission(result.board.workspaceId, {
+    list: ["delete"],
+  });
+
+  if (!canRestoreList) {
+    return { success: false, error: "List not found" };
+  }
+
+  try {
+    const restoredList = await restoreList(listId);
+    revalidatePath(`/boards/${restoredList.boardId}`);
+    emitListRestored(restoredList.boardId, {
+      list: {
+        id: restoredList.id,
+        title: restoredList.title,
+        boardId: restoredList.boardId,
+        position: restoredList.position,
+      },
+    });
+    emitAnalyticsRefresh(result.board.workspaceId);
+    return { success: true };
+  } catch {
+    return { success: false, error: "Failed to restore list. Please try again." };
+  }
+}
+
+export type PermanentDeleteListResult =
+  | { success: true }
+  | { success: false; error: string };
+
+const LIST_TITLE_MISMATCH = "Title confirmation does not match";
+const CLOUDINARY_BLOCK =
+  "Cannot permanently delete this list: it contains attachments stored in Cloudinary. Contact your workspace admin to resolve this.";
+const LIVE_CARDS_BLOCK =
+  "This list contains active cards. Use force delete to permanently delete them as well.";
+const CONCURRENT_RESTORE =
+  "This list was restored while processing. Please try again.";
+
+export async function permanentlyDeleteListAction(
+  formData: FormData,
+): Promise<PermanentDeleteListResult> {
+  // verifySession is the very first operation: rejects unauthenticated callers
+  // before any schema parsing, DB reads, or writes (governing invariant).
+  const { userId } = await verifySession();
+
+  const rawData = Object.fromEntries(formData);
+  const parsed = permanentDeleteListSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    return { success: false, error: "List not found" };
+  }
+
+  const { listId, confirmationText, force } = parsed.data;
+
+  const result = await getArchivedListWithBoard(listId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "List not found" };
+  }
+
+  const canPermanentDelete = await hasWorkspacePermission(
+    result.board.workspaceId,
+    { organization: ["update"] },
+  );
+
+  if (!canPermanentDelete) {
+    return { success: false, error: "List not found" };
+  }
+
+  // Exact case-sensitive title confirmation
+  if (confirmationText !== result.list.title) {
+    return { success: false, error: LIST_TITLE_MISMATCH };
+  }
+
+  try {
+    await db.$transaction(async (tx) => {
+      // Acquire row lock on the list and revalidate archived status under the
+      // lock (US-074, in-flight purge race fix).
+      const locked = await tx.$queryRaw<
+        Array<{ id: string; archivedAt: Date | null }>
+      >`SELECT id, "archivedAt" FROM "list" WHERE id = ${listId} FOR UPDATE`;
+
+      if (locked.length === 0 || locked[0].archivedAt === null) {
+        throw new Error("CONCURRENT_RESTORE");
+      }
+
+      // Cloudinary attachment guard under the lock (decision 0029).
+      const cloudinaryAttachment = await tx.attachment.findFirst({
+        where: {
+          card: { listId },
+          cloudinaryPublicId: { not: null },
+        },
+        select: { id: true },
+      });
+
+      if (cloudinaryAttachment) {
+        throw new Error("CLOUDINARY_BLOCK");
+      }
+
+      // Count live cards (not archived, not deleted) inside the tx
+      const liveCards = await tx.card.count({
+        where: {
+          listId,
+          archivedAt: null,
+          deletedAt: null,
+        },
+      });
+
+      if (liveCards > 0 && !force) {
+        throw new Error("LIVE_CARDS_EXIST");
+      }
+
+      // Snapshot every cascaded card for history events
       const cards = await tx.card.findMany({
         where: { listId },
         select: {
           id: true,
+          archivedAt: true,
+          deletedAt: true,
+          completedAt: true,
           estimateHours: true,
           dueDate: true,
-          completedAt: true,
-          archivedAt: true,
           members: {
             select: { userId: true },
             orderBy: { assignedAt: "asc" },
           },
         },
       });
-      await recordCardHistoryEvents(
-        tx,
-        cards.map((card) =>
-          buildCardDeletedEvent(
-            result.board.workspaceId,
-            result.board.id,
-            card.id,
-            {
-              memberIds: card.members.map((member) => member.userId),
-              estimateHours: card.estimateHours,
-              dueDate: toIsoOrNull(card.dueDate),
-              completedAt: toIsoOrNull(card.completedAt),
-              archivedAt: toIsoOrNull(card.archivedAt),
-            },
-            userId,
-          ),
+
+      // Write truthful CARD_DELETED CardHistoryEvent rows for every card
+      const events = cards.map((card) =>
+        buildCardDeletedEvent(
+          result.board.workspaceId,
+          result.list.boardId,
+          card.id,
+          {
+            memberIds: card.members.map((m) => m.userId),
+            estimateHours: card.estimateHours,
+            dueDate: card.dueDate?.toISOString() ?? null,
+            completedAt: card.completedAt?.toISOString() ?? null,
+            archivedAt: card.archivedAt?.toISOString() ?? null,
+          },
+          userId,
         ),
       );
-      await tx.list.delete({
-        where: { id: listId },
+
+      await recordCardHistoryEvents(tx, events);
+
+      // Conditionally delete the list — still must be archived.
+      // READ COMMITTED + conditional deleteMany on the list row
+      // is the selected race mechanism.
+      const deleteResult = await tx.list.deleteMany({
+        where: {
+          id: listId,
+          archivedAt: { not: null },
+        },
       });
+
+      // count 0 means concurrent restore: roll back all history
+      if (deleteResult.count === 0) {
+        throw new Error("CONCURRENT_RESTORE");
+      }
     });
+
     revalidatePath(`/boards/${result.list.boardId}`);
     emitListDeleted(result.list.boardId, { listId });
     emitAnalyticsRefresh(result.board.workspaceId);
     return { success: true };
-  } catch {
-    return { success: false, error: "Failed to delete list. Please try again." };
+  } catch (error) {
+    if (error instanceof Error && error.message === "LIVE_CARDS_EXIST") {
+      return { success: false, error: LIVE_CARDS_BLOCK };
+    }
+    if (error instanceof Error && error.message === "CLOUDINARY_BLOCK") {
+      return { success: false, error: CLOUDINARY_BLOCK };
+    }
+    if (error instanceof Error && error.message === "CONCURRENT_RESTORE") {
+      return { success: false, error: CONCURRENT_RESTORE };
+    }
+    return {
+      success: false,
+      error: "Failed to permanently delete list. Please try again.",
+    };
   }
 }
 
@@ -486,7 +584,7 @@ export async function createCardAction(
 
   const { userId } = await verifySession();
 
-  const { listId, title } = parsed.data;
+  const { listId, title, description, dueDate, priority } = parsed.data;
 
   const result = await getListWithBoard(listId);
   if (!result || result.board.archivedAt) {
@@ -506,7 +604,7 @@ export async function createCardAction(
       const lastCard = await tx.card.findFirst({
         where: {
           listId,
-          archivedAt: null,
+          ...LIVE_CARD_SCOPE,
         },
         orderBy: [{ position: "desc" }, { createdAt: "desc" }],
         select: { position: true },
@@ -514,14 +612,20 @@ export async function createCardAction(
       const position = lastCard
         ? lastCard.position + CARD_POSITION_GAP
         : CARD_POSITION_GAP;
-      const completedAt = result.list.isDone ? new Date() : null;
+      // A newly created card is never complete: completion is card-owned and set
+      // only by the explicit toggle, never derived from the list (decision 0020).
+      // US-083 W7: the quick-capture optional fields (description, due date,
+      // priority) persist HERE in the same atomic create — no chained update
+      // actions, no wrapper mutation.
       const createdCard = await tx.card.create({
         data: {
           listId,
           title,
           createdById: userId,
           position,
-          completedAt,
+          description: description ?? null,
+          dueDate: dueDate ?? null,
+          priority: priority ?? null,
         },
         select: {
           id: true,
@@ -530,6 +634,7 @@ export async function createCardAction(
           position: true,
           estimateHours: true,
           dueDate: true,
+          priority: true,
           archivedAt: true,
           deletedAt: true,
         },
@@ -542,7 +647,6 @@ export async function createCardAction(
           createdCard.id,
           {
             listId: result.list.id,
-            listIsDone: result.list.isDone,
             estimateHours: createdCard.estimateHours,
             dueDate: toIsoOrNull(createdCard.dueDate),
             memberIds,
@@ -553,40 +657,47 @@ export async function createCardAction(
         ),
       ];
 
-      if (result.list.isDone) {
-        events.push(
-          buildCardCompletedEvent(
-            result.board.workspaceId,
-            result.board.id,
-            createdCard.id,
-            {
-              listId: result.list.id,
-              estimateHours: createdCard.estimateHours,
-              dueDate: toIsoOrNull(createdCard.dueDate),
-              memberIds,
-              firstCompletion: true,
-            },
-            userId,
-          ),
-        );
-      }
-
       await recordCardHistoryEvents(tx, events);
-      return createdCard;
+
+      // Automation (US-066): evaluate rules inside the trigger tx, after the
+      // history write. Rule-driven mutations share this tx and roll back with it.
+      const { effects } = await evaluateRules({
+        client: tx,
+        workspaceId: result.board.workspaceId,
+        triggerType: "card-created",
+        event: { cardId: createdCard.id, boardId: result.board.id, listId },
+      });
+      return { card: createdCard, ruleEffects: effects };
     });
 
     revalidatePath(`/boards/${result.list.boardId}`);
     emitCardCreated(result.list.boardId, {
       card: {
-        id: card.id,
-        listId: card.listId,
-        title: card.title,
-        position: card.position,
+        id: card.card.id,
+        listId: card.card.listId,
+        title: card.card.title,
+        position: card.card.position,
+        // US-083 W7 fidelity: observer clients receive due date + priority
+        // for quick-captured cards (the reducer applies them; description is
+        // not part of the board-card snapshot).
+        dueDate: toIsoOrNull(card.card.dueDate),
+        priority: card.card.priority,
       },
     });
     emitAnalyticsRefresh(result.board.workspaceId);
-    return { success: true, cardId: card.id };
-  } catch {
+    await fireDeferredEffects(card.ruleEffects);
+    return { success: true, cardId: card.card.id };
+  } catch (error) {
+    if (error instanceof RuleExecutionError) {
+      // Decision 0030: only UNEXPECTED errors reach here (stale-target failures
+      // are isolated in-tx and the action succeeds). This message is accurate
+      // solely for the unexpected-abort class.
+      await logRuleExecutionError(error);
+      return {
+        success: false,
+        error: `Automation rule "${error.context.ruleName}" hit an unexpected error; no changes were applied.`,
+      };
+    }
     return { success: false, error: "Failed to create card. Please try again." };
   }
 }
@@ -674,7 +785,8 @@ export async function restoreCardAction(
   const { cardId } = parsed.data;
 
   // Archived-aware resolver: getCardWithListAndBoard filters archivedAt:null and
-  // could never find a card to restore.
+  // could never find a card to restore. W8: the resolver now flags (rather than
+  // nulls) the parent-list-archived case so the action can gate it below.
   const result = await getArchivedCardWithListAndBoard(cardId);
   if (!result || result.board.archivedAt) {
     return { success: false, error: "Card not found" };
@@ -688,8 +800,40 @@ export async function restoreCardAction(
     return { success: false, error: "Card not found" };
   }
 
+  // US-083 W8: the parent-list-archived case is distinguished ONLY after the
+  // card exists, remains archived, the board is active, and the caller is
+  // authorized — every other case keeps the generic not-found above. The
+  // in-transaction FOR UPDATE revalidation below re-checks the same condition
+  // against the true race (list archived between this read and the commit).
+  if (result.parentListArchived) {
+    return {
+      success: false,
+      error: PARENT_LIST_ARCHIVED_MESSAGE,
+      code: "PARENT_LIST_ARCHIVED",
+    };
+  }
+
   try {
     await db.$transaction(async (tx) => {
+      // US-083 W8 race guard: the sequential pre-read above can pass while the
+      // parent list is archived by a concurrent action before this transaction
+      // runs. Lock the parent list row and revalidate archivedAt under the lock
+      // (same pattern as permanentlyDeleteListAction / uploadAttachmentAction)
+      // so a restore can never commit a live card into an archived (invisible)
+      // list.
+      const locked = await tx.$queryRaw<
+        Array<{ id: string; archivedAt: Date | null }>
+      >`SELECT id, "archivedAt" FROM "list" WHERE id = ${result.list.id} FOR UPDATE`;
+
+      if (locked.length === 0) {
+        // Parent list permanently deleted between pre-read and tx: the card
+        // cascade-deleted with it. Generic failure — no existence leak.
+        throw new Error("RESTORE_TARGET_GONE");
+      }
+      if (locked[0].archivedAt !== null) {
+        throw new Error("PARENT_LIST_ARCHIVED");
+      }
+
       const card = await tx.card.update({
         where: {
           id: cardId,
@@ -721,18 +865,29 @@ export async function restoreCardAction(
       ]);
     });
     revalidatePath(`/boards/${result.list.boardId}`);
-    // Reappear on other viewers' boards — reuses the tested card:created reducer.
+    // Reappear on other viewers' boards — reuses the tested card:created
+    // reducer. US-083 W7 fidelity: like createCardAction, the payload carries
+    // the card's due date + priority so restored cards keep their meta.
     emitCardCreated(result.list.boardId, {
       card: {
         id: result.card.id,
         listId: result.card.listId,
         title: result.card.title,
         position: result.card.position,
+        dueDate: toIsoOrNull(result.card.dueDate),
+        priority: result.card.priority,
       },
     });
     emitAnalyticsRefresh(result.board.workspaceId);
     return { success: true };
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === "PARENT_LIST_ARCHIVED") {
+      return {
+        success: false,
+        error: PARENT_LIST_ARCHIVED_MESSAGE,
+        code: "PARENT_LIST_ARCHIVED",
+      };
+    }
     return { success: false, error: "Failed to restore card. Please try again." };
   }
 }
@@ -860,9 +1015,10 @@ export async function updateCardEstimateAction(
     return { success: false, error: "Card not found" };
   }
 
-  if (snapshot.card.completedAt) {
-    return { success: false, error: "Estimate cannot be changed after first completion" };
-  }
+  // No estimate lock (decision 0020): the estimate stays editable through
+  // complete/reopen cycles. Analytics is event-sourced, so estimate-at-completion
+  // is recoverable from the ESTIMATE_SET/ESTIMATE_CHANGED event log — the live
+  // field freeze guarded nothing analytics trusted.
 
   try {
     if (estimateHours !== snapshot.card.estimateHours) {
@@ -913,6 +1069,161 @@ export async function updateCardEstimateAction(
     return { success: true };
   } catch {
     return { success: false, error: "Failed to update estimate. Please try again." };
+  }
+}
+
+export async function toggleCardCompletionAction(
+  formData: FormData,
+): Promise<ToggleCardCompletionResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = toggleCardCompletionSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  const { userId } = await verifySession();
+  const { cardId, complete } = parsed.data;
+
+  const snapshot = await getCardWithListAndMembers(cardId);
+  if (!snapshot) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const canUpdateCard = await hasWorkspacePermission(snapshot.board.workspaceId, {
+    card: ["update"],
+  });
+
+  if (!canUpdateCard) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const previousCompletedAt = snapshot.card.completedAt;
+  // A no-op toggle (already in the requested state) still returns success but
+  // writes no history event and re-emits the current state.
+  const isTransition = complete !== (previousCompletedAt !== null);
+
+  // requireEstimateBeforeDone gate (kept — decision 0020): block only a genuine
+  // complete transition, surfaced inline (not a silent no-op).
+  if (complete && isTransition) {
+    const workspaceSettings = await db.workspace.findUnique({
+      where: { id: snapshot.board.workspaceId },
+      select: { requireEstimateBeforeDone: true },
+    });
+    if (
+      workspaceSettings?.requireEstimateBeforeDone &&
+      snapshot.card.estimateHours == null
+    ) {
+      return {
+        success: false,
+        error: "Set an estimate before marking this card complete",
+      };
+    }
+  }
+
+  let ruleEffects: DeferredEffect[] = [];
+  try {
+    const card = await db.$transaction(async (tx) => {
+      const { card: updated, transitioned } = await setCardCompletion(
+        tx,
+        cardId,
+        complete,
+        previousCompletedAt,
+      );
+
+      // Record a lifecycle event only on an actual transition. `transitioned` is
+      // the authoritative in-transaction compare-and-set result (not the
+      // pre-transaction `isTransition`), so a concurrent double-toggle records at
+      // most one event per streak.
+      if (transitioned) {
+        const event = complete
+          ? buildCardCompletedEvent(
+              snapshot.board.workspaceId,
+              snapshot.board.id,
+              cardId,
+              {
+                listId: snapshot.list.id,
+                estimateHours: updated.estimateHours,
+                dueDate: toIsoOrNull(updated.dueDate),
+                memberIds: snapshot.memberIds,
+                // Streak-start marker; vestigial under the current-streak anchor
+                // (US-064 / decision 0021). True whenever completing from a
+                // non-completed state.
+                firstCompletion: previousCompletedAt === null,
+              },
+              userId,
+            )
+          : buildCardReopenedEvent(
+              snapshot.board.workspaceId,
+              snapshot.board.id,
+              cardId,
+              {
+                listId: snapshot.list.id,
+                dueDate: toIsoOrNull(updated.dueDate),
+                memberIds: snapshot.memberIds,
+              },
+              userId,
+            );
+        await recordCardHistoryEvents(tx, [event]);
+
+        // Automation (US-066): a genuine completion/reopen transition fires the
+        // matching trigger inside this tx; rule effects roll back with it.
+        const { effects } = await evaluateRules({
+          client: tx,
+          workspaceId: snapshot.board.workspaceId,
+          triggerType: complete ? "card-completed" : "card-reopened",
+          event: {
+            cardId,
+            boardId: snapshot.board.id,
+            listId: snapshot.list.id,
+            completed: complete,
+          },
+        });
+        ruleEffects = effects;
+      }
+
+      return updated;
+    });
+
+    revalidatePath(`/boards/${snapshot.list.boardId}`);
+    // Dedicated in-place completion event — card:updated is title-only and can't
+    // carry a completion flip. Carry completedAt (not a bare boolean) so the
+    // receiver recomputes due-status. Safe mid-drag: a flag flip never reorders
+    // the list array (mirrors labels/members).
+    emitCardCompletionUpdated(snapshot.list.boardId, {
+      cardId,
+      completedAt: toIsoOrNull(card.completedAt),
+    });
+    emitAnalyticsRefresh(snapshot.board.workspaceId);
+    await fireDeferredEffects(ruleEffects);
+
+    return {
+      success: true,
+      card: {
+        id: card.id,
+        listId: card.listId,
+        title: card.title,
+        description: card.description,
+        estimateHours: card.estimateHours,
+        dueDate: card.dueDate,
+        completedAt: card.completedAt,
+        priority: card.priority,
+        coverImage: card.coverImage,
+        updatedAt: card.updatedAt,
+      },
+    };
+  } catch (error) {
+    if (error instanceof RuleExecutionError) {
+      // Decision 0030: only UNEXPECTED errors reach here (stale-target failures
+      // are isolated in-tx and the action succeeds).
+      await logRuleExecutionError(error);
+      return {
+        success: false,
+        error: `Automation rule "${error.context.ruleName}" hit an unexpected error; no changes were applied.`,
+      };
+    }
+    return { success: false, error: "Failed to update completion. Please try again." };
   }
 }
 
@@ -1164,34 +1475,81 @@ export async function setCardCoverAction(
   }
 
   try {
-    await createAttachment({
-      cardId: parsedCardId,
-      userId: actorUserId,
-      fileName: file.name,
-      fileUrl: cloudinaryResult.secureUrl,
-      fileType: file.type,
-      fileSize: file.size,
-      cloudinaryPublicId: cloudinaryResult.publicId,
-      cloudinaryResourceType: cloudinaryResult.resourceType,
+    // Acquire a row lock on the parent List and revalidate it's still active
+    // before inserting the attachment (US-074, in-flight upload race fix).
+    const listId = cardResult.list.id;
+    const result = await db.$transaction(async (tx) => {
+      // SELECT ... FOR UPDATE on the parent list row
+      const list = await tx.$queryRaw<
+        Array<{ id: string; archivedAt: Date | null }>
+      >`SELECT id, "archivedAt" FROM "list" WHERE id = ${listId} FOR UPDATE`;
+
+      if (list.length === 0 || list[0].archivedAt !== null) {
+        throw new Error("LIST_ARCHIVED_OR_DELETED");
+      }
+
+      await createAttachment(
+        {
+          cardId: parsedCardId,
+          userId: actorUserId,
+          fileName: file.name,
+          fileUrl: cloudinaryResult.secureUrl,
+          fileType: file.type,
+          fileSize: file.size,
+          cloudinaryPublicId: cloudinaryResult.publicId,
+          cloudinaryResourceType: cloudinaryResult.resourceType,
+        },
+        tx,
+      );
+
+      await createActivityEntry(
+        {
+          workspaceId: cardResult.board.workspaceId,
+          boardId: cardResult.board.id,
+          cardId: parsedCardId,
+          userId: actorUserId,
+          action: "CREATED",
+          entityType: "ATTACHMENT",
+          metadata: {
+            fileName: file.name,
+            fileSize: file.size,
+          },
+        },
+        tx,
+      );
+
+      const updatedCard = await updateCardCover(
+        parsedCardId,
+        cloudinaryResult.secureUrl,
+        tx,
+      );
+
+      return updatedCard;
     });
 
-    await createActivityEntry({
-      workspaceId: cardResult.board.workspaceId,
-      boardId: cardResult.board.id,
-      cardId: parsedCardId,
-      userId: actorUserId,
-      action: "CREATED",
-      entityType: "ATTACHMENT",
-      metadata: {
-        fileName: file.name,
-        fileSize: file.size,
-      },
-    });
-
-    const card = await updateCardCover(parsedCardId, cloudinaryResult.secureUrl);
     revalidatePath(`/boards/${cardResult.board.id}`);
-    return { success: true, card };
+    return { success: true, card: result };
   } catch (error) {
+    if (error instanceof Error && error.message === "LIST_ARCHIVED_OR_DELETED") {
+      // Compensate: destroy the just-uploaded Cloudinary asset
+      try {
+        const { v2: cloudinary } = await import("cloudinary");
+        const config = (await import("@/lib/cloudinary")).getCloudinaryConfig();
+        cloudinary.config({
+          cloud_name: config.cloudName,
+          api_key: config.apiKey,
+          api_secret: config.apiSecret,
+        });
+        await cloudinary.uploader.destroy(cloudinaryResult.publicId, {
+          resource_type: cloudinaryResult.resourceType,
+        });
+        console.log("Cleaned up orphaned Cloudinary file:", cloudinaryResult.publicId);
+      } catch (cleanupError) {
+        console.error("Failed to clean up Cloudinary file:", cleanupError);
+      }
+      return { success: false, error: "Card not found" };
+    }
+
     console.error("Failed to set card cover:", error);
     try {
       const { v2: cloudinary } = await import("cloudinary");
@@ -1253,48 +1611,39 @@ export async function moveCardAction(
     return { success: false, error: "Card not found" };
   }
 
-  const workspaceSettings = await db.workspace.findUnique({
-    where: { id: cardResult.board.workspaceId },
-    select: { requireEstimateBeforeDone: true },
-  });
-  const movesIntoDone = !snapshot.list.isDone && targetListResult.list.isDone;
-  if (
-    movesIntoDone &&
-    workspaceSettings?.requireEstimateBeforeDone &&
-    snapshot.card.estimateHours == null
-  ) {
-    return {
-      success: false,
-      error: "Set an estimate before moving this card to a done list",
-    };
-  }
-
+  // A move changes only list membership + position — it never completes or
+  // reopens a card, and never gates on the estimate (decision 0020). Completion
+  // and its `requireEstimateBeforeDone` gate live solely in the completion toggle.
   try {
-    let movedCard: { id: string; listId: string; position: number } | null = null;
+    let movedCard:
+      | { id: string; listId: string; position: number; ruleEffects: DeferredEffect[] }
+      | null = null;
+
+    // Hints are mutable across retries: a StaleNeighborError drops the offending
+    // side so the next attempt re-anchors on the surviving neighbour / appends
+    // (US-062 mn2).
+    let prevHint = prevCardId ?? null;
+    let nextHint = nextCardId ?? null;
 
     for (let attempt = 0; attempt < MAX_REORDER_CARD_RETRIES; attempt += 1) {
       try {
         movedCard = await db.$transaction(async (tx) => {
-          const nextPosition = await resolveCardPositionForTx(tx, {
+          const nextPosition = await resolveCardPosition(tx, {
             targetListId,
-            prevCardId: prevCardId ?? null,
-            nextCardId: nextCardId ?? null,
+            prevCardId: prevHint,
+            nextCardId: nextHint,
+            // The card is arriving from another list, but exclude it defensively
+            // so a same-list re-drop never bisects against its own stale slot.
+            excludeCardId: cardId,
           });
-          const movesOutOfDone = snapshot.list.isDone && !targetListResult.list.isDone;
-          const nextCompletedAt = movesIntoDone
-            ? (snapshot.card.completedAt ?? new Date())
-            : movesOutOfDone
-              ? null
-              : snapshot.card.completedAt;
           const updatedCard = await tx.card.update({
             where: {
               id: cardId,
-              archivedAt: null,
+              ...LIVE_CARD_SCOPE,
             },
             data: {
               listId: targetListId,
               position: nextPosition,
-              completedAt: nextCompletedAt,
             },
             select: {
               id: true,
@@ -1313,25 +1662,58 @@ export async function moveCardAction(
               actorId: userId,
               fromListId: snapshot.list.id,
               toListId: targetListResult.list.id,
-              fromListIsDone: snapshot.list.isDone,
-              toListIsDone: targetListResult.list.isDone,
               estimateHours: updatedCard.estimateHours,
-              dueDate: toIsoOrNull(updatedCard.dueDate),
               memberIds,
-              completedAtBeforeMove: snapshot.card.completedAt,
             });
 
             await recordCardHistoryEvents(tx, events);
-            return updatedCard;
+
+            // Automation (US-066): fire the move trigger only on an actual list
+            // change (a same-list reorder is not a "moved to list" event). Runs
+            // inside this attempt's tx; on a StaleNeighbor/P2002 retry the effects
+            // are rebuilt fresh and only the committing attempt's survive.
+            let ruleEffects: DeferredEffect[] = [];
+            if (snapshot.list.id !== targetListId) {
+              const res = await evaluateRules({
+                client: tx,
+                workspaceId: cardResult.board.workspaceId,
+                triggerType: "card-moved-to-list",
+                event: {
+                  cardId,
+                  boardId: cardResult.board.id,
+                  listIdFrom: snapshot.list.id,
+                  listIdTo: targetListId,
+                  listId: targetListId,
+                },
+              });
+              ruleEffects = res.effects;
+            }
+            return { ...updatedCard, ruleEffects };
         });
         break;
       } catch (error) {
-        if (!isUniqueConstraintError(error) || attempt === MAX_REORDER_CARD_RETRIES - 1) {
+        // A stale neighbour hint recovers without a renumber: drop that side and
+        // retry so the move re-anchors on the surviving neighbour / appends.
+        if (error instanceof StaleNeighborError && attempt < MAX_REORDER_CARD_RETRIES - 1) {
+          if (error.side === "prev") {
+            prevHint = null;
+          } else {
+            nextHint = null;
+          }
+          continue;
+        }
+
+        // P2002 (rival grabbed the slot) or PositionSpaceExhaustedError (no gap
+        // to bisect) both recover the same way: renumber the target list, retry.
+        if (
+          (!isUniqueConstraintError(error) && !(error instanceof PositionSpaceExhaustedError)) ||
+          attempt === MAX_REORDER_CARD_RETRIES - 1
+        ) {
           throw error;
         }
 
         await db.$transaction(async (tx) => {
-          await normalizeCardPositionsForTx(tx, targetListId);
+          await normalizeCardPositions(tx, targetListId);
         });
       }
     }
@@ -1351,8 +1733,18 @@ export async function moveCardAction(
     });
 
     emitAnalyticsRefresh(cardResult.board.workspaceId);
+    await fireDeferredEffects(movedCard.ruleEffects);
     return { success: true };
-  } catch {
+  } catch (error) {
+    if (error instanceof RuleExecutionError) {
+      // Decision 0030: only UNEXPECTED errors reach here (stale-target failures
+      // are isolated in-tx and the action succeeds).
+      await logRuleExecutionError(error);
+      return {
+        success: false,
+        error: `Automation rule "${error.context.ruleName}" hit an unexpected error; no changes were applied.`,
+      };
+    }
     return { success: false, error: "Failed to move card. Please try again." };
   }
 }
@@ -1603,6 +1995,7 @@ export async function assignCardMemberAction(
             image: existing.user.image,
             email: existing.user.email,
           },
+          ruleEffects: [] as DeferredEffect[],
         };
       }
 
@@ -1652,6 +2045,20 @@ export async function assignCardMemberAction(
         ),
       ]);
 
+      // Automation (US-066): a new assignment fires the member-assigned trigger
+      // inside this tx; rule effects roll back with the assignment on failure.
+      const { effects } = await evaluateRules({
+        client: tx,
+        workspaceId: cardResult.board.workspaceId,
+        triggerType: "member-assigned",
+        event: {
+          cardId,
+          boardId: cardResult.board.id,
+          listId: cardResult.list.id,
+          memberId: userId,
+        },
+      });
+
       return {
         changed: true,
         member: {
@@ -1660,6 +2067,7 @@ export async function assignCardMemberAction(
           image: result.user.image,
           email: result.user.email,
         },
+        ruleEffects: effects,
       };
     }).catch(async (error) => {
       if (!isUniqueConstraintError(error)) {
@@ -1697,6 +2105,7 @@ export async function assignCardMemberAction(
           image: existing.user.image,
           email: existing.user.email,
         },
+        ruleEffects: [] as DeferredEffect[],
       };
     });
 
@@ -1733,12 +2142,22 @@ export async function assignCardMemberAction(
       const members = await getCardMembers(cardId);
       emitCardMembersUpdated(cardResult.board.id, { cardId, members });
     }
+    await fireDeferredEffects(assignment.ruleEffects);
     return {
       success: true,
       changed: assignment.changed,
       member: assignment.member,
     };
   } catch (error) {
+    if (error instanceof RuleExecutionError) {
+      // Decision 0030: only UNEXPECTED errors reach here (stale-target failures
+      // are isolated in-tx and the action succeeds).
+      await logRuleExecutionError(error);
+      return {
+        success: false,
+        error: `Automation rule "${error.context.ruleName}" hit an unexpected error; no changes were applied.`,
+      };
+    }
     console.error("Failed to assign member to card:", error);
     return { success: false, error: "Failed to assign member. Please try again." };
   }
@@ -1894,33 +2313,74 @@ export async function uploadAttachmentAction(
   }
 
   try {
-    const attachment = await createAttachment({
-      cardId: parsedCardId,
-      userId: actorUserId,
-      fileName: file.name,
-      fileUrl: cloudinaryResult.secureUrl,
-      fileType: file.type,
-      fileSize: file.size,
-      cloudinaryPublicId: cloudinaryResult.publicId,
-      cloudinaryResourceType: cloudinaryResult.resourceType,
-    });
+    // Acquire a row lock on the parent List and revalidate it's still active
+    // before inserting the attachment (US-074, in-flight upload race fix).
+    const listId = cardResult.list.id;
+    const attachment = await db.$transaction(async (tx) => {
+      const list = await tx.$queryRaw<
+        Array<{ id: string; archivedAt: Date | null }>
+      >`SELECT id, "archivedAt" FROM "list" WHERE id = ${listId} FOR UPDATE`;
 
-    await createActivityEntry({
-      workspaceId: cardResult.board.workspaceId,
-      boardId: cardResult.board.id,
-      cardId: parsedCardId,
-      userId: actorUserId,
-      action: "CREATED",
-      entityType: "ATTACHMENT",
-      metadata: {
-        fileName: file.name,
-        fileSize: file.size,
-      },
+      if (list.length === 0 || list[0].archivedAt !== null) {
+        throw new Error("LIST_ARCHIVED_OR_DELETED");
+      }
+
+      const att = await createAttachment(
+        {
+          cardId: parsedCardId,
+          userId: actorUserId,
+          fileName: file.name,
+          fileUrl: cloudinaryResult.secureUrl,
+          fileType: file.type,
+          fileSize: file.size,
+          cloudinaryPublicId: cloudinaryResult.publicId,
+          cloudinaryResourceType: cloudinaryResult.resourceType,
+        },
+        tx,
+      );
+
+      await createActivityEntry(
+        {
+          workspaceId: cardResult.board.workspaceId,
+          boardId: cardResult.board.id,
+          cardId: parsedCardId,
+          userId: actorUserId,
+          action: "CREATED",
+          entityType: "ATTACHMENT",
+          metadata: {
+            fileName: file.name,
+            fileSize: file.size,
+          },
+        },
+        tx,
+      );
+
+      return att;
     });
 
     revalidatePath(`/boards/${cardResult.board.id}`);
     return { success: true, attachmentId: attachment.id };
   } catch (error) {
+    if (error instanceof Error && error.message === "LIST_ARCHIVED_OR_DELETED") {
+      // Compensate: destroy the just-uploaded Cloudinary asset
+      try {
+        const { v2: cloudinary } = await import("cloudinary");
+        const config = (await import("@/lib/cloudinary")).getCloudinaryConfig();
+        cloudinary.config({
+          cloud_name: config.cloudName,
+          api_key: config.apiKey,
+          api_secret: config.apiSecret,
+        });
+        await cloudinary.uploader.destroy(cloudinaryResult.publicId, {
+          resource_type: cloudinaryResult.resourceType,
+        });
+        console.log("Cleaned up orphaned Cloudinary file:", cloudinaryResult.publicId);
+      } catch (cleanupError) {
+        console.error("Failed to clean up Cloudinary file:", cleanupError);
+      }
+      return { success: false, error: "Card not found" };
+    }
+
     console.error("Failed to save attachment:", error);
     try {
       const { v2: cloudinary } = await import("cloudinary");
@@ -2132,8 +2592,28 @@ export async function addCardLabelAction(
     return { success: false, error: "Label not found" };
   }
 
+  let ruleEffects: DeferredEffect[] = [];
   try {
-    const { changed } = await addCardLabel(cardId, labelId);
+    const { changed } = await db.$transaction(async (tx) => {
+      const result = await addCardLabel(cardId, labelId, tx);
+      // Automation (US-066): a newly attached label fires the trigger inside this
+      // tx; rule effects roll back with the attach on failure.
+      if (result.changed) {
+        const { effects } = await evaluateRules({
+          client: tx,
+          workspaceId: cardResult.board.workspaceId,
+          triggerType: "label-added-to-card",
+          event: {
+            cardId,
+            boardId: cardResult.board.id,
+            listId: cardResult.list.id,
+            labelId,
+          },
+        });
+        ruleEffects = effects;
+      }
+      return result;
+    });
     if (changed) {
       const labels = await getCardLabels(cardId);
       emitCardLabelsUpdated(cardResult.list.boardId, {
@@ -2142,8 +2622,18 @@ export async function addCardLabelAction(
       });
     }
     revalidatePath(`/boards/${cardResult.list.boardId}`);
+    await fireDeferredEffects(ruleEffects);
     return { success: true, changed };
   } catch (error) {
+    if (error instanceof RuleExecutionError) {
+      // Decision 0030: only UNEXPECTED errors reach here (stale-target failures
+      // are isolated in-tx and the action succeeds).
+      await logRuleExecutionError(error);
+      return {
+        success: false,
+        error: `Automation rule "${error.context.ruleName}" hit an unexpected error; no changes were applied.`,
+      };
+    }
     console.error("Failed to add label to card:", error);
     return { success: false, error: "Failed to add label. Please try again." };
   }
@@ -2272,7 +2762,7 @@ export async function deleteChecklistAction(
   const { checklistId } = parsed.data;
 
   const scope = await getChecklistWithCard(checklistId);
-  if (!scope || scope.board.archivedAt || scope.cardArchived) {
+  if (!scope || scope.board.archivedAt || scope.cardArchived || scope.listArchived) {
     return { success: false, error: "Checklist not found" };
   }
 
@@ -2313,7 +2803,7 @@ export async function createChecklistItemAction(
   const { checklistId, title } = parsed.data;
 
   const scope = await getChecklistWithCard(checklistId);
-  if (!scope || scope.board.archivedAt || scope.cardArchived) {
+  if (!scope || scope.board.archivedAt || scope.cardArchived || scope.listArchived) {
     return { success: false, error: "Checklist not found" };
   }
 
@@ -2345,7 +2835,7 @@ export async function toggleChecklistItemAction(
   const { itemId, isCompleted } = parsed.data;
 
   const scope = await getChecklistItemWithCard(itemId);
-  if (!scope || scope.board.archivedAt || scope.cardArchived) {
+  if (!scope || scope.board.archivedAt || scope.cardArchived || scope.listArchived) {
     return { success: false, error: "Item not found" };
   }
 
@@ -2377,7 +2867,7 @@ export async function deleteChecklistItemAction(
   const { itemId } = parsed.data;
 
   const scope = await getChecklistItemWithCard(itemId);
-  if (!scope || scope.board.archivedAt || scope.cardArchived) {
+  if (!scope || scope.board.archivedAt || scope.cardArchived || scope.listArchived) {
     return { success: false, error: "Item not found" };
   }
 

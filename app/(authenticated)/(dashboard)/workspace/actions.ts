@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 
+import { z } from "zod";
+
 import { hasWorkspacePermission } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
 import db from "@/lib/prisma";
@@ -10,13 +12,22 @@ import { inviteMemberSchema } from "@/lib/schemas";
 import { isValidTimezone } from "@/lib/timezone";
 import { auth } from "@/lib/auth";
 import { notifyInvited } from "@/lib/notification";
-import { emitAnalyticsRefresh } from "@/lib/realtime/server";
+import { emitAnalyticsRefresh, emitInvitationNew } from "@/lib/realtime/server";
 
 type InviteMemberResult =
   | { success: true; invitationId: string }
   | { success: false; error: string };
 
 const PENDING_INVITATION_STATUS = "pending";
+
+// workspaceId reaches these settings actions straight from the client, so parse
+// it before any DB use (CLAUDE.md gotcha #4). NOTE: a workspace IS a Better Auth
+// organization, whose id is a 32-char nanoid — NOT a UUID (cf. the US-062 MJ1
+// memberId correction; app models like board/card use UUIDs, Better Auth models
+// do not). So bound it by length rather than parsing as a UUID; .uuid() would
+// reject every legitimate workspace id. hasWorkspacePermission remains the real
+// gate — this is defense-in-depth with a "not found" posture on malformed input.
+const workspaceIdSchema = z.string().min(1).max(255);
 
 function toErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim().length > 0) {
@@ -119,6 +130,27 @@ export async function inviteMemberAction(
       console.error("Failed to send invite notification:", notificationError);
     }
 
+    // Best-effort live arrival signal (US-083 W2): resolve an already-
+    // registered invitee by normalized email and push `invitation:new` to their
+    // user room only. Better Auth stores BOTH user emails and invitation
+    // emails lowercase (sign-up.mjs normalizes at sign-up; createInvitation
+    // lowercases on create), so the insensitive match is a defensive superset.
+    // An unregistered email gets no realtime signal — the persisted invitation
+    // and email flow still succeed. A lookup/emit failure never fails the
+    // invite.
+    try {
+      const invitee = await db.user.findFirst({
+        where: { email: { equals: normalizedEmail, mode: "insensitive" } },
+        select: { id: true },
+      });
+
+      if (invitee) {
+        emitInvitationNew(invitee.id, { invitationId: invitation.id });
+      }
+    } catch (emitError) {
+      console.error("Failed to emit invitation:new:", emitError);
+    }
+
     return { success: true, invitationId: invitation.id };
   } catch (error) {
     return {
@@ -139,6 +171,10 @@ export async function updateWorkspaceTimezoneAction(
   timezone: string,
 ): Promise<UpdateWorkspaceTimezoneResult> {
   await verifySession();
+
+  if (!workspaceIdSchema.safeParse(workspaceId).success) {
+    return { success: false, error: "Workspace not found" };
+  }
 
   if (!isValidTimezone(timezone)) {
     return { success: false, error: "Invalid timezone. Please enter a valid IANA timezone string (e.g. America/New_York, UTC)." };
@@ -179,6 +215,10 @@ export async function updateWorkspaceRequireEstimateAction(
 ): Promise<UpdateWorkspaceRequireEstimateResult> {
   await verifySession();
 
+  if (!workspaceIdSchema.safeParse(workspaceId).success) {
+    return { success: false, error: "Workspace not found" };
+  }
+
   const canManageWorkspace = await hasWorkspacePermission(workspaceId, {
     organization: ["update"],
   });
@@ -218,6 +258,10 @@ export async function updateWorkspaceAnalyticsLaunchAction(
   launchAt: Date,
 ): Promise<UpdateWorkspaceAnalyticsLaunchResult> {
   await verifySession();
+
+  if (!workspaceIdSchema.safeParse(workspaceId).success) {
+    return { success: false, error: "Workspace not found" };
+  }
 
   const canManageWorkspace = await hasWorkspacePermission(workspaceId, {
     organization: ["update"],

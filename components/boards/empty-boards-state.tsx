@@ -13,7 +13,7 @@ export function EmptyBoardsState({
     <div className="flex min-h-[60vh] flex-1 items-center justify-center px-4">
       <div className="max-w-sm text-center">
         <div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-xl bg-muted">
-          <span className="text-3xl">W</span>
+          <span className="text-3xl" aria-hidden="true">W</span>
         </div>
         <h1 className="mb-2 text-xl font-semibold">Create your first workspace</h1>
         <p className="mb-6 text-sm text-muted-foreground">

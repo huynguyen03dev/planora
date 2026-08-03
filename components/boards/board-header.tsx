@@ -10,14 +10,10 @@ import {
 } from "@/app/(authenticated)/(dashboard)/boards/actions";
 import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store";
 import { BoardFilter } from "@/components/boards/board-filter";
-import {
-  boardHeaderAvatarFallbackClass,
-  boardHeaderAvatarRingClass,
-} from "@/components/boards/board-header-controls";
-import { BoardLabelToggle } from "@/components/boards/board-label-toggle";
-import { BoardSearch } from "@/components/boards/board-search";
+import { BoardAutomationDialog } from "@/components/workspace/automation/board-automation-dialog";
+import { boardHeaderAvatarCountClass } from "@/components/boards/board-header-controls";
 import { ArchivedCardsDialog } from "@/components/boards/archived-cards-dialog";
-import type { ArchivedCardData } from "@/components/boards/archived-cards-dialog";
+import type { ArchivedCardData, ArchivedListData } from "@/components/boards/archived-cards-dialog";
 import { BoardMenu } from "@/components/boards/board-menu";
 import {
   Avatar,
@@ -28,7 +24,9 @@ import {
   AvatarImage,
 } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { avatarColorClass, avatarRingClass } from "@/lib/avatar";
 import { getBoardTheme } from "@/lib/constants";
 import { cn, getInitials } from "@/lib/utils";
 
@@ -44,7 +42,11 @@ type BoardHeaderProps = {
   canEdit: boolean;
   canDelete: boolean;
   canArchiveCard: boolean;
+  canDeleteList?: boolean;
   archivedCards: ArchivedCardData[];
+  archivedLists?: ArchivedListData[];
+  // Admin-only permanent delete affordance (US-074 Slice C).
+  canPermanentDelete?: boolean;
   starred: boolean;
 };
 
@@ -53,7 +55,10 @@ export function BoardHeader({
   canEdit,
   canDelete,
   canArchiveCard,
+  canDeleteList = false,
   archivedCards,
+  archivedLists = [],
+  canPermanentDelete = false,
   starred,
 }: BoardHeaderProps) {
   // Live presence: who currently has this board open. Server-driven, deduped.
@@ -142,7 +147,7 @@ export function BoardHeader({
 
   return (
     <header
-      className="space-y-4 rounded-t-xl border border-black/10 p-4 md:p-5"
+      className="space-y-4 rounded-t-xl border border-white/15 p-4 md:p-5"
       style={{ background: boardTheme.header }}
     >
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -173,16 +178,17 @@ export function BoardHeader({
               className="max-w-xl bg-white/90"
             />
           ) : canEdit ? (
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => {
                 setDraftTitle(board.title);
                 setEditing(true);
               }}
-              className="max-w-full text-left"
+              className="max-w-full h-auto p-1 -m-1 text-left text-white hover:bg-white/10"
             >
-              <h1 className="truncate text-xl font-semibold text-white sm:text-2xl">{board.title}</h1>
-            </button>
+              <h1 className="truncate text-xl font-semibold sm:text-2xl">{board.title}</h1>
+            </Button>
           ) : (
             <h1 className="truncate text-xl font-semibold text-white sm:text-2xl">{board.title}</h1>
           )}
@@ -190,26 +196,27 @@ export function BoardHeader({
 
         <div className="flex flex-wrap items-center justify-end gap-2">
           {showReconnecting ? (
-            <span
+            <Badge
               role="status"
-              className="flex items-center gap-1.5 rounded-full bg-amber-500/90 px-2.5 py-1 text-xs font-medium text-white"
+              className="flex h-6 items-center gap-1.5 rounded-full bg-amber-500/90 hover:bg-amber-500/90 px-2.5 py-1 text-xs font-medium text-white border-none"
             >
               <span className="size-1.5 animate-pulse rounded-full bg-white" />
               Reconnecting…
-            </span>
+            </Badge>
           ) : null}
 
           {watchers.length > 0 ? (
-            <AvatarGroup
-              className={cn("pr-1", boardHeaderAvatarRingClass)}
-              aria-label="Viewing now"
-            >
+            <AvatarGroup className="pr-1" aria-label="Viewing now">
               {visibleWatchers.map((watcher) => (
                 <Avatar
                   key={watcher.id}
-                  // Lift an admin above its overlapping neighbours so the crown
+                  // Per-user lighter-hue separating ring (see lib/avatar). Lift an
+                  // admin above its overlapping neighbours so the crown
                   // (bottom-right) is never hidden under the next avatar.
-                  className={cn(watcher.role === "admin" && "z-10")}
+                  className={cn(
+                    avatarRingClass(watcher.id),
+                    watcher.role === "admin" && "z-10",
+                  )}
                   title={
                     watcher.role === "admin"
                       ? `${watcher.name} (admin)`
@@ -219,7 +226,7 @@ export function BoardHeader({
                   {watcher.image ? (
                     <AvatarImage src={watcher.image} alt={watcher.name} />
                   ) : null}
-                  <AvatarFallback className={boardHeaderAvatarFallbackClass}>
+                  <AvatarFallback className={avatarColorClass(watcher.id)}>
                     {getInitials(watcher.name)}
                   </AvatarFallback>
                   {watcher.role === "admin" ? (
@@ -237,7 +244,7 @@ export function BoardHeader({
               ))}
               {watcherOverflow > 0 ? (
                 <AvatarGroupCount
-                  className={cn("text-xs", boardHeaderAvatarFallbackClass)}
+                  className={cn("text-xs", boardHeaderAvatarCountClass)}
                   aria-label={`${watcherOverflow} more`}
                 >
                   +{watcherOverflow}
@@ -250,7 +257,7 @@ export function BoardHeader({
             type="button"
             variant="outline"
             size="sm"
-            className="rounded-full border-white/40 bg-white/15 text-white hover:bg-white/25"
+            className="rounded-md border-white/40 bg-white/15 text-white hover:bg-white/25"
           >
             Share
           </Button>
@@ -263,7 +270,7 @@ export function BoardHeader({
             disabled={starPending}
             aria-pressed={isStarred}
             aria-label={isStarred ? "Unstar board" : "Star board"}
-            className={`rounded-full border-white/40 bg-white/15 hover:bg-white/25 ${
+            className={`rounded-md border-white/40 bg-white/15 hover:bg-white/25 ${
               isStarred ? "text-yellow-400 hover:text-yellow-300" : "text-white"
             }`}
           >
@@ -274,22 +281,22 @@ export function BoardHeader({
             />
           </Button>
 
-          <BoardSearch />
-
-          <BoardLabelToggle />
-
           <BoardFilter />
+
+          <BoardAutomationDialog boardId={board.id} boardTitle={board.title} />
 
           <ArchivedCardsDialog
             archivedCards={archivedCards}
-            canRestore={canArchiveCard}
+            archivedLists={archivedLists}
+            canRestore={canArchiveCard || canDeleteList}
+            canPermanentDelete={canPermanentDelete}
           />
 
           <BoardMenu board={board} canEdit={canEdit} canDelete={canDelete} />
         </div>
       </div>
 
-      {error ? <p className="text-sm text-destructive-foreground">{error}</p> : null}
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </header>
   );
 }

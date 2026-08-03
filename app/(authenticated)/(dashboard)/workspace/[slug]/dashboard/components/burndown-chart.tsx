@@ -138,11 +138,11 @@ export function BurndownChart({ data }: BurndownChartProps) {
         </div>
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5">
-            <span className="h-0.5 w-4 rounded" style={{ backgroundColor: LINE_COLOR }} />
+            <span className="h-0.5 w-4 rounded" style={{ backgroundColor: LINE_COLOR }} aria-hidden="true" />
             Remaining
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-4 border-t-2 border-dashed border-muted-foreground/60" />
+            <span className="w-4 border-t-2 border-dashed border-muted-foreground/60" aria-hidden="true" />
             Projection
           </span>
         </div>
@@ -269,12 +269,13 @@ export function BurndownChart({ data }: BurndownChartProps) {
               <span
                 className="inline-block h-1.5 w-1.5 rounded-full"
                 style={{ backgroundColor: LINE_COLOR }}
+                aria-hidden="true"
               />
               Remaining {formatHours(Math.round(hoverPt.remainingHours))}
             </div>
             {hoverPt.idealHours != null && (
               <div className="flex items-center gap-1.5 text-muted-foreground">
-                <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/60" aria-hidden="true" />
                 Projection {formatHours(Math.round(hoverPt.idealHours))}
               </div>
             )}

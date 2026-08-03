@@ -19,6 +19,14 @@ card/list/board deletion. These rows are **append-only** — never mutate or del
 them. Historical state (e.g. who was assigned at a point in time) is reconstructed
 by replaying events, which is why member filtering is accurate over time.
 
+**Automation attribution.** Rule-driven card mutations (see `automation.md`)
+append `CardHistoryEvent` rows exactly like human edits, but with the actor set
+to the seeded **"Planora Automation"** system user (`AUTOMATION_ACTOR_USER_ID`)
+and `metadata: { ruleId }`. The system user is never a workspace member, so it
+never appears in the team-member filter and never inflates a real user's action
+counts — analytics can distinguish automated from human work while keeping the
+non-null `actorId`/`userId` contract intact (decision 0022 §5).
+
 ## Metrics
 
 `getWorkspaceAnalytics()` computes, over the selected range:
@@ -35,8 +43,27 @@ by replaying events, which is why member filtering is accurate over time.
   (detail table per card).
 - **Overdue count** — cards past `dueDate` and not done.
 - **Completed late** — cards completed after their due date.
-- **Reopen rate** — share of cards moved back out of a done list.
+- **Reopen rate** — share of completed cards that were reopened. Event-based:
+  denominator = distinct cards that reached completion relevant to the range
+  (a `CARD_COMPLETED` in range **or** a reopen-after-completion in range);
+  numerator = cards reopened (after a completion) in range. The numerator is a
+  subset of the denominator, so the rate is capped at 100% even when a card's
+  completion predates the range. Decoupled from the streak "currently complete"
+  filter so a completed-then-reopened-and-open card still counts toward the rate
+  (decision 0021).
 - **Estimation coverage** — share of cards carrying an estimate (data quality).
+
+### Completion-metric anchoring (current streak)
+
+Since completion is a freely-toggleable card checkbox (decision 0020), throughput,
+`totalCompleted`, cycle/lead-time, and the flow chart's "completed" series anchor
+on a card's **current completed streak** — the completion after its last
+`CARD_REOPENED`, or the first completion if never reopened (decision 0021). A card
+that is currently reopened is **not** counted as completed, and cycle-time
+measures `created → current-streak completion`. This makes the numbers robust to
+accidental/premature ticks. Overdue and burndown already derive from the
+point-in-time replay (`CARD_REOPENED` clears `completedAt`), so they are
+streak-correct without change.
 
 ## Filters & time
 
@@ -65,3 +92,10 @@ The engine and export are the best-tested part of the app
 (`lib/analytics/engine.test.ts`, `tests/analytics-export.test.ts`,
 `lib/card-history.test.ts`). Keep new metrics test-backed — they are pure
 functions over the event stream and cheap to test.
+
+## First-Party Usage Telemetry Baseline (Roadmap US-076, Decision 0027 Proposed)
+
+- **First-Party Infrastructure:** Measures daily active retention and feature usage (Today view, Quick Capture, Rule execution) using internal `UsageTelemetryEvent` storage. 100% first-party: zero third-party analytics SDKs, tracking pixels, or external SaaS providers.
+- **Privacy & Zero-PII Boundary:** Event payloads record only event names, hashed/UUID `workspaceId`, `userId` HMAC hash, and timestamp. Zero card titles, descriptions, comments, or PII are ever captured.
+- **Rolling Bounded Retention:** Raw telemetry rows are retained for a rolling 90-day window, after which an automated daily cron prunes expired raw events while preserving daily aggregate summaries.
+- **Workspace Admin Dashboard:** Provides workspace admins with high-level DAU and feature usage metrics within the Workspace Analytics shell.

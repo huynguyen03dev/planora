@@ -40,8 +40,9 @@ optional `backgroundColor`, a creator, and `archivedAt` (soft delete).
 ### List
 
 An ordered column on a board (model `List`). Ordered by `position Float`,
-unique per `(boardId, position)`. An `isDone` flag marks a list as the
-completion column (moving a card into it auto-completes the card).
+unique per `(boardId, position)`. Lists carry no completion flag — completion is
+card-owned (`Card.completedAt`, set by the completion toggle), not derived from
+the column (decision 0020).
 
 ### Card
 
@@ -93,7 +94,8 @@ See `lib/dnd/apply-drop.ts`.
 
 The real-time rule that defers **structural** remote socket events (move/create/
 delete/archive) while a local drag is in progress, applying in-place events
-(comments, title, isDone) live, then resyncing on drop. Prevents drag corruption.
+(comments, title, card completion, labels/members) live, then resyncing on drop.
+Prevents drag corruption.
 See `board-store-provider.tsx` and `tests/board-store.test.ts`.
 
 ### Analytics Launch Boundary

@@ -13,6 +13,7 @@
  * would make the isolation assertion a tautology.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { APIError } from "better-auth";
 
 import { boardFixture, expectNoWrites, formData, roleGrants, type Role } from "./_harness";
 
@@ -148,6 +149,24 @@ describe("updateBoardAction — security boundary", () => {
 
     expect(result).toEqual({ success: true });
     expect(h.board.updateBoard).toHaveBeenCalledWith(BOARD_UUID, { title: "Renamed" });
+  });
+
+  it("US-059: a non-member (auth.api.hasPermission throws UNAUTHORIZED) gets a clean deny, not a 500", async () => {
+    signInAs("outsider-user", WS_B, "admin"); // real member of WS_B only
+    h.board.getBoardById.mockResolvedValue(boardFixture(WS_A));
+    // Mirrors Better Auth's organization.mjs:75 throw for a non-member caller,
+    // instead of the mocked-decision resolve the other cases use.
+    h.hasPermission.mockRejectedValueOnce(
+      APIError.from("UNAUTHORIZED", {
+        message: "You are not a member of this organization.",
+        code: "USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION",
+      }),
+    );
+
+    const result = await updateBoardAction(validForm());
+
+    expect(result).toEqual({ success: false, error: "Board not found" });
+    expectNoWrites(...writeSpies);
   });
 });
 

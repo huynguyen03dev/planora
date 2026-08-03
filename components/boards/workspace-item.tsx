@@ -3,8 +3,15 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Analytics01Icon } from "@hugeicons/core-free-icons";
+import {
+  Analytics01Icon,
+  KanbanIcon,
+  Settings01Icon,
+  UserMultipleIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+
+import { cn } from "@/lib/utils";
 
 import { workspaceBadgeSurface } from "./styles";
 
@@ -21,9 +28,43 @@ export function WorkspaceItem({ workspace }: WorkspaceItemProps) {
   const pathname = usePathname();
   const selectedWorkspaceId = searchParams.get("workspace");
   const isActive = selectedWorkspaceId === workspace.id;
-  const isAnalyticsActive = pathname.startsWith(`/workspace/${workspace.slug}`);
-  const [isManuallyExpanded, setManuallyExpanded] = useState(isActive);
-  const expanded = isActive || isManuallyExpanded;
+  const base = `/workspace/${workspace.slug}`;
+  // Any of this workspace's shell routes is open — used to auto-expand the item.
+  const isShellRouteActive = pathname.startsWith(`${base}/`);
+
+  const links = [
+    {
+      label: "Boards",
+      href: `/boards?workspace=${workspace.id}`,
+      icon: KanbanIcon,
+      active: isActive,
+    },
+    {
+      label: "Analytics",
+      href: `${base}/dashboard`,
+      icon: Analytics01Icon,
+      // Match the dashboard route exactly — startsWith(base) would also light
+      // Analytics on the members/settings routes (US-063 nav bleed).
+      active: pathname === `${base}/dashboard`,
+    },
+    {
+      label: "Members",
+      href: `${base}/members`,
+      icon: UserMultipleIcon,
+      active: pathname.startsWith(`${base}/members`),
+    },
+    {
+      label: "Settings",
+      href: `${base}/settings`,
+      icon: Settings01Icon,
+      active: pathname.startsWith(`${base}/settings`),
+    },
+  ];
+
+  const [isManuallyExpanded, setManuallyExpanded] = useState(
+    isActive || isShellRouteActive,
+  );
+  const expanded = isActive || isShellRouteActive || isManuallyExpanded;
 
   const initial = workspace.name.charAt(0).toUpperCase();
 
@@ -32,6 +73,7 @@ export function WorkspaceItem({ workspace }: WorkspaceItemProps) {
       <button
         type="button"
         onClick={() => setManuallyExpanded((value) => !value)}
+        aria-expanded={expanded}
         className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-sidebar-accent"
       >
         <div
@@ -40,30 +82,29 @@ export function WorkspaceItem({ workspace }: WorkspaceItemProps) {
           {initial}
         </div>
         <span className="flex-1 truncate text-left">{workspace.name}</span>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs text-muted-foreground" aria-hidden="true">
           {expanded ? "▼" : "▶"}
         </span>
       </button>
 
       {expanded ? (
         <div className="ml-8 mt-1 space-y-0.5">
-          <Link
-            href={`/boards?workspace=${workspace.id}`}
-            className={`block rounded-md px-2 py-1 text-sm transition-colors hover:bg-sidebar-accent ${
-              isActive ? "bg-sidebar-accent font-medium" : "text-muted-foreground"
-            }`}
-          >
-            Boards
-          </Link>
-          <Link
-            href={`/workspace/${workspace.slug}/dashboard`}
-            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-sm transition-colors hover:bg-sidebar-accent ${
-              isAnalyticsActive ? "bg-sidebar-accent font-medium" : "text-muted-foreground"
-            }`}
-          >
-            <HugeiconsIcon icon={Analytics01Icon} className="size-3.5" />
-            <span>Analytics</span>
-          </Link>
+          {links.map((link) => (
+            <Link
+              key={link.label}
+              href={link.href}
+              aria-current={link.active ? "page" : undefined}
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-2 py-1 text-sm transition-colors hover:bg-sidebar-accent",
+                link.active
+                  ? "bg-sidebar-accent font-medium text-foreground"
+                  : "text-muted-foreground",
+              )}
+            >
+              <HugeiconsIcon icon={link.icon} className="size-3.5" />
+              <span>{link.label}</span>
+            </Link>
+          ))}
         </div>
       ) : null}
     </div>

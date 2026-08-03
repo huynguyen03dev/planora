@@ -13,6 +13,10 @@
 # testing
 /coverage
 
+# QA artifacts (manual browser QA + Playwright screenshots)
+/.qa-shots/
+/e2e/.qa-artifacts/
+
 # next.js
 /.next/
 /out/
@@ -32,6 +36,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -75,3 +80,9 @@ scripts/bin/harness-cli.exe
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Local UI-review screenshots (scratch, not tracked)
+.ui-review/
+
+# Generated demo-fixture manifest (current local database ids)
+/.demo/

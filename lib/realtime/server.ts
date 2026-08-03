@@ -1,6 +1,6 @@
 import { Server } from "socket.io";
 
-import type { CardLabelSnapshot, CardMemberSnapshot, CardSnapshot, ListSnapshot, NotificationNewPayload, ServerToClientEvents, ClientToServerEvents, Watcher } from "./types";
+import type { CardLabelSnapshot, CardMemberSnapshot, CardSnapshot, InvitationNewPayload, ListSnapshot, NotificationNewPayload, ServerToClientEvents, ClientToServerEvents, Watcher } from "./types";
 import { ROOMS } from "./events";
 
 declare global {
@@ -87,10 +87,28 @@ export function emitListCreated(boardId: string, payload: {
   }
 }
 
+export function emitListRestored(boardId: string, payload: {
+  list: ListSnapshot;
+}) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.board(boardId)).emit("list:restored", {
+      boardId,
+      ...payload,
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit list:restored:", error);
+  }
+}
+
 export function emitListUpdated(boardId: string, payload: {
   listId: string;
   title?: string;
-  isDone?: boolean;
 }) {
   const io = getIO();
   if (!io) {
@@ -182,6 +200,29 @@ export function emitCardArchived(boardId: string, payload: {
     });
   } catch (error) {
     console.error("[realtime] Failed to emit card:archived:", error);
+  }
+}
+
+// In-place / live (not structural): a card's completion flag flipped. Safe to
+// apply mid-drag — it never reorders the list array. Mirrors card:labels-updated.
+// Carries completedAt (ISO string or null) so the receiver recomputes due-status.
+export function emitCardCompletionUpdated(boardId: string, payload: {
+  cardId: string;
+  completedAt: string | null;
+}) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.board(boardId)).emit("card:completion-updated", {
+      boardId,
+      ...payload,
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit card:completion-updated:", error);
   }
 }
 
@@ -301,6 +342,25 @@ export function emitNotificationNew(userId: string, payload: NotificationNewPayl
     io.to(ROOMS.user(userId)).emit("notification:new", payload);
   } catch (error) {
     console.error("[realtime] Failed to emit notification:new:", error);
+  }
+}
+
+// Live workspace-invitation arrival (US-083 W2): pushed to the invitee's own
+// user room only — the same room every authenticated socket auto-joins on
+// connect (server.ts), so no client-controlled join is involved. The payload is
+// the invitation's public id only; the recipient's header increments the badge
+// and the inbox re-reads the invitation table on open (DB stays the truth).
+export function emitInvitationNew(inviteeId: string, payload: InvitationNewPayload) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.user(inviteeId)).emit("invitation:new", payload);
+  } catch (error) {
+    console.error("[realtime] Failed to emit invitation:new:", error);
   }
 }
 

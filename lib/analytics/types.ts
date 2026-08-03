@@ -94,6 +94,49 @@ export type WorkspaceAnalyticsPayload = {
   };
 };
 
+// Serializable export payload (JSON/CSV download). Built by
+// exportWorkspaceAnalyticsAction and consumed by the pure CSV formatter in
+// lib/analytics/csv-export.ts — kept here so neither depends on a "use server"
+// module.
+export type AnalyticsExportPayload = {
+  burndown: {
+    date: string;
+    remainingHours: number;
+    idealHours: number | null;
+  }[];
+  kpis: {
+    remainingHours: { current: number; previous: number; change: number };
+    medianLeadTimeHours: { current: number; previous: number; change: number };
+    averageLeadTimeHours: { current: number; previous: number; change: number };
+    overdueCount: { current: number; previous: number; change: number };
+    completedLateCount: { current: number; previous: number; change: number };
+    reopenRatePercent: { current: number; previous: number; change: number };
+    estimationCoveragePercent: {
+      current: number;
+      estimatedCount: number;
+      unestimatedCount: number;
+    };
+  };
+  leadTimeRows: {
+    cardId: string;
+    cardTitle: string;
+    createdAt: string;
+    completedAt: string;
+    leadTimeHours: number;
+    wasLate: boolean;
+  }[];
+  metadata: {
+    workspaceId: string;
+    workspaceTimezone: string;
+    from: string;
+    to: string;
+    boardId: string | null;
+    memberId: string | null;
+    includeArchivedBoards: boolean;
+    exportedAt: string;
+  };
+};
+
 // Query input
 export type WorkspaceAnalyticsQuery = {
   workspaceId: string;

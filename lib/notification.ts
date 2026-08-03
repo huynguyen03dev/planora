@@ -1,6 +1,7 @@
 import "server-only";
 
 import db from "@/lib/prisma";
+import { resolveMentions } from "@/lib/mention";
 import { emitNotificationNew } from "@/lib/realtime/server";
 import { sendEmail } from "@/lib/email";
 import { AssignEmail } from "@/emails/assign-email";
@@ -247,55 +248,31 @@ export async function notifyMentioned(data: {
 
     if (members.length === 0) return;
 
-    // Build a set of resolved user IDs by scanning the content for @memberName
-    // patterns. Uses the same algorithm as renderMentionContent: find each '@',
-    // then try to match the longest member name that follows it with a word
-    // boundary after.
-    const content = data.content;
-    const memberMap = new Map<string, { userId: string; name: string; email: string | null }>();
-    for (const m of members) {
-      if (m.user.name) memberMap.set(m.user.name.toLowerCase(), { userId: m.userId, name: m.user.name, email: m.user.email ?? null });
+    // Resolve mentions through the one shared resolver (lib/mention.ts), the
+    // same matcher the comment highlighter uses. Dedupe by userId and drop the
+    // commenter's own self-mention.
+    const resolved = new Map<string, { userId: string; name: string; email: string | null }>();
+    const matches = resolveMentions(
+      data.content,
+      members.map((m) => ({
+        userId: m.userId,
+        name: m.user.name ?? "",
+        email: m.user.email ?? null,
+      })),
+    );
+    for (const { member } of matches) {
+      resolved.set(member.userId, member);
     }
+    resolved.delete(data.commenterUserId);
 
-    const resolvedUserIds = new Set<string>();
-    let i = 0;
-    while (i < content.length) {
-      if (content[i] === "@" && i + 1 < content.length) {
-        let bestUserId: string | null = null;
-        let bestEnd = 0;
+    if (resolved.size === 0) return;
 
-        for (const [lowerName, { userId, name }] of memberMap) {
-          const afterAt = content.slice(i + 1);
-          if (afterAt.toLowerCase().startsWith(lowerName)) {
-            const endIdx = i + 1 + name.length;
-            const nextChar = content[endIdx];
-            if (nextChar === undefined || !/[a-zA-Z]/.test(nextChar)) {
-              if (name.length > (bestEnd - i - 1)) {
-                bestUserId = userId;
-                bestEnd = endIdx;
-              }
-            }
-          }
-        }
-
-        if (bestUserId) {
-          resolvedUserIds.add(bestUserId);
-          i = bestEnd;
-          continue;
-        }
-      }
-      i++;
-    }
-
-    // Filter out commenter
-    resolvedUserIds.delete(data.commenterUserId);
-
-    if (resolvedUserIds.size === 0) return;
+    const recipients = Array.from(resolved.values());
 
     await Promise.all(
-      Array.from(resolvedUserIds).map((userId) =>
+      recipients.map((member) =>
         createNotification({
-          userId,
+          userId: member.userId,
           type: "MENTIONED",
           title: `Mentioned in "${data.cardTitle}"`,
           message: `${data.commenterName} mentioned you in a comment on "${data.cardTitle}" in "${data.boardTitle}".`,
@@ -304,15 +281,16 @@ export async function notifyMentioned(data: {
       ),
     );
 
-    // Best-effort mention emails
+    // Best-effort mention emails — fired concurrently and awaited with
+    // allSettled so one slow or rejecting recipient neither blocks the request
+    // nor aborts the others (a plain Promise.all would reject on the first
+    // failure and drop the rest). Per-recipient failures are logged, not thrown.
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-    for (const userId of resolvedUserIds) {
-      const member = Array.from(memberMap.values()).find((m) => m.userId === userId);
-      if (!member?.email) continue;
-
-      try {
-        await sendEmail({
-          to: member.email,
+    const withEmail = recipients.filter((member) => member.email);
+    const results = await Promise.allSettled(
+      withEmail.map((member) =>
+        sendEmail({
+          to: member.email as string,
           subject: `You were mentioned in "${data.cardTitle}"`,
           react: MentionEmail({
             mentionedByName: data.commenterName,
@@ -321,9 +299,12 @@ export async function notifyMentioned(data: {
             cardLink: `${appUrl}/boards/${data.boardId}`,
           }),
           fromName: `${data.commenterName} mentioned you (Planora)`,
-        });
-      } catch (emailError) {
-        console.error("[notification] Failed to send mention email:", emailError);
+        }),
+      ),
+    );
+    for (const result of results) {
+      if (result.status === "rejected") {
+        console.error("[notification] Failed to send mention email:", result.reason);
       }
     }
   } catch (error) {
@@ -344,6 +325,46 @@ export async function notifyInvited(data: {
   // The signature is preserved so existing callers in the invite flow keep
   // working without change.
   void data;
+}
+
+/**
+ * In-app notification produced by an automation rule's `notify-member` action
+ * (US-066). The automation system user is the implicit actor. Best-effort: a
+ * failure here must never roll back or fail the triggering request (this runs
+ * post-commit). Reuses the ASSIGNED notification type for v1 — there is no
+ * dedicated automation notification type yet.
+ */
+export async function notifyAutomation(data: {
+  recipientUserId: string;
+  cardId: string;
+  message?: string;
+}): Promise<void> {
+  try {
+    const card = await db.card.findUnique({
+      where: { id: data.cardId },
+      select: {
+        title: true,
+        list: { select: { boardId: true, board: { select: { title: true } } } },
+      },
+    });
+    if (!card) return;
+
+    const boardId = card.list.boardId;
+    const boardTitle = card.list.board.title;
+    const trimmed = data.message?.trim();
+
+    await createNotification({
+      userId: data.recipientUserId,
+      type: "ASSIGNED",
+      title: `Automation: "${card.title}"`,
+      message: trimmed
+        ? trimmed
+        : `An automation rule flagged the card "${card.title}" on "${boardTitle}".`,
+      linkUrl: `/boards/${boardId}`,
+    });
+  } catch (error) {
+    console.error("[notification] Failed to send automation notification:", error);
+  }
 }
 
 export async function notifyDueDate(data: {
