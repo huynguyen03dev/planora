@@ -50,7 +50,7 @@ Quản lý dự án theo mô hình Kanban là một trong những phương pháp
 
 Hệ thống cung cấp các tính năng chính: bảng – danh sách – thẻ Kanban với kéo thả và thứ tự định vị theo khoảng cách float-gap; không gian làm việc và phân quyền truy cập theo vai trò; đồng bộ thời gian thực nhiều người dùng; dashboard phân tích tiến độ (burndown, lead time, tỉ lệ quá hạn, tỉ lệ mở lại) dựa trên luồng sự kiện lịch sử thẻ dạng append-only; hệ thống tự động hóa kiểu Butler với cơ chế chống vòng lặp bốn tầng; thông báo trong ứng dụng và qua email; quản lý an toàn vòng đời danh sách với xóa mềm và xóa vĩnh viễn có bảo vệ.
 
-Chất lượng sản phẩm được đảm bảo bởi **1.404 bài kiểm thử đơn vị/tích hợp** (90 tệp), **155 bài kiểm thử thành phần giao diện** (RTL) và **36 bài kiểm thử E2E** với hai phiên trình duyệt thực tế, trong đó có ma trận phân quyền RBAC 142 trường hợp và các bằng chứng kiểu "sabotage-verified" xác minh tính đúng đắn của các rào cản bảo mật. Đồ án được triển khai trên nền tảng Railway với email qua Resend và lưu trữ file qua Cloudinary, kèm quy trình demo bảo vệ có thể lặp lại.
+Chất lượng sản phẩm được đảm bảo bởi **1.404 bài kiểm thử** (Vitest, 90 tệp — gồm unit, tích hợp và 301 bài kiểm thử thành phần giao diện RTL trên 33 tệp) và **36 bài kiểm thử E2E** với hai phiên trình duyệt thực tế, trong đó có ma trận phân quyền RBAC 145 trường hợp và các bằng chứng kiểu "sabotage-verified" xác minh tính đúng đắn của các rào cản bảo mật. Đồ án được triển khai trên nền tảng Railway với email qua Resend và lưu trữ file qua Cloudinary, kèm quy trình demo bảo vệ có thể lặp lại.
 
 **Từ khóa:** Kanban, quản lý dự án, Next.js, Server Actions, React 19, Prisma, PostgreSQL, Socket.io, thời gian thực, RBAC, kiểm thử.
 
@@ -64,7 +64,7 @@ This thesis presents the analysis, design, and implementation of **Planora** —
 
 The system delivers: Kanban boards, lists, and cards with drag-and-drop and float-gap ordering; workspace management and role-based access control; real-time multi-user collaboration; an analytics dashboard (burndown, lead time, overdue rate, reopen rate) reconstructed from an append-only card-history event stream; a Butler-style automation engine with four-layer loop prevention; in-app and email notifications; and a safe list lifecycle with soft-delete and guarded permanent deletion.
 
-Product quality is backed by **1,404 unit/integration tests** (90 files), **155 React component tests** (RTL), and **36 end-to-end tests** across two real browser clients, including a 142-case RBAC permission matrix and sabotage-verified proofs of the security boundaries. The application is deployed on Railway with email via Resend and file storage via Cloudinary, together with a repeatable defense-demo workflow.
+Product quality is backed by **1,404 tests** (Vitest across 90 files — unit, integration, and 301 React component tests (RTL) across 33 files) and **36 end-to-end tests** across two real browser clients, including a 145-case RBAC permission matrix and sabotage-verified proofs of the security boundaries. The application is deployed on Railway with email via Resend and file storage via Cloudinary, together with a repeatable defense-demo workflow.
 
 **Keywords:** Kanban, project management, Next.js, Server Actions, React 19, Prisma, PostgreSQL, Socket.io, real-time, RBAC, testing.
 
@@ -218,7 +218,7 @@ Next.js giới thiệu mô hình **React Server Components (RSC)** trong App Rou
 - **Có thể trả về dữ liệu tuần tự hóa**: kết quả trả về dạng object thuần (plain object) để client sử dụng trực tiếp.
 - **Kết hợp với cơ chế revalidation**: sau khi ghi dữ liệu, gọi `revalidatePath()` để làm mới các thành phần server phụ thuộc dữ liệu vừa thay đổi.
 
-Trong đồ án này, Server Actions được sử dụng làm **ranh giới bắt buộc duy nhất cho mọi thao tác ghi dữ liệu** (mutation boundary), theo một hợp đồng cố định gồm tám bước (trình bày chi tiết tại mục 3.6). Không có API REST phục vụ dữ liệu — đây là một lựa chọn kiến trúc có chủ đích nhằm giảm diện tích tấn công và đảm bảo mọi đường ghi đều đi qua cùng một chuỗi kiểm tra bảo mật.
+Trong đồ án này, Server Actions được sử dụng làm **ranh giới bắt buộc duy nhất cho mọi thao tác ghi dữ liệu** (mutation boundary), theo một hợp đồng chuẩn gồm đủ các bước bắt buộc (trình bày chi tiết tại mục 3.6). Không có API REST phục vụ dữ liệu — đây là một lựa chọn kiến trúc có chủ đích nhằm giảm diện tích tấn công và đảm bảo mọi đường ghi đều đi qua cùng một chuỗi kiểm tra bảo mật.
 
 ### 2.2 Next.js 16, React 19 và TypeScript
 
@@ -273,13 +273,13 @@ PostgreSQL là hệ quản trị cơ sở dữ liệu quan hệ mã nguồn mở
 - **editor** — tạo và chỉnh sửa nội dung (board/list/card/comment) nhưng không quản lý tổ chức, không xóa vĩnh viễn;
 - **viewer** — chỉ đọc và bình luận.
 
-Ma trận vai trò × thao tác được kiểm chứng bằng 142 trường hợp kiểm thử tự động (mục 5.6).
+Ma trận vai trò × thao tác được kiểm chứng bằng 145 trường hợp kiểm thử tự động (mục 5.6).
 
 ### 2.5 Socket.io và đồng bộ thời gian thực
 
 **Socket.io** (phiên bản 4.8) là thư viện thời gian thực hai chiều dựa trên WebSocket, có cơ chế fallback (long-polling) và phòng (rooms) để nhóm kết nối. Trong đồ án, kiến trúc thời gian thực tuân theo một nguyên tắc bất biến: **Prisma/PostgreSQL là nguồn dữ liệu duy nhất; Socket.io chỉ phát quảng bá sự kiện để các client khác cập nhật trạng thái giao diện**.
 
-Máy chủ HTTP tùy chỉnh (`server.ts`) bọc Next.js handler và khởi tạo Socket.io trên cùng một cổng (3000), chạy qua `tsx`. Quá trình xác thực socket diễn ra ngay ở tầng middleware: đọc cookie phiên, lấy `userId`, sau đó mỗi sự kiện tham gia phòng (`board:join`, `workspace:join`) lại được kiểm tra quyền theo phòng (`canUserJoinBoard`, `canUserJoinWorkspace` — 19 trường hợp kiểm thử chuyên biệt). Các sự kiện được định nghĩa kiểu tường minh (`card:moved`, `list:created`, `notification:new`, `analytics:refresh`…).
+Máy chủ HTTP tùy chỉnh (`server.ts`) bọc Next.js handler và khởi tạo Socket.io trên cùng một cổng (3000), chạy qua `tsx`. Quá trình xác thực socket diễn ra ngay ở tầng middleware: đọc cookie phiên, lấy `userId`, sau đó mỗi sự kiện tham gia phòng (`board:join`, `workspace:join`) lại được kiểm tra quyền theo phòng (`getBoardMembershipRole`, `canUserJoinWorkspace` — 19 trường hợp kiểm thử chuyên biệt). Các sự kiện được định nghĩa kiểu tường minh (`card:moved`, `list:created`, `notification:new`, `analytics:refresh`…).
 
 Điểm kỹ thuật quan trọng nhất của tầng thời gian thực là **bất biến hoãn có nhận biết kéo thả (drag-aware deferral)**: khi người dùng đang kéo một thẻ/danh sách, các sự kiện thay đổi cấu trúc (tạo, xóa, di chuyển, lưu trữ) đến từ client khác bị **hoãn lại**, cờ `pendingResync` được bật; khi thả xong, client gọi `router.refresh()` để đồng bộ lại với dữ liệu server. Điều này ngăn `@hello-pangea/dnd` bị hỏng mảng danh sách giữa lúc kéo. Ngược lại, các sự kiện thay đổi tại chỗ (đổi tên, đánh dấu hoàn thành, thay đổi nhãn/thành viên, bình luận) được áp dụng trực tiếp vì chúng không làm thay đổi thứ tự mảng.
 
@@ -511,7 +511,7 @@ Planora là ứng dụng **server-first** trên Next.js, không tách riêng bac
 Các lớp chính:
 
 1. **Tầng trình bày (client)**: client components nhận sự kiện socket, cập nhật Zustand store; thành phần kéo thả `@hello-pangea/dnd`; dialog/bảng điều khiển xây trên shadcn/ui. Dữ liệu khởi tạo đến từ RSC (server components) qua props.
-2. **Tầng mutation (Server Actions)**: `app/**/actions.ts` — ranh giới bắt buộc của mọi thao tác ghi, thực thi đúng hợp đồng 8 bước (mục 3.6).
+2. **Tầng mutation (Server Actions)**: `app/**/actions.ts` — ranh giới bắt buộc của mọi thao tác ghi, thực thi đúng hợp đồng đủ các bước (mục 3.6).
 3. **Tầng nghiệp vụ (lib)**: các hàm thuần/queries chuyên biệt — `lib/card.ts`, `lib/list.ts`, `lib/board.ts`, `lib/ordering.ts` (toán vị trí), `lib/card-history.ts` (dựng sự kiện), `lib/analytics/engine.ts`, `lib/automation/*`, `lib/realtime/*`.
 4. **Tầng dữ liệu**: `db` singleton với PrismaPg adapter → PostgreSQL. Socket.io chỉ phát quảng bá, không ghi dữ liệu.
 
@@ -519,18 +519,18 @@ Về mặt tổ chức route: nhóm `(public)` gồm trang đích `/`, `/sign-in
 
 ### 3.6 Luồng mutation chuẩn qua Server Action
 
-Mọi thao tác ghi dữ liệu phải đi qua một Server Action theo **đúng thứ tự tám bước** (hợp đồng quan trọng nhất của kiến trúc — `docs/ARCHITECTURE.md`):
+Mọi thao tác ghi dữ liệu phải đi qua một Server Action tuân theo **hợp đồng gồm đủ các bước** — xác thực phiên, kiểm tra quyền, cô lập workspace, kiểm tra đầu vào, giao dịch Prisma, phát sự kiện realtime và revalidate — (hợp đồng quan trọng nhất của kiến trúc — `docs/ARCHITECTURE.md`). **Thứ tự thực hiện có thể linh hoạt theo từng action**: nhiều action parse Zod **trước** `verifySession()` (ví dụ `createListAction` gọi `safeParse` trước khi xác thực phiên), và một số action gọi `revalidatePath` **trước** khi phát sự kiện realtime; điều bắt buộc là đủ tất cả các bước, không phải một thứ tự cố định:
 
 ```text
-1. verifySession()                    → lấy userId, không bao giờ tin nhận dạng từ client
-2. hasWorkspacePermission(workspaceId, { entity: [verb] })
-                                       → kiểm tra quyền theo vai trò RBAC
-3. Cô lập workspace                    → mọi truy vấn giới hạn theo workspace của người gọi
-4. Zod parse (lib/schemas/)            → kiểm tra dữ liệu đầu vào trước khi chạm DB
-5. db.$transaction(...)                → ghi dữ liệu (bó nhiều dòng khi đổi vị trí)
-6. Emit sự kiện thời gian thực          → emitCardCreated / emitListMoved / ...
-7. revalidatePath()                    → làm mới dữ liệu server-rendered (trừ reorder/move thuần)
-8. Trả về dữ liệu tuần tự hóa           → object thuần, không model instance
+verifySession()                    → lấy userId, không bao giờ tin nhận dạng từ client
+hasWorkspacePermission(workspaceId, { entity: [verb] })
+                                   → kiểm tra quyền theo vai trò RBAC
+Cô lập workspace                    → mọi truy vấn giới hạn theo workspace của người gọi
+Zod parse (lib/schemas/)            → kiểm tra dữ liệu đầu vào trước khi chạm DB
+db.$transaction(...)                → ghi dữ liệu (bó nhiều dòng khi đổi vị trí)
+Emit sự kiện thời gian thực          → emitCardCreated / emitListMoved / ...
+revalidatePath()                    → làm mới dữ liệu server-rendered (trừ reorder/move thuần)
+Trả về dữ liệu tuần tự hóa           → object thuần, không model instance
 ```
 
 Ví dụ minh họa luồng thực tế của `createCardAction` (rút gọn):
@@ -543,16 +543,16 @@ export async function createCardAction(formData: FormData) {
   const parsed = createCardSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { success: false, error: "Dữ liệu không hợp lệ" };
 
-  const { userId } = await verifySession();                        // bước 1
+  const { userId } = await verifySession();                        // xác thực phiên
   const { listId, title, description, dueDate, priority } = parsed.data;
-  const result = await getListWithBoard(listId);                    // bước 3 (scope)
+  const result = await getListWithBoard(listId);                    // cô lập workspace (scope)
   if (!result || result.board.archivedAt) return { success: false, error: "List not found" };
 
   const canCreateCard = await hasWorkspacePermission(
-    result.board.workspaceId, { card: ["create"] });               // bước 2
+    result.board.workspaceId, { card: ["create"] });               // kiểm tra quyền RBAC
   if (!canCreateCard) return { success: false, error: "List not found" };
 
-  const card = await db.$transaction(async (tx) => {                // bước 5
+  const card = await db.$transaction(async (tx) => {                // giao dịch Prisma (Zod đã chạy ở đầu hàm)
     // vị trí float-gap ở cuối danh sách
     const lastCard = await tx.card.findFirst({ where: { listId, ...LIVE_CARD_SCOPE },
       orderBy: [{ position: "desc" }, { createdAt: "desc" }], select: { position: true } });
@@ -566,11 +566,11 @@ export async function createCardAction(formData: FormData) {
     return { card: createdCard, ruleEffects: effects };
   });
 
-  revalidatePath(`/boards/${result.list.boardId}`);                 // bước 7
-  emitCardCreated(result.list.boardId, { card: { /* snapshot */ } }); // bước 6
+  revalidatePath(`/boards/${result.list.boardId}`);                 // revalidate (thứ tự so với emit linh hoạt theo action)
+  emitCardCreated(result.list.boardId, { card: { /* snapshot */ } }); // emit sự kiện realtime
   emitAnalyticsRefresh(result.board.workspaceId);
   await fireDeferredEffects(card.ruleEffects);
-  return { success: true, cardId: card.card.id };                   // bước 8
+  return { success: true, cardId: card.card.id };                   // trả dữ liệu tuần tự hóa
 }
 ```
 
@@ -586,7 +586,7 @@ Mỗi mutation được bảo vệ bởi ba lớp kiểm tra độc lập, đề
 2. **Phân quyền (A2)**: `hasWorkspacePermission(workspaceId, { ... })` — Better Auth kiểm tra vai trò hiện tại của người dùng trong organization đó theo access-control statements; trường hợp không phải thành viên được chuẩn hóa thành từ chối mềm (quyết định xử lý `UNAUTHORIZED` thành `false`).
 3. **Cô lập workspace (A3)**: mọi truy vấn đều được giới hạn theo `workspaceId` suy ra từ dữ liệu server (không lấy từ client); thẻ/danh sách ngoài workspace không bao giờ tìm thấy (trả lỗi chung chung "not found" để tránh rò rỉ sự tồn tại).
 
-Bộ ba lớp này được kiểm chứng bằng **118 trường hợp kiểm thử tích hợp** trên 26 action ghi dữ liệu và 2 action đọc (mục 5.2), kèm bằng chứng sabotage: gỡ một lớp kiểm tra thì các trường hợp A2/A3 tương ứng chuyển đỏ.
+Bộ ba lớp này được kiểm chứng bằng **143 trường hợp kiểm thử tích hợp** (mục 5.2), kèm bằng chứng sabotage: gỡ một lớp kiểm tra thì các trường hợp A2/A3 tương ứng chuyển đỏ.
 
 #### 3.7.2 RBAC ba vai trò
 
@@ -687,7 +687,7 @@ export const auth = betterAuth({
 
 #### 4.3.1 Thao tác cơ bản
 
-Các Server Action trong `boards/[boardId]/actions.ts` triển khai toàn bộ vòng đời bảng/danh sách/thẻ theo hợp đồng 8 bước. Phần logic đọc/queries tách trong `lib/board.ts`, `lib/list.ts`, `lib/card.ts`, `lib/comment.ts`, `lib/attachment.ts`, `lib/checklist.ts`, `lib/label.ts`, `lib/card-member.ts`. Các bước vị trí dùng chung được gom vào `lib/ordering.ts` (hằng số gap, `resolveCardPosition`, `normalizeCardPositions`, `StaleNeighborError`).
+Các Server Action trong `boards/[boardId]/actions.ts` triển khai toàn bộ vòng đời bảng/danh sách/thẻ theo hợp đồng chuẩn (mục 3.6). Phần logic đọc/queries tách trong `lib/board.ts`, `lib/list.ts`, `lib/card.ts`, `lib/comment.ts`, `lib/attachment.ts`, `lib/checklist.ts`, `lib/label.ts`, `lib/card-member.ts`. Các bước vị trí dùng chung được gom vào `lib/ordering.ts` (hằng số gap, `resolveCardPosition`, `normalizeCardPositions`, `StaleNeighborError`).
 
 #### 4.3.2 Toán vị trí float-gap
 
@@ -770,7 +770,7 @@ function applyOrDefer<T>(apply: (payload: T) => void, payload: T) {
 // card:labels-updated, comment:created) áp dụng trực tiếp.
 ```
 
-Cùng với đó, board store thực hiện **dedupe self-echo**: sự kiện do chính client phát ra (echo từ socket) không được áp dụng hai lần — kiểm tra trạng thái canonical đã phản ánh thì bỏ qua, tương tự cho create events (quyết định 0008). Bất biến này là bản sửa đằng sau commit `7706b6d` và được kiểm chứng bởi 37 trường hợp trong `tests/board-store.test.ts`.
+Cùng với đó, board store thực hiện **dedupe self-echo**: sự kiện do chính client phát ra (echo từ socket) không được áp dụng hai lần — kiểm tra trạng thái canonical đã phản ánh thì bỏ qua, tương tự cho create events (quyết định 0008). Bất biến **hoãn kéo thả** (hoãn cập nhật remote khi đang kéo, `applyOrDefer` ở trên) là bản sửa đằng sau commit `7706b6d`; cùng với dedupe self-echo, cả hai được kiểm chứng bởi 54 trường hợp trong `tests/board-store.test.ts`.
 
 #### 4.4.4 Presence
 
@@ -818,7 +818,7 @@ Từ quyết định 0030, **cô lập lỗi theo từng bước (per-step isola
 - **Tạo thông báo**: `lib/notification.ts` cung cấp `notifyMentioned` (quét mention trong bình luận), `notifyCardAssigned`, `notifyCommentOnCard`, `notifyDueDate` — mỗi hàm ghi `Notification` (DB) và gửi email best-effort (lỗi email không làm hỏng thao tác gốc).
 - **Phân phối thời gian thực**: `emitNotificationNew(userId, payload)` đẩy vào phòng `user:<userId>`; chuông thông báo tăng ngay lập tức, đồng bộ lại từ DB khi kết nối lại.
 - **Lời mời sống**: `inviteMemberAction` phát `invitation:new` tới phòng người được mời (đã đăng ký) với email chuẩn hóa không phân biệt hoa thường; badge chuông lời mời tăng trực tiếp; người ngoài (không được mời) không thấy tín hiệu (kiểm chứng phòng).
-- **Bộ lập lịch hạn chót**: route cron `POST /api/cron/due-date-reminders` (Bearer CRON_SECRET) được driver trong `server.ts` gọi mỗi 15 phút; chọn thẻ đến hạn/24h hoặc quá hạn còn hoạt động, dedup theo `@@unique([cardId, userId, milestone])`; 20 trường hợp kiểm thử đơn vị cho milestone selection và các bộ lọc.
+- **Bộ lập lịch hạn chót**: route cron `POST /api/cron/due-date-reminders` (Bearer CRON_SECRET) được driver trong `server.ts` gọi mỗi 15 phút; chọn thẻ đến hạn/24h hoặc quá hạn còn hoạt động, dedup theo `@@unique([cardId, userId, milestone])`; 18 trường hợp kiểm thử đơn vị cho milestone selection và các bộ lọc.
 
 ### 4.8 Giao diện người dùng và design system
 
@@ -839,7 +839,7 @@ Trong quá trình hiện thực, có nhiều vấn đề kỹ thuật sâu đư�
 
 **Vấn đề**: sau mỗi cú kéo thả, client thực hiện tới ba lần render toàn bảng (optimistic set, revalidatePath, echo socket), làm drop trên bảng 90 thẻ chậm 1561ms (1396ms JS main thread).
 **Giải pháp**: (1) dedupe self-echo cho `applyRemoteCardMoved`/`applyRemoteListMoved` (sự kiện mô tả trạng thái store đã phản ánh thì bỏ qua); (2) bỏ `revalidatePath` ở đúng ba action reorder/move thuần — store lạc quan là thẩm quyền, client khác hội tụ qua socket; (3) bất biến hoãn kéo thả giữ nguyên như rào an toàn (sự kiện cấu trúc hoãn khi đang kéo, đồng bộ lại bằng `router.refresh()` khi thả).
-**Kết quả**: loại hai trong ba lần render thừa; kiểm chứng bởi `tests/board-store.test.ts` (37 ca) và E2E two-client (slice 2).
+**Kết quả**: loại hai trong ba lần render thừa; kiểm chứng bởi `tests/board-store.test.ts` (54 ca) và E2E two-client (slice 2).
 
 #### 4.9.2 Quyết định 0015 — Toàn vẹn vị trí thẻ (partial unique index + normalize collision-safe)
 
@@ -891,7 +891,7 @@ Kiểm thử được tổ chức theo hình chóp bốn tầng, mỗi tầng tr
 3. **Kiểm thử thành phần giao diện (RTL)** — Vitest 2 dự án `components` (happy-dom): kiểm thử hành vi của các client component (dialog, bảng điều khiển, hàng thành viên...) với Server Actions và `next/navigation` được mock, truy vấn theo vai trò (accessible queries) và `user-event`, không dùng snapshot.
 4. **Kiểm thử E2E** — Playwright, hai phiên trình duyệt (two-client) trên máy chủ và PostgreSQL thật: chứng minh các luồng người dùng hoàn chỉnh, đặc biệt là **đồng bộ thời gian thực giữa hai người dùng thật** và các thành phần server không thể render bằng RTL.
 
-Chỉ đạo xuyên suốt: **mỗi hợp đồng chức năng phải có bằng chứng kiểm thử** — được ghi trong `docs/TEST_MATRIX.md`, tài liệu ánh xạ từng hàng hợp đồng tới tệp kiểm thử và số trường hợp tương ứng. Các con số dưới đây là số liệu **đọc từ kho và TEST_MATRIX tại thời điểm viết báo cáo** (cổng cuối cùng 02/08/2026): **1.404 bài kiểm thử đơn vị/tích hợp xanh trên 90 tệp**, **155 bài RTL trên 14 bộ kiểm thử**, **36 bài E2E xanh** trên 15 tệp spec.
+Chỉ đạo xuyên suốt: **mỗi hợp đồng chức năng phải có bằng chứng kiểm thử** — được ghi trong `docs/TEST_MATRIX.md`, tài liệu ánh xạ từng hàng hợp đồng tới tệp kiểm thử và số trường hợp tương ứng. Các con số dưới đây là số liệu **đọc từ kho và TEST_MATRIX tại thời điểm viết báo cáo** (cổng cuối cùng 02/08/2026): **1.404 bài kiểm thử xanh** (Vitest, 90 tệp — gồm unit, tích hợp và 301 bài RTL trên 33 tệp), **36 bài E2E xanh** trên 15 tệp spec. [XÁC MINH: trạng thái "xanh" của bộ kiểm thử và tổng 1.404 bài được lấy từ kết quả cổng CI ngày 02/08/2026 — số liệu cổng, không phải đếm tĩnh trên mã nguồn.]
 
 ### 5.2 Kiểm thử đơn vị và tích hợp
 
@@ -899,30 +899,32 @@ Các nhóm kiểm thử chính và số trường hợp (đọc từ `docs/TEST_
 
 | Nhóm | Tệp | Số trường hợp | Điểm chứng minh |
 | --- | --- | --- | --- |
-| Ranh giới bảo mật Server Action (A1/A2/A3 + positive control) | `tests/server-actions/{board,list-card,workspace,analytics-read}.test.ts` | 118 (26 action ghi + 2 action đọc) | Mọi mutation có verifySession + cổng quyền + cô lập workspace; `moveCardAction` từ chối workspace khác |
-| Ma trận RBAC | `tests/server-actions/rbac-matrix.test.ts` | 142 | Vai trò × thao tác theo roles thật + UI map + copy hợp đồng khớp nhau |
-| Board store (remote apply + drag-defer + dedupe self-echo) | `tests/board-store.test.ts` | 37 | Bất biến hoãn kéo thả, echo dedupe |
-| Sự kiện lịch sử thẻ | `lib/card-history.test.ts` | 16 | Dựng sự kiện created/moved/completed/reopened/estimate |
+| Ranh giới bảo mật Server Action (A1/A2/A3 + positive control) | `tests/server-actions/{board,list-card,workspace,analytics-read}.test.ts` | 143 (board 13 + list-card 116 + workspace 11 + analytics-read 3) | Mọi mutation có verifySession + cổng quyền + cô lập workspace; `moveCardAction` từ chối workspace khác |
+| Ma trận RBAC | `tests/server-actions/rbac-matrix.test.ts` | 145 | Vai trò × thao tác theo roles thật + UI map + copy hợp đồng khớp nhau |
+| Board store (remote apply + drag-defer + dedupe self-echo) | `tests/board-store.test.ts` | 54 | Bất biến hoãn kéo thả, echo dedupe |
+| Sự kiện lịch sử thẻ | `lib/card-history.test.ts` | 11 | Dựng sự kiện created/moved/completed/reopened/estimate |
 | Toán vị trí kéo thả | `lib/dnd/apply-drop.test.ts` | 15 | translateCardDrop/translateListDrop, giữ tham chiếu |
-| Bộ lọc/tìm kiếm bảng | `lib/board-filter.test.ts` | 14 | Lọc nhãn + tìm tiêu đề (AND) |
+| Bộ lọc/tìm kiếm bảng | `lib/board-filter.test.ts` | 37 | Lọc nhãn + tìm tiêu đề (AND) |
 | Phân quyền socket | `lib/realtime/auth.test.ts` | 19 | `getBoardMembershipRole`, `canUserJoinWorkspace`, fail-closed |
 | Presence | `lib/realtime/presence.test.ts` | 9 | Dedupe đa tab, last-tab-leaves, reconnect interleave |
-| Động cơ tự động hóa | `lib/automation/*.test.ts` | 101 (matcher 19, resolver 13, loop-guard 18, cycle-check 12, executor 31, effects 7, evaluator 16) [XÁC MINH: tổng 101 là con số trong TEST_MATRIX; đếm trực tiếp các khối `it()`/`test()` trong tệp cho 121 (executor 32, cộng thêm `view.test.ts` 4 ca)] | Trigger/điều kiện, đích động, chống vòng lặp, thực thi, cô lập lỗi |
+| Động cơ tự động hóa | `lib/automation/*.test.ts` | 101 (matcher 19, resolver 13, loop-guard 18, cycle-check 12, executor 32, effects 7, evaluator 16) [XÁC MINH: tổng 101 là con số trong TEST_MATRIX; đếm trực tiếp các khối `it()`/`test()` cho 121 — 19+13+18+12+32+7+16 = 117 trong `lib/automation/*`, cộng thêm `view.test.ts` 4 ca] | Trigger/điều kiện, đích động, chống vòng lặp, thực thi, cô lập lỗi |
 | Automation scheduled | `tests/automation-scheduled.test.ts` | 8 | Due-date-approaching, dedup hai tầng |
-| Quản lý luật (Server Action) | `tests/server-actions/automation-rules.test.ts` | 34 | Admin-only + đọc cho mọi thành viên + Zod |
+| Quản lý luật (Server Action) | `tests/server-actions/automation-rules.test.ts` | 42 | Admin-only + đọc cho mọi thành viên + Zod |
 | Cô lập lỗi automation | `tests/server-actions/automation-failure-isolation.test.ts` | 4 | Mutation chính không bị rollback bởi đích lỗi thời |
-| Checklist | `tests/server-actions/checklist.test.ts` | 22 | A1/A2/A3 cho 5 action + positive control |
+| Checklist | `tests/server-actions/checklist.test.ts` | 24 | A1/A2/A3 cho 5 action + positive control |
 | Vòng đời danh sách | `tests/server-actions/list-lifecycle.test.ts` | 43 | A1/A2/A3, cổng Cloudinary, live-cards, FOR UPDATE |
 | Quản lý thành viên | `tests/server-actions/members.test.ts` + `lib/workspace-members.test.ts` | 21 + 7 | Chặn mất admin cuối, khóa tư vấn |
-| Nhắc hạn chót | `lib/due-date-reminders.test.ts` | 20 | Milestone selection, dedup, SELECT predicate |
-| Thông báo | `lib/notification.test.ts` | 10 | notifyMentioned/notifyDueDate, email failure graceful |
-| Analytics engine | `lib/analytics/engine.test.ts` | 5 | Burndown, lead time, overdue, reopen, coverage |
+| Nhắc hạn chót | `lib/due-date-reminders.test.ts` | 18 | Milestone selection, dedup, SELECT predicate |
+| Thông báo | `lib/notification.test.ts` | 17 | notifyMentioned/notifyDueDate, email failure graceful |
+| Analytics engine | `lib/analytics/engine.test.ts` | 13 | Burndown, lead time, overdue, reopen, coverage |
 | Xuất CSV | `tests/analytics-export.test.ts` | 7 | Escaping + formula-injection guard |
 | Nhãn | `lib/schemas/label.test.ts` + `lib/label.test.ts` | 8 + 6 | Schema, CRUD, dedupe gắn, tách nhãn |
 | Khôi phục/undo | `tests/server-actions/undo-restore.test.ts`, `lib/undo.test.ts`, `tests/db-undo-race-proof.test.ts` | 13 + 16 + 3 | Race "list cha bị lưu trữ" trên PostgreSQL thật (interleaving) |
 | Today / My Work | `lib/today.test.ts` + `tests/server-actions/today.test.ts` | 16 + 7 | Phân nhóm hạn chót (DST), lọc workspace từ memberships, không N+1 |
-| Quick capture | `lib/quick-capture.test.ts` + `tests/server-actions/quick-capture.test.ts` | 33 + 18 | Defaults, shortcut guards, optional fields trong cùng tx |
-| Bảo vệ chỉ mục/khóa DB | `tests/db-index-proof.test.ts` | 3 | Interleaving lock_timeout thật: producer lock, archiver lock, purge lock |
+| Quick capture | `lib/quick-capture.test.ts` + `tests/server-actions/quick-capture.test.ts` | 32 + 18 | Defaults, shortcut guards, optional fields trong cùng tx |
+| Bảo vệ chỉ mục/khóa DB | `tests/db-index-proof.test.ts` | 6 | Interleaving lock_timeout thật: producer lock, archiver lock, purge lock |
+
+*Ghi chú: Các số liệu bảng 5.2 được hiệu chỉnh theo đếm trực tiếp trên mã nguồn ngày 03/08/2026.*
 
 #### 5.2.1 Bằng chứng PostgreSQL thật (không chỉ mock)
 
@@ -930,13 +932,13 @@ Một điểm khác biệt quan trọng so với kiểm thử thông thường: 
 
 ### 5.3 Kiểm thử thành phần giao diện (React Testing Library)
 
-RTL được dựng lên trên Vitest như dự án `components` (môi trường happy-dom, `vitest.workspace.ts`) với **155 bài kiểm thử trên 14 bộ kiểm thử client-component**, mỗi bộ mock Server Actions + `next/navigation`, truy vấn theo hành vi (accessible queries + `user-event`), không dùng snapshot. Phạm vi tiêu biểu:
+RTL được dựng lên trên Vitest như dự án `components` (môi trường happy-dom, `vitest.workspace.ts`) với **301 bài kiểm thử trên 33 tệp kiểm thử client-component** (components: 271 ca trên 25 tệp; app: 30 ca trên 8 tệp), mỗi bộ mock Server Actions + `next/navigation`, truy vấn theo hành vi (accessible queries + `user-event`), không dùng snapshot. Phạm vi tiêu biểu:
 
-- **Boards**: `board-filter` (5), `card-detail-sheet` (6 — autosave on-blur + guards + read-only), `card-completion-toggle` (10), `card-checklists-section` (24), `card-labels-section` (13), `card-attachments` (12).
+- **Boards**: `board-filter` (5), `card-detail-sheet` (8 — autosave on-blur + guards + read-only), `card-completion-toggle` (10), `card-checklists-section` (24), `card-labels-section` (13), `card-attachments` (12), `list-card-item` (8), `list-column` (7).
 - **Automation**: `rule-builder-dialog` (5), `rule-row` (16 — enable-toggle + delete + canManage + last-run), `automation-content` (11), `execution-log-panel` (16), `board-automation-dialog` (7).
 - **Members**: `member-row` (15 — đổi vai trò + xóa + gating last-admin/self), `invite-member-dialog` (4).
-- **Notifications**: `notification-dropdown` (11).
-- **Khác**: `today-view` (11), `quick-capture` (23), `quick-capture-shortcuts` (13), `undo-snackbar` (14), `archived-cards-dialog` (22), `board-header-wiring` (2), `authenticated-header-actions` (4).
+- **Notifications**: `notification-dropdown` (14).
+- **Khác**: `today-view` (11), `quick-capture` (23), `quick-capture-shortcuts` (13), `undo-snackbar` (14), `archived-cards-dialog` (22), `board-header-wiring` (4), `authenticated-header-actions` (5).
 
 Lưu ý: các thành phần server (RSC) không thể render bằng RTL, nên được phủ bởi tầng E2E.
 
@@ -977,7 +979,7 @@ Ví dụ tiêu biểu (đều được ghi nhận trong TEST_MATRIX):
 
 ### 5.6 Ma trận phân quyền RBAC
 
-`tests/server-actions/rbac-matrix.test.ts` — **142 trường hợp** — kiểm chứng toàn bộ ma trận vai trò × thao tác trên ba vai trò thật (`lib/permissions.ts`), theo ba lớp:
+`tests/server-actions/rbac-matrix.test.ts` — **145 trường hợp** (57 lớp L1 + 30 lớp L2 + 57 lớp L3 + 1 ngữ nghĩa AND) — kiểm chứng toàn bộ ma trận vai trò × thao tác trên ba vai trò thật (`lib/permissions.ts`), theo ba lớp:
 
 - **L1 — ma trận server**: mọi ô (vai trò, thực thể + động từ) của `admin`/`editor`/`viewer` với ngữ nghĩa AND (yêu cầu nhiều quyền cùng lúc);
 - **L2 — bản đồ UI**: `getBoardPagePermissionsForRole` (quyền hiển thị trang bảng) khớp với ma trận server;
@@ -1009,33 +1011,39 @@ Chính sách nhánh: `dev` là nhánh tích hợp, `main` chỉ qua PR (ruleset 
 
 ### 6.1 Môi trường triển khai
 
-Ứng dụng được triển khai production trên nền tảng **Railway** — tên miền dạng `*.up.railway.app` [XÁC MINH: tên miền cụ thể cần xác nhận lại tại thời điểm bảo vệ] — chạy server tùy chỉnh `server.ts` (khởi động qua `tsx` hoặc bản build Next.js production) bên trong container Node. Các dịch vụ liên quan: PostgreSQL 16 (dịch vụ quản lý bởi nền tảng), Resend cho email giao dịch và Cloudinary cho lưu trữ tệp đính kèm/ảnh bìa.
+Ứng dụng được triển khai production trên nền tảng **Railway** với URL thật **https://planora-production-0ffa.up.railway.app** (domain Railway, region Singapore — asia-southeast1-eqsg3a), chạy server tùy chỉnh `server.ts` bên trong container Node. Build theo **Dockerfile 3 giai đoạn (node:24-slim)** được khai báo trong `railway.json` (builder Dockerfile); `scripts/docker-entrypoint.sh` chạy `npx prisma migrate deploy` (idempotent) **trước** `npm run start`, đảm bảo 14/14 migration đã được áp dụng trên PostgreSQL 16 in-project của Railway. Các dịch vụ liên quan: PostgreSQL 16 (dịch vụ in-project do nền tảng quản lý), Resend cho email giao dịch và Cloudinary cho lưu trữ tệp đính kèm/ảnh bìa.
 
-Khác biệt quan trọng với triển khai mặc định của Next.js: ứng dụng **không thể chạy `next start` đơn thuần** vì cần Socket.io trên cùng cổng — do đó script `npm run start` khởi động `NODE_ENV=production tsx server.ts`. Trước khi khởi động, cần chạy `npx prisma migrate deploy` để áp dụng 14 migration lên cơ sở dữ liệu production.
+Khác biệt quan trọng với triển khai mặc định của Next.js: ứng dụng **không thể chạy `next start` đơn thuần** vì cần Socket.io trên cùng cổng — do đó script `npm run start` khởi động `NODE_ENV=production tsx server.ts`, sau khi entrypoint đã hoàn tất migrate deploy lên cơ sở dữ liệu production.
 
 ### 6.2 Cấu hình môi trường và cơ sở dữ liệu
 
 Các biến môi trường bắt buộc (danh sách đầy đủ trong `.env.example`):
 
 ```bash
-DATABASE_URL="postgresql://user:password@host:5432/dbname?schema=public"
-BETTER_AUTH_SECRET="<openssl rand -base64 32>"
-BETTER_AUTH_URL="https://<domain>"
-NEXT_PUBLIC_APP_URL="https://<domain>"
+DATABASE_URL="postgresql://user:password@host:5432/dbname?schema=public"   # PostgreSQL 16 in-project của Railway
+BETTER_AUTH_SECRET="<openssl rand -base64 32>"          # sinh mới tại thời điểm deploy
+BETTER_AUTH_URL="https://planora-production-0ffa.up.railway.app"
+NEXT_PUBLIC_APP_URL="https://planora-production-0ffa.up.railway.app"
 RESEND_API_KEY="re_..."           # bắt buộc ở production (xác minh email bắt buộc)
-EMAIL_FROM="Planora <noreply@domain>"
-CRON_SECRET="<openssl rand -base64 32>"   # kích hoạt driver cron nội bộ
+EMAIL_FROM="Planora <noreply@planora.hazeruno.dpdns.org>"  # domain đã verify DKIM/SPF/DMARC
+CRON_SECRET="<openssl rand -base64 32>"   # sinh mới; kích hoạt driver cron nội bộ
 NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME="..."
 NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET="..."
 CLOUDINARY_API_KEY="..."
 CLOUDINARY_API_SECRET="..."
 ```
 
+Điểm lưu ý build-time: các biến `NEXT_PUBLIC_*` là biến **build-time** — Dockerfile khai báo chúng qua `ARG`, và Railway inject các biến môi trường vào quá trình build, nên chúng được nhúng vào bundle client tại thời điểm build (không đọc lúc runtime). `BETTER_AUTH_SECRET` và `CRON_SECRET` được sinh mới tại thời điểm deploy; `RESEND_API_KEY` + `EMAIL_FROM` dùng domain đã verify **planora.hazeruno.dpdns.org**.
+
 Điểm lưu ý vận hành: vì xác minh email được bắt buộc ở mọi môi trường (quyết định 0023), `RESEND_API_KEY` phải được cấu hình hợp lệ — nếu thiếu, mọi tài khoản mới sẽ bị khóa ngoài hệ thống (rủi ro đã được ghi nhận trong chính quyết định). `SMTP_HOST` không có hiệu lực trong production (quyết định 0025), nên không thể vô tình chuyển thư production vào bể chứa dev.
 
 ### 6.3 Email và lưu trữ file
 
 - **Email (Resend + React Email)**: tất cả email giao dịch — xác minh email, đặt lại mật khẩu, lời mời workspace, nhắc hạn chót — được render bằng template React (`emails/`) và gửi qua Resend. Trong phát triển/kiểm thử, transport chuyển sang nodemailer → Mailpit khi có `SMTP_HOST`.
+
+  Pipeline xác minh email đã được chứng minh end-to-end trên production ngày 03/08/2026: đăng ký tài khoản mới → Resend gửi email xác minh (SPF và DMARC đã được thêm vào DNS Cloudflare cho domain gửi) → nhấp link xác minh → `emailVerified = true` → đăng nhập thành công.
+
+  **Hạn chế trung thực**: email xác minh có thể rơi vào hộp **Spam** của Gmail vì link xác minh nằm trên domain `up.railway.app` khác với domain gửi thư (`planora.hazeruno.dpdns.org`) — Gmail vẫn đánh dấu spam dù DKIM/SPF/DMARC đều pass. Mitigation khi demo: dùng tài khoản đã xác minh từ trước, hoặc mở link xác minh trực tiếp từ Resend dashboard (Deliveries).
 - **Lưu trữ file (Cloudinary)**: tệp đính kèm và ảnh bìa upload qua preset có cấu hình (`NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET`), lưu `cloudinaryPublicId`/`cloudinaryResourceType` để phục vụ bồi hoàn an toàn khi xóa vĩnh viễn danh sách (quyết định 0029).
 
 ### 6.4 Quy trình demo bảo vệ
@@ -1073,20 +1081,20 @@ Sau quá trình phát triển khoảng 5 tháng (285 commit từ 16/03/2026 đ�
 
 **Về chất lượng**
 
-- **1.404 bài kiểm thử đơn vị/tích hợp** (90 tệp) xanh, **155 bài kiểm thử RTL**, **36 bài E2E** hai phiên trình duyệt xanh; cổng CI `lint → tsc → test` chạy tự động trên mọi thay đổi.
-- Ma trận RBAC 142 trường hợp; ranh giới bảo mật 118 trường hợp A1/A2/A3; phân quyền socket 19 trường hợp — tất cả đều **sabotage-verified**.
+- **1.404 bài kiểm thử** (Vitest, 90 tệp — gồm unit, tích hợp và 301 bài kiểm thử thành phần giao diện RTL trên 33 tệp) xanh và **36 bài E2E** hai phiên trình duyệt xanh; cổng CI `lint → tsc → test` chạy tự động trên mọi thay đổi.
+- Ma trận RBAC 145 trường hợp; ranh giới bảo mật 143 trường hợp A1/A2/A3; phân quyền socket 19 trường hợp — tất cả đều **sabotage-verified**.
 - Bằng chứng PostgreSQL thật cho các cuộc đua đồng thời (lock FOR UPDATE, interleaving lock_timeout) — mức độ kiểm chứng vượt xa kiểm thử mock thông thường.
 - 31 quyết định thiết kế được ghi lại; tài liệu TEST_MATRIX ánh xạ từng hợp đồng chức năng tới bằng chứng kiểm thử cụ thể.
 
 **Về triển khai**
 
-- Sẵn sàng triển khai production trên Railway với migrate deploy, Resend, Cloudinary; quy trình demo bảo vệ lặp lại được với fixture 2 bảng/5 danh sách/7 thẻ và diễn tập tự động.
+- Đã triển khai production trên Railway (**https://planora-production-0ffa.up.railway.app**, Dockerfile 3 giai đoạn + migrate deploy tự động qua `docker-entrypoint.sh`) với Resend và Cloudinary; quy trình demo bảo vệ lặp lại được với fixture 2 bảng/5 danh sách/7 thẻ và diễn tập tự động.
 
 ### 7.2 Đánh giá tổng quan
 
 So với mục tiêu ban đầu, đồ án đã đạt được toàn bộ các mục tiêu chức năng cốt lõi và vượt mong đợi ở chiều sâu kỹ thuật:
 
-- **Về kiến trúc**: mô hình "Server Actions làm ranh giới ghi duy nhất + socket chỉ quảng bá" giúp kiểm soát bảo mật tập trung và dễ suy luận; hợp đồng 8 bước được thực thi nhất quán trên 26 action ghi dữ liệu (và 2 action đọc, theo ma trận US-006).
+- **Về kiến trúc**: mô hình "Server Actions làm ranh giới ghi duy nhất + socket chỉ quảng bá" giúp kiểm soát bảo mật tập trung và dễ suy luận; hợp đồng các bước được thực thi nhất quán trên mọi action ghi dữ liệu (theo ma trận US-006).
 - **Về độ tin cậy**: việc kết hợp transaction + unique index một phần + khóa FOR UPDATE cho các bất biến dữ liệu (vị trí, admin cuối, upload-đối-archived) là điểm mạnh nhất của đồ án, được chứng minh không chỉ bằng mock mà bằng interleaving trên PostgreSQL thật.
 - **Về thời gian thực**: bất biến hoãn kéo thả giải quyết đúng bài toán tinh tế nhất của ứng dụng kanban đa người dùng — không làm hỏng cú kéo thả của người đang thao tác khi người khác thay đổi cấu trúc.
 - **Về quy trình**: kỷ luật "hợp đồng → story → quyết định → bằng chứng" (docs/product, docs/stories, docs/decisions, TEST_MATRIX) giúp sản phẩm có hồ sơ kỹ thuật đầy đủ, đúng tinh thần một đồ án tốt nghiệp chất lượng.
@@ -1095,7 +1103,7 @@ So với mục tiêu ban đầu, đồ án đã đạt được toàn bộ các 
 
 Các hạn chế được ghi nhận trung thực (chủ yếu từ TEST_MATRIX — các hàng ở trạng thái `planned`):
 
-1. **Phủ kiểm thử thành phần chưa hoàn toàn**: RTL đã phủ tốt nhóm dialog/editor/row, nhưng còn trống ở nội dung bảng (`list-card-item`, `list-column` — cần wrapper DragDropContext), biểu đồ dashboard, và phần soạn bình luận.
+1. **Phủ kiểm thử thành phần chưa hoàn toàn**: RTL đã phủ tốt nhóm dialog/editor/row và nội dung bảng (`list-card-item` 8 ca, `list-column` 7 ca), nhưng còn trống ở biểu đồ dashboard và phần soạn bình luận.
 2. **Business logic của một số CRUD chưa unit-test đầy đủ**: nhiều thao tác (board CRUD, card members, comments, attachments) mới chỉ được chứng minh ở ranh giới bảo mật (A1/A2/A3); phần logic nghiệp vụ bên trong còn chưa được phủ.
 3. **Một số module chưa có E2E**: E2E tập trung vào thời gian thực; các luồng như vòng đời danh sách (E2E chưa implement), quản lý thành viên hai tài khoản (planned), activity log (chưa test), vẫn là khoảng trống.
 4. **Virtualization bị hoãn**: bảng lớn (hàng trăm thẻ) chưa có virtual scrolling — quyết định 0010 hoãn virtualization vì chưa có bằng chứng nhu cầu desktop; hiện phụ thuộc vào memoization và dedupe render.
@@ -1107,7 +1115,7 @@ Các hạn chế được ghi nhận trung thực (chủ yếu từ TEST_MATRIX 
 
 Dựa trên roadmap đã ghi nhận (initiative IN-04) và các quyết định tương lai:
 
-1. **Hoàn thiện phủ kiểm thử**: RTL cho list-column/list-card-item, biểu đồ dashboard, comment composer; integration test cho business logic các CRUD còn lại; E2E cho vòng đời danh sách và luồng thành viên hai tài khoản.
+1. **Hoàn thiện phủ kiểm thử**: RTL cho biểu đồ dashboard và comment composer; integration test cho business logic các CRUD còn lại; E2E cho vòng đời danh sách và luồng thành viên hai tài khoản.
 2. **Virtualization cho bảng lớn**: triển khai virtual scrolling khi có bằng chứng hiệu năng thực tế (đã có `scripts/perf-measure.ts` và bộ seed bảng lớn làm nền).
 3. **Mở rộng tự động hóa (US-080)**: trigger theo thay đổi thuộc tính (hạn chót, ước lượng, ưu tiên, stale-in-capture); cân nhắc webhooks và DSL tự do ở v2.
 4. **Mẫu thẻ và thẻ định kỳ (US-081/082)**: tái sử dụng template, lịch tạo thẻ định kỳ với cơ chế dedup rõ ràng.
