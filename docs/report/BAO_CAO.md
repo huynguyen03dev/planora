@@ -891,7 +891,7 @@ Kiểm thử được tổ chức theo hình chóp bốn tầng, mỗi tầng tr
 3. **Kiểm thử thành phần giao diện (RTL)** — Vitest 2 dự án `components` (happy-dom): kiểm thử hành vi của các client component (dialog, bảng điều khiển, hàng thành viên...) với Server Actions và `next/navigation` được mock, truy vấn theo vai trò (accessible queries) và `user-event`, không dùng snapshot.
 4. **Kiểm thử E2E** — Playwright, hai phiên trình duyệt (two-client) trên máy chủ và PostgreSQL thật: chứng minh các luồng người dùng hoàn chỉnh, đặc biệt là **đồng bộ thời gian thực giữa hai người dùng thật** và các thành phần server không thể render bằng RTL.
 
-Chỉ đạo xuyên suốt: **mỗi hợp đồng chức năng phải có bằng chứng kiểm thử** — được ghi trong `docs/TEST_MATRIX.md`, tài liệu ánh xạ từng hàng hợp đồng tới tệp kiểm thử và số trường hợp tương ứng. Các con số dưới đây là số liệu **đọc từ kho và TEST_MATRIX tại thời điểm viết báo cáo** (cổng cuối cùng 02/08/2026): **1.404 bài kiểm thử xanh** (Vitest, 90 tệp — gồm unit, tích hợp và 301 bài RTL trên 33 tệp), **36 bài E2E xanh** trên 15 tệp spec. [XÁC MINH: trạng thái "xanh" của bộ kiểm thử và tổng 1.404 bài được lấy từ kết quả cổng CI ngày 02/08/2026 — số liệu cổng, không phải đếm tĩnh trên mã nguồn.]
+Chỉ đạo xuyên suốt: **mỗi hợp đồng chức năng phải có bằng chứng kiểm thử** — được ghi trong `docs/TEST_MATRIX.md`, tài liệu ánh xạ từng hàng hợp đồng tới tệp kiểm thử và số trường hợp tương ứng. Các con số dưới đây là số liệu **đọc từ kho và TEST_MATRIX tại thời điểm viết báo cáo** (cổng cuối cùng 02/08/2026): **1.404 bài kiểm thử xanh** (Vitest, 90 tệp — gồm unit, tích hợp và 301 bài RTL trên 33 tệp), **36 bài E2E xanh** trên 15 tệp spec. [XÁC MINH: trạng thái "xanh" của bộ kiểm thử và tổng 1.404 bài được lấy từ kết quả cổng CI ngày 02/08/2026 — và được tái xác minh bằng một lần chạy đầy đủ `npm test` trên máy local ngày 03/08/2026 (90 tệp / 1.404 bài đều passed) cùng các lần chạy CI và E2E trên GitHub Actions (cả hai workflow success trên nhánh dev ngày 03/08/2026). Số liệu cổng, không phải đếm tĩnh trên mã nguồn.]
 
 ### 5.2 Kiểm thử đơn vị và tích hợp
 
@@ -924,7 +924,7 @@ Các nhóm kiểm thử chính và số trường hợp (đọc từ `docs/TEST_
 | Quick capture | `lib/quick-capture.test.ts` + `tests/server-actions/quick-capture.test.ts` | 32 + 18 | Defaults, shortcut guards, optional fields trong cùng tx |
 | Bảo vệ chỉ mục/khóa DB | `tests/db-index-proof.test.ts` | 6 | Interleaving lock_timeout thật: producer lock, archiver lock, purge lock |
 
-*Ghi chú: Các số liệu bảng 5.2 được hiệu chỉnh theo đếm trực tiếp trên mã nguồn ngày 03/08/2026.*
+*Ghi chú: Các số liệu bảng 5.2 được hiệu chỉnh theo đếm trực tiếp trên mã nguồn ngày 03/08/2026; tổng 1.404 bài (90 tệp) được tái xác minh bằng chạy `npm test` đầy đủ cùng ngày.*
 
 #### 5.2.1 Bằng chứng PostgreSQL thật (không chỉ mock)
 
