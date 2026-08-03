@@ -39,8 +39,16 @@ const h = vi.hoisted(() => {
       createBoard: vi.fn(),
       updateBoard: vi.fn(),
       deleteBoard: vi.fn(),
+      toggleBoardStar: vi.fn(),
     },
-    db: {},
+    db: {
+      // `isWorkspaceMember` (the gate for toggleBoardStarAction) queries the
+      // DB membership row directly — there is no better-auth seam to mock.
+      workspaceMember: { findFirst: vi.fn() },
+    },
+    workspace: {
+      createWorkspaceForCurrentUser: vi.fn(),
+    },
     verifySession: vi.fn(async () => {
       if (!state.authed || !state.callerId) {
         // mirrors dal.verifySession redirecting an unauthenticated caller
@@ -62,8 +70,11 @@ vi.mock("@/lib/board", () => ({
   createBoard: h.board.createBoard,
   updateBoard: h.board.updateBoard,
   deleteBoard: h.board.deleteBoard,
+  toggleBoardStar: h.board.toggleBoardStar,
 }));
-vi.mock("@/lib/workspace", () => ({ createWorkspaceForCurrentUser: vi.fn() }));
+vi.mock("@/lib/workspace", () => ({
+  createWorkspaceForCurrentUser: h.workspace.createWorkspaceForCurrentUser,
+}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/headers", () => ({ headers: vi.fn(async () => new Headers()) }));
 
@@ -79,6 +90,8 @@ import {
   createBoardAction,
   updateBoardAction,
   deleteBoardAction,
+  toggleBoardStarAction,
+  createWorkspaceAction,
 } from "@/app/(authenticated)/(dashboard)/boards/actions";
 
 /** Put a caller on the board: authenticated, member of `ws` with `role`. */
@@ -100,6 +113,7 @@ beforeEach(() => {
   h.state.callerId = null;
   h.state.authed = true;
   h.state.membership.clear();
+  h.db.workspaceMember.findFirst.mockResolvedValue(null);
 });
 
 describe("updateBoardAction — security boundary", () => {
@@ -250,5 +264,115 @@ describe("createBoardAction — security boundary (workspaceId from input)", () 
 
     expect(result).toEqual({ success: true, boardId: "new-board" });
     expect(h.board.createBoard).toHaveBeenCalled();
+  });
+});
+
+describe("toggleBoardStarAction — security boundary (member-any via isWorkspaceMember)", () => {
+  it("A1 auth: unauthenticated caller never reaches a write", async () => {
+    signOut();
+    h.board.getBoardById.mockResolvedValue(boardFixture(WS_A));
+
+    await expect(toggleBoardStarAction(BOARD_UUID)).rejects.toThrow();
+
+    expect(h.board.getBoardById).not.toHaveBeenCalled();
+    expectNoWrites(h.board.toggleBoardStar);
+  });
+
+  it("A2 access: a non-member of the board's workspace is denied (member-any gate)", async () => {
+    // Starring gates on `isWorkspaceMember` — any role passes, so the deny
+    // dimension is non/foreign membership rather than role.
+    signInAs("outsider-user", WS_B, "admin"); // real member of WS_B only
+    h.board.getBoardById.mockResolvedValue(boardFixture(WS_A));
+
+    const result = await toggleBoardStarAction(BOARD_UUID);
+
+    expect(result).toEqual({ success: false, error: "Board not found" });
+    expectNoWrites(h.board.toggleBoardStar);
+  });
+
+  it("A3 isolation: the gate is consulted about the resource's workspace (WS_A), not the caller's own", async () => {
+    signInAs("cross-tenant-user", WS_B, "admin");
+    h.board.getBoardById.mockResolvedValue(boardFixture(WS_A));
+
+    const result = await toggleBoardStarAction(BOARD_UUID);
+
+    expect(result).toEqual({ success: false, error: "Board not found" });
+    // The board resolves to WS_A; the membership check must be scoped to that
+    // resource-derived workspace and the session user — never caller-supplied.
+    expect(h.db.workspaceMember.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: WS_A,
+          userId: "cross-tenant-user",
+        }),
+      }),
+    );
+    expectNoWrites(h.board.toggleBoardStar);
+  });
+
+  it("unknown board: a nonexistent board is denied before any membership query or write", async () => {
+    signInAs("member-user", WS_A, "admin");
+    h.board.getBoardById.mockResolvedValue(null);
+
+    const result = await toggleBoardStarAction(BOARD_UUID);
+
+    expect(result).toEqual({ success: false, error: "Board not found" });
+    expect(h.db.workspaceMember.findFirst).not.toHaveBeenCalled();
+    expectNoWrites(h.board.toggleBoardStar);
+  });
+
+  it("allow (positive control): a WS-A member of ANY role stars the board", async () => {
+    // viewer is sufficient — the gate is membership, not role.
+    signInAs("viewer-user", WS_A, "viewer");
+    h.board.getBoardById.mockResolvedValue(boardFixture(WS_A));
+    h.db.workspaceMember.findFirst.mockResolvedValue({ id: "membership-1" });
+    h.board.toggleBoardStar.mockResolvedValue(true);
+
+    const result = await toggleBoardStarAction(BOARD_UUID);
+
+    expect(result).toEqual({ success: true, starred: true });
+    expect(h.board.toggleBoardStar).toHaveBeenCalledWith("viewer-user", BOARD_UUID);
+  });
+});
+
+describe("createWorkspaceAction — security boundary (session-only gate; no workspace to scope)", () => {
+  // NOTE: production enforces ONLY verifySession() + Zod here — the action
+  // creates a brand-new workspace FOR the current user, so there is no target
+  // workspace to scope and no role to check. A2/A3 have no production
+  // counterpart, so the deny dimension is authentication only; the action is
+  // tested exactly as it gates, with no invented permission check.
+  it("A1 auth: unauthenticated caller never reaches a write", async () => {
+    signOut();
+
+    await expect(createWorkspaceAction(formData({ workspaceName: "New Workspace" }))).rejects.toThrow();
+
+    expectNoWrites(h.workspace.createWorkspaceForCurrentUser);
+  });
+
+  it("validation: a too-short workspace name is rejected before any write", async () => {
+    signInAs("user", WS_A, "viewer");
+
+    const result = await createWorkspaceAction(formData({ workspaceName: "X" }));
+
+    expect(result).toEqual({
+      success: false,
+      error: "Workspace name must be at least 2 characters",
+    });
+    expectNoWrites(h.workspace.createWorkspaceForCurrentUser);
+  });
+
+  it("allow (positive control): an authenticated caller creates a workspace (trimmed name hits the seam)", async () => {
+    signInAs("user", WS_A, "viewer");
+    h.workspace.createWorkspaceForCurrentUser.mockResolvedValue({
+      id: "ws-new",
+      name: "Team",
+      slug: "team",
+    });
+
+    const result = await createWorkspaceAction(formData({ workspaceName: " Team " }));
+
+    expect(result).toEqual({ success: true, workspaceId: "ws-new" });
+    // The Zod schema trims before the write seam sees the name.
+    expect(h.workspace.createWorkspaceForCurrentUser).toHaveBeenCalledWith("Team");
   });
 });
