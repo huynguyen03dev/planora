@@ -727,6 +727,149 @@ describe("updateCardDueDateAction", () => {
     await updateCardDueDateAction(form());
     expect(h.db.$transaction).toHaveBeenCalled();
   });
+
+  // ── HIGH-1 (US-020): a dueDate change invalidates stale CardReminder rows ──
+  // The cron route's claim-first dedup keys on (cardId, userId, milestone): a
+  // stale row for the OLD milestone would P2002-skip the fresh DUE_SOON for the
+  // NEW date — so the old reminder would never fire again but the new one would
+  // be silently swallowed. The action must delete the card's reminder rows in
+  // the SAME transaction that rewrites dueDate. These cases run the real
+  // transaction body against a fake tx (tg2 pattern) and assert the actual DB
+  // effects. (The matrix previously cited validation.md — prose, not a test.)
+
+  it("HIGH-1 push-out: dueDate moved beyond the approach window deletes stale reminders in the same tx as the date write", async () => {
+    signInAs("u", WS_A, "editor");
+    const fx = cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID });
+    // A DUE_SOON row for the old milestone could already exist; the new date is
+    // far outside the 24h approach window.
+    fx.card.dueDate = new Date("2025-12-20T00:00:00.000Z");
+    h.getCardWithListAndMembers.mockResolvedValue(fx);
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+
+    const r = await updateCardDueDateAction(formData({ cardId: CARD_ID, dueDate: "2026-06-01" }));
+
+    expect(r).toEqual({ success: true });
+    // Every stale row for the card is removed — not just the old milestone's.
+    expect(tx.cardReminder.deleteMany).toHaveBeenCalledWith({ where: { cardId: CARD_ID } });
+    // ...and the card is rewritten with the new date inside the same tx.
+    expect(tx.card.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: CARD_ID }),
+        data: expect.objectContaining({ dueDate: new Date("2026-06-01T00:00:00.000Z") }),
+      }),
+    );
+    // Ordering matters: the stale row must be gone before the new dueDate is
+    // visible to the next cron tick, so the fresh DUE_SOON claim never sees it.
+    expect(tx.cardReminder.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.card.update.mock.invocationCallOrder[0],
+    );
+    // The plain (non-tx) card.update must NOT fire — the write went through the tx.
+    expect(h.db.card.update).not.toHaveBeenCalled();
+    // The change is recorded as DUE_DATE_CHANGED with before/after metadata.
+    expect(tx.cardHistoryEvent.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          eventType: "DUE_DATE_CHANGED",
+          cardId: CARD_ID,
+          metadata: expect.objectContaining({
+            previousDueDate: "2025-12-20T00:00:00.000Z",
+            nextDueDate: "2026-06-01T00:00:00.000Z",
+          }),
+        }),
+      ],
+      skipDuplicates: false,
+    });
+  });
+
+  it("HIGH-1 clear: dueDate cleared removes stale reminders and nulls the card date", async () => {
+    signInAs("u", WS_A, "editor");
+    const fx = cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID });
+    fx.card.dueDate = new Date("2026-01-01T00:00:00.000Z");
+    h.getCardWithListAndMembers.mockResolvedValue(fx);
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+
+    // The client omits the dueDate field to clear (see card-detail-sheet).
+    const r = await updateCardDueDateAction(formData({ cardId: CARD_ID }));
+
+    expect(r).toEqual({ success: true });
+    // Cancelling the date cancels the unsent reminders — the old milestone can
+    // never fire.
+    expect(tx.cardReminder.deleteMany).toHaveBeenCalledWith({ where: { cardId: CARD_ID } });
+    expect(tx.card.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: CARD_ID }),
+        data: expect.objectContaining({ dueDate: null }),
+      }),
+    );
+    expect(tx.cardHistoryEvent.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          eventType: "DUE_DATE_CLEARED",
+          cardId: CARD_ID,
+          metadata: expect.objectContaining({
+            previousDueDate: "2026-01-01T00:00:00.000Z",
+            nextDueDate: null,
+          }),
+        }),
+      ],
+      skipDuplicates: false,
+    });
+  });
+
+  it("HIGH-1 set: assigning a dueDate to a never-dated card clears any stale rows so a fresh DUE_SOON is claimable", async () => {
+    signInAs("u", WS_A, "editor");
+    const fx = cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID });
+    fx.card.dueDate = null; // card never had a due date
+    h.getCardWithListAndMembers.mockResolvedValue(fx);
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+
+    const r = await updateCardDueDateAction(formData({ cardId: CARD_ID, dueDate: "2026-06-01" }));
+
+    expect(r).toEqual({ success: true });
+    // Defensive deleteMany still runs (no-op when nothing exists) so the new
+    // date's DUE_SOON claim can never collide with a leftover row.
+    expect(tx.cardReminder.deleteMany).toHaveBeenCalledWith({ where: { cardId: CARD_ID } });
+    expect(tx.cardHistoryEvent.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          eventType: "DUE_DATE_SET",
+          cardId: CARD_ID,
+          metadata: expect.objectContaining({
+            previousDueDate: null,
+            nextDueDate: "2026-06-01T00:00:00.000Z",
+          }),
+        }),
+      ],
+      skipDuplicates: false,
+    });
+  });
+
+  it("dedup invariant: re-submitting the SAME dueDate leaves CardReminder rows untouched", async () => {
+    signInAs("u", WS_A, "editor");
+    const fx = cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID });
+    fx.card.dueDate = new Date("2026-01-01T00:00:00.000Z");
+    h.getCardWithListAndMembers.mockResolvedValue(fx);
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+
+    const r = await updateCardDueDateAction(formData({ cardId: CARD_ID, dueDate: "2026-01-01" }));
+
+    expect(r).toEqual({ success: true });
+    // No date change → no transaction, no reminder wipe: the cron route's
+    // claim-first P2002 dedup for already-sent milestones stays intact.
+    expect(h.db.$transaction).not.toHaveBeenCalled();
+    expect(tx.cardReminder.deleteMany).not.toHaveBeenCalled();
+    expect(h.db.card.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: CARD_ID }),
+        data: expect.objectContaining({ dueDate: new Date("2026-01-01T00:00:00.000Z") }),
+      }),
+    );
+    expect(tx.cardHistoryEvent.createMany).not.toHaveBeenCalled();
+  });
 });
 
 describe("moveCardAction (two-workspace — the sharpest case)", () => {
