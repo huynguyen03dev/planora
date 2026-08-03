@@ -16,7 +16,7 @@
 
 ---
 
-**Giảng viên hướng dẫn:** Phạm Ngọc Hưng
+**Giảng viên hướng dẫn:** TS. Phạm Ngọc Hưng
 
 **Sinh viên thực hiện:** Nguyễn Quang Huy  
 **Mã số sinh viên:** 21010597  
@@ -32,7 +32,7 @@ Hà Nội, 2026
 
 ## LỜI CẢM ƠN
 
-Trước hết, em xin gửi lời cảm ơn chân thành nhất tới thầy **Phạm Ngọc Hưng**, giảng viên hướng dẫn của đồ án, người đã tận tình định hướng, góp ý và đồng hành cùng em trong suốt quá trình thực hiện đề tài. Những lời khuyên về mặt kỹ thuật, phương pháp làm việc cũng như cách thức trình bày vấn đề của thầy đã giúp em hoàn thiện cả về sản phẩm lẫn bài báo cáo này.
+Trước hết, em xin gửi lời cảm ơn chân thành nhất tới thầy **TS. Phạm Ngọc Hưng**, giảng viên hướng dẫn của đồ án, người đã tận tình định hướng, góp ý và đồng hành cùng em trong suốt quá trình thực hiện đề tài. Những lời khuyên về mặt kỹ thuật, phương pháp làm việc cũng như cách thức trình bày vấn đề của thầy đã giúp em hoàn thiện cả về sản phẩm lẫn bài báo cáo này.
 
 Em cũng xin gửi lời cảm ơn tới toàn thể các thầy cô trong Khoa Công nghệ thông tin, Trường Đại học Phenikaa đã truyền đạt những kiến thức nền tảng về công nghệ phần mềm, cơ sở dữ liệu và kỹ thuật lập trình trong suốt thời gian học tập tại trường.
 
