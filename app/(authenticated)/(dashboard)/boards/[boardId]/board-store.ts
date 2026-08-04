@@ -10,6 +10,7 @@ import type {
   CardCreatedPayload,
   CardLabelsUpdatedPayload,
   CardMembersUpdatedPayload,
+  CardMetaUpdatedPayload,
   CardMovedPayload,
   CardUpdatedPayload,
   CommentCreatedPayload,
@@ -112,6 +113,9 @@ export type SelectedCardData = {
     email: string;
     image: string | null;
   }>;
+  /** Label set of the open card — patched live by card:labels-updated (F4) so
+   *  the detail sheet can render remote label changes without a reload. */
+  labels: CardLabel[];
 };
 
 type BoardStore = {
@@ -182,6 +186,7 @@ type BoardStore = {
   applyRemoteCardCompletionUpdated: (payload: CardCompletionUpdatedPayload) => void;
   applyRemoteCardLabelsUpdated: (payload: CardLabelsUpdatedPayload) => void;
   applyRemoteCardMembersUpdated: (payload: CardMembersUpdatedPayload) => void;
+  applyRemoteCardMetaUpdated: (payload: CardMetaUpdatedPayload) => void;
   applyRemoteCommentCreated: (payload: CommentCreatedPayload) => void;
   applyRemotePresence: (payload: BoardPresencePayload) => void;
 };
@@ -700,8 +705,10 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       const owningList = state.lists.find((list) =>
         list.cards.some((card) => card.id === payload.cardId),
       );
+      const isSelected =
+        state.selectedCardId === payload.cardId && Boolean(state.selectedCard);
 
-      if (!owningList) {
+      if (!owningList && !isSelected) {
         return state;
       }
 
@@ -711,7 +718,9 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       // re-render. The name/color comparison matters: a label rename/recolor
       // keeps the id set unchanged, so an id-only check would wrongly swallow it
       // and leave stale chips (US-010).
-      const current = owningList.cards.find((card) => card.id === payload.cardId);
+      const current = owningList
+        ? owningList.cards.find((card) => card.id === payload.cardId)
+        : undefined;
       if (
         current &&
         current.labels.length === payload.labels.length &&
@@ -725,20 +734,30 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
         return state;
       }
 
-      const newLists = state.lists.map((list) => {
-        if (!list.cards.some((card) => card.id === payload.cardId)) {
-          return list;
-        }
+      const newLists = owningList
+        ? state.lists.map((list) => {
+            if (!list.cards.some((card) => card.id === payload.cardId)) {
+              return list;
+            }
 
-        return {
-          ...list,
-          cards: list.cards.map((card) =>
-            card.id === payload.cardId ? { ...card, labels: payload.labels } : card,
-          ),
-        };
-      });
+            return {
+              ...list,
+              cards: list.cards.map((card) =>
+                card.id === payload.cardId ? { ...card, labels: payload.labels } : card,
+              ),
+            };
+          })
+        : state.lists;
 
-      return { lists: newLists };
+      // F4: also patch the open detail sheet's label set when this is the card
+      // being viewed — mirrors how members are patched, so a remote label
+      // attach/detach (or rename/recolor fan-out) reaches the sheet live.
+      const newSelectedCard =
+        isSelected && state.selectedCard
+          ? { ...state.selectedCard, labels: payload.labels }
+          : state.selectedCard;
+
+      return { lists: newLists, selectedCard: newSelectedCard };
     });
   },
 
@@ -785,6 +804,97 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
           assignableMembers: nextAssignable,
         },
       };
+    });
+  },
+
+  // In-place display-metadata patch (F3): one or more of a card's due date,
+  // priority, estimate, cover changed remotely. Safe to apply mid-drag — it
+  // never reorders the list array (mirrors card:completion-updated / labels).
+  // dueDate arrives as an ISO string (JSON-safe); rehydrate to a Date to match
+  // the store's card shape. estimateHours exists only on the open detail sheet,
+  // so it is applied to selectedCard only; the rest patch both faces.
+  applyRemoteCardMetaUpdated: (payload) => {
+    const { boardId } = get();
+
+    if (boardId !== payload.boardId) {
+      return;
+    }
+
+    const { cardId, fields } = payload;
+
+    const dueDate =
+      fields.dueDate === undefined ? undefined : fields.dueDate ? new Date(fields.dueDate) : null;
+    // Only the fields the payload carries are patched — the rest of the card is
+    // untouched.
+    const listPatch: Partial<Pick<ListWithCards["cards"][number], "coverImage" | "priority" | "dueDate">> = {};
+    if (fields.coverImage !== undefined) listPatch.coverImage = fields.coverImage;
+    if (fields.priority !== undefined) listPatch.priority = fields.priority;
+    if (fields.dueDate !== undefined) listPatch.dueDate = dueDate;
+
+    const selectedPatch: Partial<Pick<SelectedCardData["card"], "estimateHours" | "coverImage" | "priority" | "dueDate">> = {
+      ...listPatch,
+    };
+    if (fields.estimateHours !== undefined) selectedPatch.estimateHours = fields.estimateHours;
+
+    set((state) => {
+      const owningList = state.lists.find((list) =>
+        list.cards.some((card) => card.id === cardId),
+      );
+      const isSelected = state.selectedCardId === cardId && Boolean(state.selectedCard);
+
+      if (!owningList && !isSelected) {
+        return state;
+      }
+
+      // Self-echo dedupe: skip the re-render when the store already reflects
+      // every incoming field (the actor's own echo after router.refresh already
+      // reseeded it). Dates compare by instant, not reference.
+      const sameMetaValue = (a: unknown, b: unknown) =>
+        a instanceof Date && b instanceof Date ? a.getTime() === b.getTime() : a === b;
+      let unchanged = true;
+      if (owningList) {
+        const current = owningList.cards.find((card) => card.id === cardId)!;
+        for (const key of Object.keys(listPatch) as Array<keyof typeof listPatch>) {
+          if (!sameMetaValue(current[key], listPatch[key])) {
+            unchanged = false;
+            break;
+          }
+        }
+      }
+      if (unchanged && isSelected && state.selectedCard) {
+        for (const key of Object.keys(selectedPatch) as Array<keyof typeof selectedPatch>) {
+          if (!sameMetaValue(state.selectedCard.card[key], selectedPatch[key])) {
+            unchanged = false;
+            break;
+          }
+        }
+      }
+      if (unchanged) {
+        return state;
+      }
+
+      const newLists =
+        owningList && Object.keys(listPatch).length > 0
+          ? state.lists.map((list) => {
+              if (!list.cards.some((card) => card.id === cardId)) {
+                return list;
+              }
+
+              return {
+                ...list,
+                cards: list.cards.map((card) =>
+                  card.id === cardId ? { ...card, ...listPatch } : card,
+                ),
+              };
+            })
+          : state.lists;
+
+      const newSelectedCard =
+        isSelected && state.selectedCard
+          ? { ...state.selectedCard, card: { ...state.selectedCard.card, ...selectedPatch } }
+          : state.selectedCard;
+
+      return { lists: newLists, selectedCard: newSelectedCard };
     });
   },
 

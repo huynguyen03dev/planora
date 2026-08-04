@@ -49,20 +49,38 @@ app.prepare().then(() => {
     const userId = (socket.data as SocketData).userId;
     socket.join(ROOMS.user(userId));
 
+    // Per-socket "wanted" sets: which boards/workspaces this client currently
+    // wants to be in (F1). board:join / workspace:join are async (authz query),
+    // so a fast A→B navigation (or a React StrictMode double-mount) can emit
+    // leave *before* the join's await resolves. Recording intent synchronously
+    // lets the post-await code detect that the client already left — otherwise
+    // the join would still call socket.join() + presenceRegistry.add(), leaving
+    // a ghost room membership / watcher that never gets cleaned until
+    // disconnect.
+    const wantedBoards = new Set<string>();
+    const wantedWorkspaces = new Set<string>();
+
     socket.on("board:join", async (payload) => {
       const { boardId } = payload;
+      wantedBoards.add(boardId);
       // One query resolves both authorization (null = denied) and the role used
       // for the presence admin badge (US-047).
       const role = await getBoardMembershipRole(userId, boardId);
 
       if (!role) {
-        socket.emit("board:error", { message: "Not authorized to join this board" });
+        // The client may have navigated away while the authz query was in
+        // flight — don't error a socket that no longer wants this board.
+        if (socket.connected && wantedBoards.has(boardId)) {
+          socket.emit("board:error", { message: "Not authorized to join this board" });
+        }
         return;
       }
 
-      // The tab may have closed during the auth round-trip — don't register a
-      // watcher for a dead socket (no disconnect would ever clean it up).
-      if (!socket.connected) {
+      // The tab may have closed, or the client left the board, during the auth
+      // round-trip — don't join a room or register a watcher for a ghost
+      // (F1).
+      if (!socket.connected || !wantedBoards.has(boardId)) {
+        wantedBoards.delete(boardId);
         return;
       }
 
@@ -74,7 +92,7 @@ app.prepare().then(() => {
         data.profile = await getUserProfile(userId);
       }
       const profile = data.profile;
-      if (!profile || !socket.connected) {
+      if (!profile || !socket.connected || !wantedBoards.has(boardId)) {
         return;
       }
 
@@ -92,6 +110,7 @@ app.prepare().then(() => {
 
     socket.on("board:leave", (payload) => {
       const { boardId } = payload;
+      wantedBoards.delete(boardId);
       socket.leave(ROOMS.board(boardId));
 
       if (presenceRegistry.remove(boardId, socket.id, userId)) {
@@ -101,10 +120,21 @@ app.prepare().then(() => {
 
     socket.on("workspace:join", async (payload) => {
       const { workspaceId } = payload;
+      wantedWorkspaces.add(workspaceId);
+
       const canJoin = await canUserJoinWorkspace(userId, workspaceId);
 
       if (!canJoin) {
-        socket.emit("board:error", { message: "Not authorized to join this workspace" });
+        if (socket.connected && wantedWorkspaces.has(workspaceId)) {
+          socket.emit("board:error", { message: "Not authorized to join this workspace" });
+        }
+        return;
+      }
+
+      // Same race guard as board:join (F1): a workspace:leave processed during
+      // the authz round-trip must cancel the join.
+      if (!socket.connected || !wantedWorkspaces.has(workspaceId)) {
+        wantedWorkspaces.delete(workspaceId);
         return;
       }
 
@@ -113,6 +143,7 @@ app.prepare().then(() => {
 
     socket.on("workspace:leave", (payload) => {
       const { workspaceId } = payload;
+      wantedWorkspaces.delete(workspaceId);
       socket.leave(ROOMS.workspace(workspaceId));
     });
 

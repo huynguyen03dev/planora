@@ -77,6 +77,7 @@ import {
   emitCardLabelsUpdated,
   emitCardMembersUpdated,
   emitCardCompletionUpdated,
+  emitCardMetaUpdated,
   emitCommentCreated,
 } from "@/lib/realtime/server";
 import { notifyCardAssigned, notifyCommentOnCard, notifyMentioned } from "@/lib/notification";
@@ -1065,6 +1066,10 @@ export async function updateCardEstimateAction(
     }
 
     revalidatePath(`/boards/${snapshot.board.id}`);
+    emitCardMetaUpdated(snapshot.board.id, {
+      cardId,
+      fields: { estimateHours: estimateHours ?? null },
+    });
     emitAnalyticsRefresh(snapshot.board.workspaceId);
     return { success: true };
   } catch {
@@ -1320,6 +1325,13 @@ export async function updateCardDueDateAction(
     }
 
     revalidatePath(`/boards/${snapshot.board.id}`);
+    // F3: the due date is display metadata — push it live so other clients'
+    // card faces and due-status recomputes (card:completion-updated) stay in
+    // sync. ISO string on the wire (JSON-safe); the store rehydrates.
+    emitCardMetaUpdated(snapshot.board.id, {
+      cardId,
+      fields: { dueDate: nextIso },
+    });
     emitAnalyticsRefresh(snapshot.board.workspaceId);
     return { success: true };
   } catch {
@@ -1360,6 +1372,12 @@ export async function updateCardPriorityAction(
   try {
     const card = await updateCardPriority(cardId, priority);
     revalidatePath(`/boards/${result.list.boardId}`);
+    // F3: priority is display metadata — push it live so other clients' card
+    // faces stay in sync (previously only the actor refreshed).
+    emitCardMetaUpdated(result.list.boardId, {
+      cardId,
+      fields: { priority },
+    });
     return { success: true, card };
   } catch {
     return { success: false, error: "Failed to update priority. Please try again." };
@@ -1422,6 +1440,12 @@ export async function updateCardCoverAction(
   try {
     const card = await updateCardCover(cardId, parsedCoverImage);
     revalidatePath(`/boards/${result.list.boardId}`);
+    // F3: cover is display metadata — push it live so other clients' card faces
+    // stay in sync.
+    emitCardMetaUpdated(result.list.boardId, {
+      cardId,
+      fields: { coverImage: parsedCoverImage },
+    });
     return { success: true, card };
   } catch {
     return { success: false, error: "Failed to update card cover. Please try again." };
@@ -1528,6 +1552,12 @@ export async function setCardCoverAction(
     });
 
     revalidatePath(`/boards/${cardResult.board.id}`);
+    // F3: the upload set a cover — push it live so other clients' card faces
+    // stay in sync.
+    emitCardMetaUpdated(cardResult.board.id, {
+      cardId: parsedCardId,
+      fields: { coverImage: cloudinaryResult.secureUrl },
+    });
     return { success: true, card: result };
   } catch (error) {
     if (error instanceof Error && error.message === "LIST_ARCHIVED_OR_DELETED") {

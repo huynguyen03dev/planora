@@ -41,6 +41,7 @@ const h = vi.hoisted(() => {
       deleteBoard: vi.fn(),
       toggleBoardStar: vi.fn(),
     },
+    emitBoardArchived: vi.fn(),
     db: {
       // `isWorkspaceMember` (the gate for toggleBoardStarAction) queries the
       // DB membership row directly — there is no better-auth seam to mock.
@@ -75,6 +76,7 @@ vi.mock("@/lib/board", () => ({
 vi.mock("@/lib/workspace", () => ({
   createWorkspaceForCurrentUser: h.workspace.createWorkspaceForCurrentUser,
 }));
+vi.mock("@/lib/realtime/server", () => ({ emitBoardArchived: h.emitBoardArchived }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/headers", () => ({ headers: vi.fn(async () => new Headers()) }));
 
@@ -223,6 +225,20 @@ describe("deleteBoardAction — security boundary", () => {
 
     expect(result).toEqual({ success: true });
     expect(h.board.deleteBoard).toHaveBeenCalledWith(BOARD_UUID);
+    // F10: the board room must be signalled so open clients leave + re-render.
+    expect(h.emitBoardArchived).toHaveBeenCalledWith(BOARD_UUID, expect.any(String));
+    const archivedAt = h.emitBoardArchived.mock.calls[0][1] as string;
+    expect(Number.isNaN(Date.parse(archivedAt))).toBe(false);
+  });
+
+  it("F10: a denied delete never signals the board room", async () => {
+    signInAs("editor-user", WS_A, "editor");
+    h.board.getBoardById.mockResolvedValue(boardFixture(WS_A));
+
+    const result = await deleteBoardAction(BOARD_UUID);
+
+    expect(result).toEqual({ success: false, error: "Board not found" });
+    expect(h.emitBoardArchived).not.toHaveBeenCalled();
   });
 });
 

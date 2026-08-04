@@ -19,6 +19,7 @@ import {
   resolveWorkspaceMember,
   withWorkspaceAdminLock,
 } from "@/lib/workspace-members";
+import { kickUserSockets } from "@/lib/realtime/server";
 import {
   listWorkspaceMembershipsByUserId,
   setActiveWorkspaceForCurrentUser,
@@ -90,6 +91,13 @@ export async function removeMemberAction(input: unknown): Promise<ActionResult> 
       });
     });
 
+    // F2: the removed member must stop receiving board/workspace broadcasts
+    // immediately — their sockets stay in board rooms until disconnected.
+    // Forcing a disconnect drops them from every room + presence entry (via
+    // the reverse-index cleanup in server.ts); on the next page load the join
+    // gates re-run and deny them.
+    kickUserSockets(targetUserId);
+
     revalidatePath("/workspace");
     revalidatePath("/boards");
     return { success: true };
@@ -135,6 +143,12 @@ export async function updateMemberRoleAction(
         body: { memberId: target.memberId, role, organizationId: workspaceId },
       });
     });
+
+    // F2: a demoted member's sockets must re-join under the new role — until
+    // then their presence badge shows a stale role. Forcing a disconnect clears
+    // presence via the disconnect handler; the next load re-runs the join gates
+    // with the fresh role.
+    kickUserSockets(targetUserId);
 
     revalidatePath("/workspace");
     revalidatePath("/boards");
