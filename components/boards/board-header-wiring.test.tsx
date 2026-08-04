@@ -9,7 +9,7 @@
  * in board-header.tsx) makes these tests fail.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 
 // Mock heavy child dependencies so BoardHeader mounts in the test environment.
 vi.mock("@/app/(authenticated)/(dashboard)/boards/[boardId]/board-store", () => ({
@@ -48,6 +48,22 @@ vi.mock("@/components/workspace/automation/board-automation-dialog", () => ({
   BoardAutomationDialog: () => <div data-testid="board-automation" />,
 }))
 
+// U1: capture the props BoardHeader forwards to InviteMemberDialog when it
+// wires the Share button into the invite flow.
+let capturedInviteWorkspaceId: string | undefined
+
+vi.mock("@/components/workspace/members/invite-member-dialog", () => ({
+  InviteMemberDialog: (props: {
+    workspaceId: string
+    trigger?: React.ReactNode
+  }) => {
+    capturedInviteWorkspaceId = props.workspaceId
+    return (
+      <div data-testid="mocked-invite-dialog">{props.trigger}</div>
+    )
+  },
+}))
+
 import { BoardHeader } from "./board-header"
 
 const baseBoard = {
@@ -58,7 +74,12 @@ const baseBoard = {
 
 const emptyArchived: [] = []
 
-function renderBoard(opts: { canPermanentDelete?: boolean; omitProp?: boolean } = {}) {
+function renderBoard(opts: {
+  canPermanentDelete?: boolean
+  omitProp?: boolean
+  workspaceId?: string
+  canInviteMembers?: boolean
+} = {}) {
   const props: Record<string, unknown> = {
     board: baseBoard,
     canEdit: true,
@@ -72,6 +93,12 @@ function renderBoard(opts: { canPermanentDelete?: boolean; omitProp?: boolean } 
   if (!opts.omitProp) {
     props.canPermanentDelete = opts.canPermanentDelete ?? false
   }
+  if (opts.workspaceId !== undefined) {
+    props.workspaceId = opts.workspaceId
+  }
+  if (opts.canInviteMembers !== undefined) {
+    props.canInviteMembers = opts.canInviteMembers
+  }
   return render(<BoardHeader {...(props as Parameters<typeof BoardHeader>[0])} />)
 }
 
@@ -79,7 +106,6 @@ describe("BoardHeader → ArchivedCardsDialog canPermanentDelete forwarding", ()
   beforeEach(() => {
     capturedCanPermanentDelete = undefined
   })
-
   it("forwards canPermanentDelete=true when BoardHeader receives it", () => {
     renderBoard({ canPermanentDelete: true })
     expect(capturedCanPermanentDelete).toBe(true)
@@ -103,5 +129,32 @@ describe("BoardHeader → ArchivedCardsDialog canPermanentDelete forwarding", ()
     renderBoard({ canPermanentDelete: true })
     expect(capturedCanPermanentDelete).not.toBeUndefined()
     expect(capturedCanPermanentDelete).toBe(true)
+  })
+})
+
+describe("BoardHeader → Share button wires into the invite flow (U1)", () => {
+  beforeEach(() => {
+    capturedInviteWorkspaceId = undefined
+  })
+
+  it("renders Share and forwards workspaceId to InviteMemberDialog when allowed", () => {
+    renderBoard({ workspaceId: "ws-1", canInviteMembers: true })
+
+    expect(screen.getByRole("button", { name: "Share" })).toBeInTheDocument()
+    expect(screen.getByTestId("mocked-invite-dialog")).toBeInTheDocument()
+    expect(capturedInviteWorkspaceId).toBe("ws-1")
+  })
+
+  it("renders no dead Share button when the viewer cannot invite", () => {
+    renderBoard({ workspaceId: "ws-1", canInviteMembers: false })
+
+    expect(screen.queryByRole("button", { name: "Share" })).not.toBeInTheDocument()
+    expect(screen.queryByTestId("mocked-invite-dialog")).not.toBeInTheDocument()
+  })
+
+  it("renders no dead Share button without a workspace context", () => {
+    renderBoard({ canInviteMembers: true })
+
+    expect(screen.queryByRole("button", { name: "Share" })).not.toBeInTheDocument()
   })
 })

@@ -15,6 +15,7 @@ import { boardHeaderAvatarCountClass } from "@/components/boards/board-header-co
 import { ArchivedCardsDialog } from "@/components/boards/archived-cards-dialog";
 import type { ArchivedCardData, ArchivedListData } from "@/components/boards/archived-cards-dialog";
 import { BoardMenu } from "@/components/boards/board-menu";
+import { InviteMemberDialog } from "@/components/workspace/members/invite-member-dialog";
 import {
   Avatar,
   AvatarBadge,
@@ -48,6 +49,11 @@ type BoardHeaderProps = {
   // Admin-only permanent delete affordance (US-074 Slice C).
   canPermanentDelete?: boolean;
   starred: boolean;
+  // U1: the Share button is the workspace invite entry. Without a workspace
+  // to invite into (or the invitation:create permission), no dead button
+  // renders — the header never offers an action the user can't take.
+  workspaceId?: string | null;
+  canInviteMembers?: boolean;
 };
 
 export function BoardHeader({
@@ -60,6 +66,8 @@ export function BoardHeader({
   archivedLists = [],
   canPermanentDelete = false,
   starred,
+  workspaceId = null,
+  canInviteMembers = false,
 }: BoardHeaderProps) {
   // Live presence: who currently has this board open. Server-driven, deduped.
   const watchers = useBoardStore((s) => s.watchers);
@@ -253,14 +261,21 @@ export function BoardHeader({
             </AvatarGroup>
           ) : null}
 
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="rounded-md border-white/40 bg-white/15 text-white hover:bg-white/25"
-          >
-            Share
-          </Button>
+          {canInviteMembers && workspaceId ? (
+            <InviteMemberDialog
+              workspaceId={workspaceId}
+              trigger={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="rounded-md border-white/40 bg-white/15 text-white hover:bg-white/25"
+                >
+                  Share
+                </Button>
+              }
+            />
+          ) : null}
 
           <Button
             type="button"

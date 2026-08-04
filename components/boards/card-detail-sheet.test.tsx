@@ -145,6 +145,119 @@ describe("CardDetailSheet — title autosave", () => {
     expect(screen.getByText(/Title cannot be empty/)).toBeInTheDocument();
   });
 
+  it("queues a description blur made while the title save is in flight (U2)", async () => {
+    let resolveFirst: ((value: { success: boolean }) => void) | null = null;
+    actions.updateCardDetailsAction
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValue({ success: true });
+
+    renderSheet();
+
+    const title = screen.getByLabelText("Card title");
+    await user.clear(title);
+    await user.type(title, "Renamed card");
+    await user.tab(); // blur title → save 1 starts and stays pending
+
+    await waitFor(() =>
+      expect(actions.updateCardDetailsAction).toHaveBeenCalledTimes(1),
+    );
+
+    // Description blur lands while save 1 is still in flight.
+    const description = screen.getByPlaceholderText(
+      "Add a more detailed description...",
+    );
+    await user.type(description, "More details");
+    await user.tab(); // blur description → save 2 queued, not dropped
+
+    // Still only the in-flight save while the queue waits for it.
+    expect(actions.updateCardDetailsAction).toHaveBeenCalledTimes(1);
+
+    resolveFirst!({ success: true });
+
+    await waitFor(() =>
+      expect(actions.updateCardDetailsAction).toHaveBeenCalledTimes(2),
+    );
+    const formData = actions.updateCardDetailsAction.mock
+      .calls[1][0] as FormData;
+    expect(formData.get("title")).toBe("Renamed card");
+    expect(formData.get("description")).toBe("More details");
+  });
+
+  it("keeps other fields editable while a field's save is in flight (U2)", async () => {
+    let resolveFirst: ((value: { success: boolean }) => void) | null = null;
+    actions.updateCardDetailsAction.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+
+    renderSheet();
+
+    const title = screen.getByLabelText("Card title");
+    await user.clear(title);
+    await user.type(title, "Renamed card");
+    await user.tab();
+
+    await waitFor(() =>
+      expect(actions.updateCardDetailsAction).toHaveBeenCalledTimes(1),
+    );
+
+    // The shared isPending freeze is gone: while the title save is pending,
+    // the description editor and the estimate picker stay enabled.
+    const description = screen.getByPlaceholderText(
+      "Add a more detailed description...",
+    );
+    expect(description).not.toBeDisabled();
+    expect(title).not.toBeDisabled();
+    expect(
+      screen.getByRole("combobox", { name: "Estimate" }),
+    ).not.toBeDisabled();
+
+    resolveFirst!({ success: true });
+  });
+
+  it("shows a transient 'Saved' confirmation after a successful save (U3)", async () => {
+    actions.updateCardDetailsAction.mockResolvedValue({ success: true });
+    renderSheet();
+
+    const title = screen.getByLabelText("Card title");
+    await user.clear(title);
+    await user.type(title, "Renamed card");
+    await user.tab();
+
+    await waitFor(() => expect(screen.getByText("Saved")).toBeInTheDocument());
+    // Confirmation is transient: it disappears after ~1.5s.
+    await waitFor(
+      () => expect(screen.queryByText("Saved")).not.toBeInTheDocument(),
+      { timeout: 2500 },
+    );
+  });
+
+  it("surfaces a failed autosave as full error text (U3)", async () => {
+    actions.updateCardDetailsAction.mockResolvedValue({
+      success: false,
+      error: "Failed to update card. Please try again.",
+    });
+    renderSheet();
+
+    const title = screen.getByLabelText("Card title");
+    await user.clear(title);
+    await user.type(title, "Renamed card");
+    await user.tab();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Failed to update card. Please try again."),
+      ).toBeInTheDocument(),
+    );
+  });
+
   it("renders the title as static text when the viewer cannot edit", () => {
     renderSheet({ canEdit: false });
     expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();

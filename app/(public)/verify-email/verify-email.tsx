@@ -109,9 +109,10 @@ function VerifyEmailInner() {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle className="text-2xl">Verification failed</CardTitle>
+          {/* U7: the specific failure message lives only in the role="alert"
+              below — never duplicated in the description. */}
           <CardDescription>
-            {error ||
-              "This verification link is invalid or has expired. Please request a new one."}
+            This verification link is invalid or has expired. Please request a new one.
           </CardDescription>
         </CardHeader>
         <CardContent>

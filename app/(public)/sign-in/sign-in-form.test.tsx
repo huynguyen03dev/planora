@@ -4,8 +4,9 @@ import userEvent from "@testing-library/user-event";
 
 import { SignInForm } from "./sign-in-form";
 
-const { mockSignInEmail } = vi.hoisted(() => ({
+const { mockSignInEmail, mockSendVerificationEmail } = vi.hoisted(() => ({
   mockSignInEmail: vi.fn(),
+  mockSendVerificationEmail: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -14,6 +15,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/auth-client", () => ({
   signIn: { email: mockSignInEmail },
+  sendVerificationEmail: mockSendVerificationEmail,
 }));
 
 const user = userEvent.setup({ pointerEventsCheck: 0 });
@@ -70,5 +72,93 @@ describe("SignInForm", () => {
     render(<SignInForm />);
     const button = screen.getByRole("button", { name: "Sign In" });
     expect(button).not.toBeDisabled();
+  });
+
+  it("offers a resend-verification path when sign-in is blocked on an unverified email (U4)", async () => {
+    mockSignInEmail.mockImplementation((_data, { onError }) => {
+      onError?.({
+        error: {
+          message: "Email not verified",
+          code: "EMAIL_NOT_VERIFIED",
+        },
+      });
+      return Promise.resolve();
+    });
+    mockSendVerificationEmail.mockResolvedValue({});
+
+    render(<SignInForm />);
+
+    await user.type(screen.getByLabelText("Email"), "test@example.com");
+    await user.type(screen.getByLabelText("Password"), "password123");
+    await user.click(screen.getByRole("button", { name: "Sign In" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Resend verification email" }),
+      ).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Resend verification email" }),
+    );
+
+    await waitFor(() =>
+      expect(mockSendVerificationEmail).toHaveBeenCalledWith({
+        email: "test@example.com",
+      }),
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        /check your inbox/i,
+      );
+    });
+  });
+
+  it("does not offer resend for a generic sign-in error (U4)", async () => {
+    mockSignInEmail.mockImplementation((_data, { onError }) => {
+      onError?.({ error: { message: "Invalid credentials" } });
+      return Promise.resolve();
+    });
+
+    render(<SignInForm />);
+
+    await user.type(screen.getByLabelText("Email"), "test@example.com");
+    await user.type(screen.getByLabelText("Password"), "password123");
+    await user.click(screen.getByRole("button", { name: "Sign In" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Invalid credentials",
+      );
+    });
+    expect(
+      screen.queryByRole("button", { name: "Resend verification email" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides the resend offer when the email field is edited again (U4)", async () => {
+    mockSignInEmail.mockImplementation((_data, { onError }) => {
+      onError?.({
+        error: { message: "Email not verified", code: "EMAIL_NOT_VERIFIED" },
+      });
+      return Promise.resolve();
+    });
+
+    render(<SignInForm />);
+
+    await user.type(screen.getByLabelText("Email"), "test@example.com");
+    await user.type(screen.getByLabelText("Password"), "password123");
+    await user.click(screen.getByRole("button", { name: "Sign In" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Resend verification email" }),
+      ).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByLabelText("Email"), "x");
+    expect(
+      screen.queryByRole("button", { name: "Resend verification email" }),
+    ).not.toBeInTheDocument();
   });
 });
