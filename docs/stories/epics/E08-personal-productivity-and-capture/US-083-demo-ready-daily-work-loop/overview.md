@@ -2,10 +2,10 @@
 
 ## Status
 
-implemented and locally accepted on the feature branch `feature/us-083-demo-ready-daily-work-loop`
-(8 commits ahead of dev through b272685; PR/merge is a separate authorization gate — no commit
-or PR was opened by the final-close pass). **W1–W8 all landed and committed**; the branch-local
-acceptance gates closed 2026-08-02: W3 exit gate executed for real (real sign-up + Mailpit
+implemented — merged to `dev` via **PR #94 on 2026-08-02** (branch
+`feature/us-083-demo-ready-daily-work-loop`; the final-close pass itself opened no
+PR — the merge went through the normal authorization gate afterward). **W1–W8 all landed and committed**; the
+branch-local acceptance gates closed 2026-08-02: W3 exit gate executed for real (real sign-up + Mailpit
 verification of the two demo users, seed→reset→seed round trip, manifest comparison —
 validation.md W3 section), continuous demo rehearsal green from the seeded fixture and
 self-provisioning on a fresh database (`e2e/demo-rehearsal.spec.ts` — validation.md
@@ -184,7 +184,7 @@ app's workspace-id format (rehearsal-caught fixes, validation.md).
 - `docs/product/realtime-sync.md` — event matrix proof status (W1, W2).
 - `docs/product/automation.md` — execution-log retention reconciliation (W4).
 - `docs/product/analytics.md` — `analytics:refresh` cross-client proof (W1).
-- `docs/TEST_MATRIX.md` — US-083 row now `implemented` (branch-local; W1–W8 evidence incl.
+- `docs/TEST_MATRIX.md` — US-083 row now `implemented` (merged via PR #94; W1–W8 evidence incl.
   the W3 round-trip/rehearsal, 375px platform proof, combined 25/25 + full-suite 36/36 E2E
   gates; harness row implemented with proof flags 1/1/1/1); US-077/US-078 rows retired with pointers (W5).
 - `DESIGN.md` — future UI validation cites its tokens/surfaces; W7 added the
