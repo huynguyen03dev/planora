@@ -37,7 +37,7 @@ export function BoardMenu({ board, canEdit, canDelete }: BoardMenuProps) {
           <Button
             variant="outline"
             size="icon-sm"
-            className="rounded-full border-white/40 bg-white/15 text-white hover:bg-white/25"
+            className="border-white/40 bg-white/15 text-white hover:bg-white/25"
             aria-label="Board menu"
           >
             ...

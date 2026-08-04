@@ -441,7 +441,7 @@ export function ArchivedCardsDialog({
                   confirmText !== deleteTarget?.title
                 }
                 onClick={confirmPermanentDelete}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                className="bg-destructive text-white hover:bg-destructive/90"
               >
                 {isDeleting ? "Deleting…" : "Permanently delete"}
               </Button>

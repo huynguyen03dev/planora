@@ -198,7 +198,7 @@ export function BoardHeader({
           {showReconnecting ? (
             <Badge
               role="status"
-              className="flex h-6 items-center gap-1.5 rounded-full bg-amber-500/90 hover:bg-amber-500/90 px-2.5 py-1 text-xs font-medium text-white border-none"
+              className="flex h-6 items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-xs font-medium text-white"
             >
               <span className="size-1.5 animate-pulse rounded-full bg-white" />
               Reconnecting…

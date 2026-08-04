@@ -8,6 +8,7 @@ import { useMemo, useState, useSyncExternalStore } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DUE_META_CHIP_CLASS, PRIORITY_META_CHIP } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import {
   describeTodayDue,
@@ -25,47 +26,27 @@ type TodayViewProps = {
   now?: Date;
 };
 
-// Priority chip — same visual language as the card face
-// (components/boards/list-card-item.tsx): soft tint bg + tinted icon/text,
-// icon + word, never color-only (US-036). Tailwind palette utilities, not raw
-// hex, so the chip follows the token system in both themes.
-const PRIORITY_CONFIG: Record<string, { label: string; className: string }> = {
-  URGENT: {
-    label: "Urgent",
-    className: "bg-red-500/10 text-red-700 dark:bg-red-500/15 dark:text-red-400",
-  },
-  HIGH: {
-    label: "High",
-    className:
-      "bg-orange-500/10 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400",
-  },
-  MEDIUM: {
-    label: "Medium",
-    className:
-      "bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400",
-  },
-  LOW: {
-    label: "Low",
-    className:
-      "bg-blue-500/10 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400",
-  },
-};
+// Priority chip — shared meta-chip ramp with the card face
+// (components/boards/list-card-item.tsx, lib/constants.ts): token tint pairs
+// (label-*, warning), AA-measured in globals.css for both themes, icon + word,
+// never color-only (WCAG 1.4.1).
 
-// Due chip tint per bucket (mirrors the card-face due-state ramp: destructive
-// for overdue, amber for today/soon, muted for upcoming). The chip ALWAYS
-// carries an icon + word + aria-label — the tint is reinforcement, never the
-// only signal (WCAG 1.4.1).
+// Due chip tint per bucket — values are the shared card-face due-state ramp
+// (lib/constants.ts): destructive for overdue, warning tint for today, warning
+// text for this week (≈ card-face "soon"), muted for later (≈ "upcoming"). The
+// chip ALWAYS carries an icon + word + aria-label — the tint is reinforcement,
+// never the only signal (WCAG 1.4.1).
 const DUE_CHIP_CLASS: Record<TodaySectionKey, string> = {
-  overdue: "bg-destructive/10 text-destructive",
-  today: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  week: "text-amber-700 dark:text-amber-400",
-  later: "text-muted-foreground",
+  overdue: DUE_META_CHIP_CLASS.overdue,
+  today: DUE_META_CHIP_CLASS.today,
+  week: DUE_META_CHIP_CLASS.soon,
+  later: DUE_META_CHIP_CLASS.upcoming,
 };
 
 function TodayCardTile({ card, now }: { card: TodayCard; now: Date }) {
   const due = describeTodayDue(card.dueDate, now);
   const dueKey = card.dueDate ? getTodaySectionKey(card.dueDate, now) : null;
-  const priority = card.priority ? PRIORITY_CONFIG[card.priority] : null;
+  const priority = card.priority ? PRIORITY_META_CHIP[card.priority] : null;
   const context = [card.board.workspace.name, card.board.title, card.list.title].join(" · ");
 
   return (

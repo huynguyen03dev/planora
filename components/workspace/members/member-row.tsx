@@ -247,7 +247,7 @@ export function MemberRow({
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
-              className={buttonVariants({ variant: "destructive" })}
+              className="bg-destructive text-white hover:bg-destructive/90"
               onClick={(event) => {
                 event.preventDefault();
                 handleRemove();
@@ -290,7 +290,7 @@ export function MemberRow({
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
-              className={buttonVariants({ variant: "destructive" })}
+              className="bg-destructive text-white hover:bg-destructive/90"
               onClick={(event) => {
                 event.preventDefault();
                 handleLeave();

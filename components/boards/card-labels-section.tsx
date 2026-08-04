@@ -387,7 +387,7 @@ function ManageLabelsDialog({ boardId, boardLabels }: ManageLabelsDialogProps) {
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
-              className={buttonVariants({ variant: "destructive" })}
+              className="bg-destructive text-white hover:bg-destructive/90"
               onClick={(event) => {
                 event.preventDefault();
                 handleDeleteConfirm();
