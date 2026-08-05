@@ -6,6 +6,7 @@ import { getBoardById, createBoard, updateBoard, deleteBoard, toggleBoardStar } 
 import { hasWorkspacePermission, isWorkspaceMember } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
 import { createWorkspaceForCurrentUser } from "@/lib/workspace";
+import { emitBoardArchived } from "@/lib/realtime/server";
 import {
   createWorkspaceSchema,
   createBoardSchema,
@@ -178,6 +179,14 @@ export async function deleteBoardAction(boardId: string): Promise<DeleteBoardRes
 
   try {
     await deleteBoard(boardId);
+    // F10: a soft-archived board must signal clients that still have it open —
+    // otherwise they keep a live-looking UI, every action fails "Board not
+    // found", and their sockets stay in the room. Broadcast to the board room
+    // so each open client leaves the room and re-renders server-side (the page
+    // 404s naturally for an archived board). `deleteBoard` sets archivedAt
+    // internally; the payload timestamp is informational (the DB stays the
+    // source of truth).
+    emitBoardArchived(boardId, new Date().toISOString());
     revalidatePath("/boards");
     revalidatePath(`/boards/${boardId}`);
     return { success: true };

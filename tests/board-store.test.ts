@@ -384,6 +384,7 @@ const selectedCardFor = (cardId: string, title: string) => ({
   attachments: [],
   assignees: [],
   assignableMembers: [],
+  labels: [],
 });
 
 describe("applyRemoteCardMoved", () => {
@@ -786,6 +787,207 @@ describe("applyRemoteCardLabelsUpdated", () => {
     });
 
     expect(cardsIn("list-1").map((card) => card.id)).toEqual(["card-a", "card-c"]);
+  });
+
+  it("patches selectedCard.labels when the card is open in the detail sheet (F4)", () => {
+    useBoardStore.setState({
+      boardId: "board-1",
+      lists: makeListsWithCards(),
+      selectedCardId: "card-a",
+      selectedCard: selectedCardFor("card-a", "Alpha"),
+    });
+
+    useBoardStore.getState().applyRemoteCardLabelsUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      labels: [RED, BLUE],
+    });
+
+    // The card face and the open sheet's label set both update live.
+    expect(cardsIn("list-1").find((card) => card.id === "card-a")!.labels).toEqual([RED, BLUE]);
+    expect(useBoardStore.getState().selectedCard!.labels).toEqual([RED, BLUE]);
+  });
+
+  it("leaves the open sheet's labels untouched when a different card's labels change (F4)", () => {
+    useBoardStore.setState({
+      boardId: "board-1",
+      lists: makeListsWithCards(),
+      selectedCardId: "card-a",
+      selectedCard: selectedCardFor("card-a", "Alpha"),
+    });
+
+    useBoardStore.getState().applyRemoteCardLabelsUpdated({
+      boardId: "board-1",
+      cardId: "card-b",
+      labels: [BLUE],
+    });
+
+    expect(useBoardStore.getState().selectedCard!.labels).toEqual([]);
+    expect(cardsIn("list-2").find((card) => card.id === "card-b")!.labels).toEqual([BLUE]);
+  });
+
+  it("self-echo dedupe also skips the selectedCard patch when the sets already match (F4)", () => {
+    useBoardStore.setState({
+      boardId: "board-1",
+      lists: makeListsWithCards(),
+      selectedCardId: "card-a",
+      selectedCard: { ...selectedCardFor("card-a", "Alpha"), labels: [RED] },
+    });
+    // The list face already carries the same set — the actor's own echo.
+    const lists = useBoardStore.getState().lists;
+    lists[0].cards[0].labels = [RED];
+    useBoardStore.setState({ lists });
+    const listsBefore = useBoardStore.getState().lists;
+    const selectedBefore = useBoardStore.getState().selectedCard;
+
+    useBoardStore.getState().applyRemoteCardLabelsUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      labels: [RED],
+    });
+
+    expect(useBoardStore.getState().lists).toBe(listsBefore);
+    expect(useBoardStore.getState().selectedCard).toBe(selectedBefore);
+  });
+});
+
+describe("applyRemoteCardMetaUpdated (F3)", () => {
+  beforeEach(() => {
+    useBoardStore.getState().reset();
+  });
+
+  it("patches dueDate, priority and coverImage on the card face in place (no reorder)", () => {
+    useBoardStore.setState({ boardId: "board-1", lists: makeListsWithCards() });
+
+    useBoardStore.getState().applyRemoteCardMetaUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      fields: {
+        dueDate: "2026-08-15T12:00:00.000Z",
+        priority: "URGENT",
+        coverImage: "https://cdn.example/cover.png",
+      },
+    });
+
+    const card = cardsIn("list-1").find((c) => c.id === "card-a")!;
+    expect(card.dueDate).toEqual(new Date("2026-08-15T12:00:00.000Z"));
+    expect(card.priority).toBe("URGENT");
+    expect(card.coverImage).toBe("https://cdn.example/cover.png");
+    // Order is untouched — in-place patch.
+    expect(cardsIn("list-1").map((c) => c.id)).toEqual(["card-a", "card-c"]);
+  });
+
+  it("patches estimateHours and dueDate on the open detail sheet", () => {
+    useBoardStore.setState({
+      boardId: "board-1",
+      lists: makeListsWithCards(),
+      selectedCardId: "card-a",
+      selectedCard: selectedCardFor("card-a", "Alpha"),
+    });
+
+    useBoardStore.getState().applyRemoteCardMetaUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      fields: {
+        estimateHours: 8,
+        dueDate: "2026-08-15T12:00:00.000Z",
+      },
+    });
+
+    const sel = useBoardStore.getState().selectedCard!;
+    expect(sel.card.estimateHours).toBe(8);
+    expect(sel.card.dueDate).toEqual(new Date("2026-08-15T12:00:00.000Z"));
+    // The list face gained dueDate too (estimate is sheet-only).
+    expect(cardsIn("list-1").find((c) => c.id === "card-a")!.dueDate).toEqual(
+      new Date("2026-08-15T12:00:00.000Z"),
+    );
+  });
+
+  it("clears fields when the payload carries null (due date removed, priority reset)", () => {
+    const lists = makeListsWithCards();
+    lists[0].cards[0] = {
+      ...lists[0].cards[0],
+      dueDate: new Date("2026-08-15T12:00:00.000Z"),
+      priority: "HIGH",
+    };
+    useBoardStore.setState({ boardId: "board-1", lists });
+
+    useBoardStore.getState().applyRemoteCardMetaUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      fields: { dueDate: null, priority: null },
+    });
+
+    const card = cardsIn("list-1").find((c) => c.id === "card-a")!;
+    expect(card.dueDate).toBeNull();
+    expect(card.priority).toBeNull();
+  });
+
+  it("is a no-op when the payload boardId does not match", () => {
+    useBoardStore.setState({ boardId: "board-1", lists: makeListsWithCards() });
+    const before = useBoardStore.getState().lists;
+
+    useBoardStore.getState().applyRemoteCardMetaUpdated({
+      boardId: "board-2",
+      cardId: "card-a",
+      fields: { priority: "URGENT" },
+    });
+
+    expect(useBoardStore.getState().lists).toBe(before);
+    expect(cardsIn("list-1").find((c) => c.id === "card-a")!.priority).toBeNull();
+  });
+
+  it("is a safe no-op when the card is not on the board and not selected", () => {
+    useBoardStore.setState({ boardId: "board-1", lists: makeListsWithCards() });
+    const before = useBoardStore.getState().lists;
+
+    useBoardStore.getState().applyRemoteCardMetaUpdated({
+      boardId: "board-1",
+      cardId: "card-missing",
+      fields: { priority: "URGENT" },
+    });
+
+    expect(useBoardStore.getState().lists).toBe(before);
+  });
+
+  it("self-echo dedupe: an identical patch is a true no-op (no re-render)", () => {
+    const lists = makeListsWithCards();
+    lists[0].cards[0] = {
+      ...lists[0].cards[0],
+      priority: "MEDIUM",
+      coverImage: "https://cdn.example/cover.png",
+    };
+    useBoardStore.setState({ boardId: "board-1", lists });
+    const before = useBoardStore.getState().lists;
+
+    useBoardStore.getState().applyRemoteCardMetaUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      fields: { priority: "MEDIUM", coverImage: "https://cdn.example/cover.png" },
+    });
+
+    expect(useBoardStore.getState().lists).toBe(before);
+  });
+
+  it("applies when only the sheet-only estimate field changed and the card is selected", () => {
+    useBoardStore.setState({
+      boardId: "board-1",
+      lists: makeListsWithCards(),
+      selectedCardId: "card-a",
+      selectedCard: selectedCardFor("card-a", "Alpha"),
+    });
+
+    useBoardStore.getState().applyRemoteCardMetaUpdated({
+      boardId: "board-1",
+      cardId: "card-a",
+      fields: { estimateHours: 3 },
+    });
+
+    expect(useBoardStore.getState().selectedCard!.card.estimateHours).toBe(3);
+    // List face has no estimate field — its values are untouched.
+    const card = cardsIn("list-1").find((c) => c.id === "card-a")!;
+    expect(card.priority).toBeNull();
+    expect(card.coverImage).toBeNull();
   });
 });
 

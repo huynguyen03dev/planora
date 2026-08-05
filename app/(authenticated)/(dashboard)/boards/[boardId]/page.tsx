@@ -254,6 +254,10 @@ export default async function BoardPage({
           email: m.email,
           image: m.image,
         })),
+        // Seed the open sheet's label set (F4) — patched live by
+        // card:labels-updated so remote label changes reach the sheet without a
+        // reload.
+        labels: cardLabels.map((l) => ({ id: l.id, name: l.name, color: l.color })),
       }
     : null;
 

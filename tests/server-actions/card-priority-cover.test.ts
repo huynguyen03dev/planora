@@ -86,6 +86,7 @@ const h = vi.hoisted(() => {
       emitCardUpdated: fn(),
       emitCardArchived: fn(),
       emitCardLabelsUpdated: fn(),
+      emitCardMetaUpdated: fn(),
       emitCommentCreated: fn(),
     },
   };

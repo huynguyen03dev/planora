@@ -5,9 +5,12 @@ import { useBoardStore } from "./board-store";
 import { BoardStoreProvider } from "./board-store-provider";
 import type { Watcher } from "@/lib/realtime/types";
 
-const mockRefresh = vi.fn();
+const mockRefresh = vi.hoisted(() => vi.fn());
+const mockReplace = vi.hoisted(() => vi.fn());
+const mockJoinBoard = vi.hoisted(() => vi.fn());
+const mockLeaveBoard = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: mockRefresh }),
+  useRouter: () => ({ refresh: mockRefresh, replace: mockReplace }),
   usePathname: () => "/boards/b-1",
   useSearchParams: () => new URLSearchParams(),
 }));
@@ -26,8 +29,8 @@ const mockSocket = {
 
 vi.mock("@/lib/realtime/client", () => ({
   initSocket: () => mockSocket,
-  joinBoard: vi.fn(),
-  leaveBoard: vi.fn(),
+  joinBoard: mockJoinBoard,
+  leaveBoard: mockLeaveBoard,
 }));
 
 const currentViewer: Watcher = {
@@ -161,5 +164,83 @@ describe("BoardStoreProvider — list:restored realtime event handling", () => {
     expect(lists.map((l) => l.id)).toEqual(["l-1"]);
     expect(useBoardStore.getState().pendingResync).toBe(true);
     expect(mockRefresh).not.toHaveBeenCalled();
+  });
+});
+
+describe("BoardStoreProvider — board:archived / board:deleted (F10) + board:error (U5)", () => {
+  function renderProvider() {
+    return render(
+      <BoardStoreProvider
+        boardId="b-1"
+        lists={[]}
+        selectedCardId={null}
+        selectedCard={null}
+        currentViewer={currentViewer}
+        canEdit={true}
+        canDelete={true}
+        canCreateList={true}
+        canCreateCard={true}
+        canEditCard={true}
+        canArchiveCard={true}
+      >
+        <div>Board</div>
+      </BoardStoreProvider>,
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    listeners.clear();
+    useBoardStore.getState().reset();
+  });
+
+  it("subscribes to board:archived, board:deleted and board:error on mount", () => {
+    renderProvider();
+
+    expect(listeners.has("board:archived")).toBe(true);
+    expect(listeners.has("board:deleted")).toBe(true);
+    expect(listeners.has("board:error")).toBe(true);
+  });
+
+  it("board:archived for the current board leaves the room, resets the store and refreshes", () => {
+    renderProvider();
+    // The provider seeded the store with the current board on mount.
+    expect(useBoardStore.getState().boardId).toBe("b-1");
+
+    listeners.get("board:archived")!({ boardId: "b-1", archivedAt: "2026-08-05T00:00:00.000Z" });
+
+    expect(mockLeaveBoard).toHaveBeenCalledWith("b-1");
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(useBoardStore.getState().boardId).toBeNull();
+  });
+
+  it("board:archived for a different board is ignored (no leave, no refresh)", () => {
+    renderProvider();
+
+    listeners.get("board:archived")!({ boardId: "b-other", archivedAt: "2026-08-05T00:00:00.000Z" });
+
+    expect(mockLeaveBoard).not.toHaveBeenCalled();
+    expect(mockRefresh).not.toHaveBeenCalled();
+    expect(useBoardStore.getState().boardId).toBe("b-1");
+  });
+
+  it("board:deleted for the current board leaves the room, resets the store and replaces to /boards", () => {
+    renderProvider();
+
+    listeners.get("board:deleted")!({ boardId: "b-1" });
+
+    expect(mockLeaveBoard).toHaveBeenCalledWith("b-1");
+    expect(mockReplace).toHaveBeenCalledWith("/boards");
+    expect(mockRefresh).not.toHaveBeenCalled();
+    expect(useBoardStore.getState().boardId).toBeNull();
+  });
+
+  it("board:error triggers a router.refresh so server state re-renders (U5)", () => {
+    renderProvider();
+
+    listeners.get("board:error")!({ message: "Not authorized to join this board" });
+
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
   });
 });
