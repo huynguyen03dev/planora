@@ -7,6 +7,12 @@ import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId
 
 // Server Actions + router are boundaries; stub them so the test drives only the
 // sheet's own autosave logic.
+// Captures the props CardLabelsSection last received, so the A1 test can assert
+// the sheet forwards the STORE's live label set (not the stale server prop).
+const labelSectionSpy = vi.hoisted(() => ({
+  latest: null as null | { cardLabelIds: string[]; boardLabels: { id: string; name: string; color: string }[] },
+}));
+
 const actions = vi.hoisted(() => ({
   updateCardDetailsAction: vi.fn(),
   updateCardEstimateAction: vi.fn(),
@@ -37,7 +43,12 @@ vi.mock("@/components/boards/card-completion-toggle", () => ({
 vi.mock("@/components/boards/card-checklists-section", () => ({
   CardChecklistsSection: () => null,
 }));
-vi.mock("@/components/boards/card-labels-section", () => ({ CardLabelsSection: () => null }));
+vi.mock("@/components/boards/card-labels-section", () => ({
+  CardLabelsSection: (props: { cardLabelIds: string[]; boardLabels: { id: string; name: string; color: string }[] }) => {
+    labelSectionSpy.latest = props;
+    return null;
+  },
+}));
 vi.mock("./use-mention-autocomplete", () => ({
   useMentionAutocomplete: () => ({
     open: false,
@@ -297,5 +308,59 @@ describe("CardDetailSheet — archive from detail (US-069)", () => {
     );
     const formData = actions.archiveCardAction.mock.calls[0][0] as FormData;
     expect(formData.get("cardId")).toBe("card-1");
+  });
+});
+
+describe("CardDetailSheet — live label set from the store (A1 / F4 round-2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useBoardStore.getState().reset();
+    labelSectionSpy.latest = null;
+  });
+
+  it("forwards the STORE's live labels when the open card is selected (stale prop fallback)", () => {
+    // The server `cardLabelIds` prop is stale (fetched before a remote attach);
+    // the store's selectedCard.labels is the live snapshot (reducer-patched).
+    useBoardStore.setState({
+      selectedCardId: "card-1",
+      selectedCard: {
+        card: makeCard(),
+        comments: [],
+        activity: [],
+        attachments: [],
+        assignees: [],
+        assignableMembers: [],
+        labels: [
+          { id: "label-1", name: "QA-Live", color: "#7C3AED" },
+          { id: "label-2", name: "Bug", color: "#B04632" },
+        ],
+      },
+    });
+
+    renderSheet({
+      cardLabelIds: [],
+      boardLabels: [{ id: "label-1", name: "Stale Name", color: "#999999" }],
+    });
+
+    expect(labelSectionSpy.latest?.cardLabelIds).toEqual(["label-1", "label-2"]);
+    // Chip metadata (name/color) comes from the LIVE store snapshot, overriding
+    // the stale prop values.
+    expect(labelSectionSpy.latest?.boardLabels).toContainEqual({
+      id: "label-1",
+      name: "QA-Live",
+      color: "#7C3AED",
+    });
+    // A label absent from the stale prop list (remotely created) is unioned in.
+    expect(labelSectionSpy.latest?.boardLabels).toContainEqual({
+      id: "label-2",
+      name: "Bug",
+      color: "#B04632",
+    });
+  });
+
+  it("falls back to the server props when no store selection matches", () => {
+    renderSheet({ cardLabelIds: ["label-prop"], boardLabels: [{ id: "label-prop", name: "Prop", color: "#111" }] });
+
+    expect(labelSectionSpy.latest?.cardLabelIds).toEqual(["label-prop"]);
   });
 });

@@ -2,6 +2,14 @@
 
 This backlog records active, planned, and candidate epics and stories across Planora.
 
+> Round-2 polish (2026-08-05, PR #104 follow-ups): realtime QA follow-ups shipped —
+> A1 sheet consumes `selectedCard.labels` live (F4 residual), A2 board-menu popover radius
+> `rounded-lg`, A3 reconnect-once after `io server disconnect` (revoked user gets a live
+> deny via `board:error` → refresh instead of a frozen tab), A4 F5–F8 realtime nits
+> (workspace-dashboard reconnect resync, `EVENTS` derived from typed maps, `workspace:error`
+> event, scheduler self-fetch loopback URL), plus UX/UI nits U8/U10/V9–V12. Full details in
+> `docs/reviews/QA-2026-08-05.md`.
+
 ## Active & Candidate Epics
 
 | Epic | Description | Status |

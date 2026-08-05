@@ -24,6 +24,9 @@ const h = vi.hoisted(() => ({
 vi.mock("@/lib/dal", () => ({ verifySession: h.verifySession }));
 vi.mock("@/lib/notification", () => ({ getUnreadNotificationCount: h.unreadCount }));
 vi.mock("@/lib/invitation", () => ({ getPendingInvitationCount: h.invitationCount }));
+vi.mock("@/lib/workspace", () => ({
+  listWorkspaceMembershipsByUserId: vi.fn(async () => []),
+}));
 vi.mock("@/lib/realtime/socket-lifecycle-provider", () => ({
   SocketLifecycleProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));

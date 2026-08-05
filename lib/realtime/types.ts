@@ -220,6 +220,7 @@ export type ServerToClientEvents = {
   "invitation:new": (payload: InvitationNewPayload) => void;
   "analytics:refresh": (payload: AnalyticsRefreshPayload) => void;
   "board:error": (payload: { message: string }) => void;
+  "workspace:error": (payload: { message: string }) => void;
 };
 
 export type ClientToServerEvents = {

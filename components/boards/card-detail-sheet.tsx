@@ -164,6 +164,31 @@ export function CardDetailSheet({
     storeSelectedCard && card && storeSelectedCard.card.id === card.id
       ? storeSelectedCard.assignableMembers.map((m) => ({ ...m, role: "" }))
       : assignableMembers;
+  // F4 (round-2): the open sheet's label set merges from the store when this is
+  // the open card — mirroring comments/members — so a remote label attach /
+  // detach (or the rename/recolor fan-out) reaches the sheet live, instead of
+  // waiting for a router.refresh to reseed the server `cardLabelIds` prop. The
+  // seed (page.tsx) guarantees the fresh-open case matches the prop; the
+  // attach/remove round-trip in the sheet stays server-authoritative.
+  const storeLabels =
+    storeSelectedCard && card && storeSelectedCard.card.id === card.id
+      ? storeSelectedCard.labels
+      : null;
+  const liveLabelIds: string[] = storeLabels
+    ? storeLabels.map((label) => label.id)
+    : cardLabelIds;
+  // Chips render from boardLabels filtered by the attached ids — override the
+  // open card's entries with the live store snapshot so a remote rename/recolor
+  // updates the chip text/color too, and union any store label the (stale)
+  // prop list lacks (a label created remotely while the sheet is open).
+  const liveBoardLabels: LabelChip[] = storeLabels
+    ? [
+        ...boardLabels.map(
+          (label) => storeLabels.find((s) => s.id === label.id) ?? label,
+        ),
+        ...storeLabels.filter((s) => !boardLabels.some((b) => b.id === s.id)),
+      ]
+    : boardLabels;
 
   if (!card) {
     return null;
@@ -228,8 +253,8 @@ export function CardDetailSheet({
           assignees={liveAssignees}
           assignableMembers={liveAssignableMembers}
           boardId={boardId}
-          boardLabels={boardLabels}
-          cardLabelIds={cardLabelIds}
+          boardLabels={liveBoardLabels}
+          cardLabelIds={liveLabelIds}
           checklists={checklists}
           canEdit={canEdit}
           canArchive={canArchive}
