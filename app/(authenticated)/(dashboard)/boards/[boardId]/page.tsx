@@ -9,6 +9,7 @@ import { getBoardById, getStarredBoardIds } from "@/lib/board";
 import {
   getBoardPagePermissionsForRole,
   getWorkspaceRole,
+  hasWorkspacePermission,
 } from "@/lib/authorization";
 import { getCardDetailForBoard } from "@/lib/card";
 import { getCommentsByCardId } from "@/lib/comment";
@@ -71,6 +72,13 @@ export default async function BoardPage({
     canComment,
     canPermanentDelete,
   } = getBoardPagePermissionsForRole(role);
+
+  // U1: the board header's Share button opens the invite flow. Inviting is
+  // admin-only (invitation:create, mirroring inviteMemberAction's gate), so
+  // gate the button here server-side rather than rendering a dead control.
+  const canInviteMembers = await hasWorkspacePermission(board.workspaceId, {
+    invitation: ["create"],
+  });
 
   const rawCardId = resolvedSearchParams.cardId;
   const selectedCardId =
@@ -295,6 +303,8 @@ export default async function BoardPage({
           }))}
           canPermanentDelete={canPermanentDelete}
           starred={isBoardStarred}
+          workspaceId={board.workspaceId}
+          canInviteMembers={canInviteMembers}
         />
 
         <div

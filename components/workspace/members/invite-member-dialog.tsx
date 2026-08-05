@@ -28,6 +28,9 @@ import {
 
 type InviteMemberDialogProps = {
   workspaceId: string;
+  // Optional custom trigger (e.g. the board header's Share button). Defaults
+  // to the standard Invite button used on the members page.
+  trigger?: React.ReactNode;
 };
 
 type InvitableRole = "admin" | "editor" | "viewer";
@@ -38,7 +41,7 @@ const ROLE_OPTIONS: { value: InvitableRole; label: string; hint: string }[] = [
   { value: "viewer", label: "Viewer", hint: "Read-only, can comment" },
 ];
 
-export function InviteMemberDialog({ workspaceId }: InviteMemberDialogProps) {
+export function InviteMemberDialog({ workspaceId, trigger }: InviteMemberDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
@@ -89,10 +92,12 @@ export function InviteMemberDialog({ workspaceId }: InviteMemberDialogProps) {
       }}
     >
       <DialogTrigger asChild>
-        <Button size="sm">
-          <HugeiconsIcon icon={UserAdd01Icon} className="size-4" aria-hidden={true} />
-          Invite
-        </Button>
+        {trigger ?? (
+          <Button size="sm">
+            <HugeiconsIcon icon={UserAdd01Icon} className="size-4" aria-hidden={true} />
+            Invite
+          </Button>
+        )}
       </DialogTrigger>
 
       <DialogContent className="w-[calc(100%-2rem)] sm:max-w-md">

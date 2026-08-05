@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useRef } from "react";
+import { useEffect, useState, useTransition, useRef } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -285,7 +285,10 @@ function CardDetailDialogBody({
   const [draftPriority, setDraftPriority] = useState(card.priority ?? "NONE");
   const coverInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
-  const [isPending, startTransition] = useTransition();
+  // Save lifecycle (U2/U3): "saving" while a queued save drains, "saved" for
+  // a ~1.5s confirmation after the last successful save, "idle" otherwise.
+  // Failures surface through `error` (full text, no truncation).
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
 
   const selectedDueDate = parseDateInputValue(draftDueDate);
@@ -311,6 +314,66 @@ function CardDetailDialogBody({
     setDescriptionBaseline(liveDescription);
     if (!descriptionEditing) setDraftDescription(liveDescription);
   }
+
+  // Queued autosave (U2): a blur/commit that lands while a save is in flight
+  // is queued and drained when the in-flight save finishes (Notion/Trello
+  // style) — the old `if (isPending) return` silently discarded it. No control
+  // is disabled by another field's save; only the status indicator reflects
+  // in-flight state.
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const queueRef = useRef<Array<() => Promise<boolean>>>([]);
+  const drainingRef = useRef(false);
+  // Last values successfully persisted for title+description, so a queued
+  // no-op blur after a save completes doesn't rewrite identical data.
+  const lastSavedDetailsRef = useRef({
+    title: card.title,
+    description: card.description ?? "",
+  });
+
+  function showSaved() {
+    setSaveStatus("saved");
+    if (savedTimerRef.current) {
+      clearTimeout(savedTimerRef.current);
+    }
+    savedTimerRef.current = setTimeout(() => {
+      setSaveStatus("idle");
+    }, 1500);
+  }
+
+  function queueSave(action: () => Promise<boolean>) {
+    queueRef.current.push(action);
+    setSaveStatus("saving");
+    if (drainingRef.current) {
+      return;
+    }
+    drainingRef.current = true;
+    void (async () => {
+      let savedAny = false;
+      while (queueRef.current.length > 0) {
+        const next = queueRef.current.shift()!;
+        const ok = await next();
+        if (ok) {
+          savedAny = true;
+        }
+      }
+      drainingRef.current = false;
+      if (savedAny) {
+        showSaved();
+      } else {
+        setSaveStatus("idle");
+      }
+    })();
+  }
+
+  // Clear the "Saved" timer on unmount so a late callback can't set state on
+  // an unmounted dialog body.
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current) {
+        clearTimeout(savedTimerRef.current);
+      }
+    };
+  }, []);
 
   // Action-row affordances scroll the matching editor into view inside the left
   // column and move focus to its primary control, so the document-style "Add to
@@ -340,25 +403,27 @@ function CardDetailDialogBody({
 
   function submitCover(coverImage: string) {
     setError("");
-    const fd = new FormData();
-    fd.set("cardId", card.id);
-    fd.set("coverImage", coverImage);
-    startTransition(async () => {
+    queueSave(async () => {
+      const fd = new FormData();
+      fd.set("cardId", card.id);
+      fd.set("coverImage", coverImage);
       const result = await updateCardCoverAction(fd);
-      if (!result.success) setError(result.error);
-      else router.refresh();
+      if (!result.success) {
+        setError(result.error);
+        return false;
+      }
+      setError("");
+      router.refresh();
+      return true;
     });
   }
 
   // Unified save model (US-032): every field autosaves, so the three competing
   // save surfaces (Save changes/Reset, Save estimate, Save due date) are gone.
   // Title + description persist on blur; estimate, due date, and priority commit
-  // on change — matching the Priority control that already autosaved.
-  function saveDetails(nextTitle: string, nextDescription: string) {
-    if (isPending) {
-      return;
-    }
-
+  // on change — matching the Priority control that already autosaved. Blurs that
+  // land while a save is in flight are queued, never dropped (U2).
+  function queueSaveDetails(nextTitle: string, nextDescription: string) {
     const trimmedTitle = nextTitle.trim();
     if (!trimmedTitle) {
       // Title is required — revert to the last persisted value rather than
@@ -368,82 +433,110 @@ function CardDetailDialogBody({
       return;
     }
 
-    if (
-      trimmedTitle === card.title &&
-      nextDescription === (card.description ?? "")
-    ) {
-      return;
-    }
-
     setError("");
 
-    const formData = new FormData();
-    formData.set("cardId", card.id);
-    formData.set("title", trimmedTitle);
-    formData.set("description", nextDescription);
+    queueSave(async () => {
+      if (
+        lastSavedDetailsRef.current.title === trimmedTitle &&
+        lastSavedDetailsRef.current.description === nextDescription
+      ) {
+        // Nothing changed since the last successful save — no write, and no
+        // "Saved" flash for a pure focus/blur.
+        return false;
+      }
 
-    startTransition(async () => {
+      const formData = new FormData();
+      formData.set("cardId", card.id);
+      formData.set("title", trimmedTitle);
+      formData.set("description", nextDescription);
+
       const result = await updateCardDetailsAction(formData);
       if (!result.success) {
         setError(result.error);
+        return false;
       }
+      setError("");
+      lastSavedDetailsRef.current = {
+        title: trimmedTitle,
+        description: nextDescription,
+      };
+      return true;
     });
   }
 
-  function saveEstimate(nextEstimate: string) {
-    if (!canEdit || isPending) {
+  function queueSaveEstimate(nextEstimate: string) {
+    if (!canEdit) {
       return;
     }
 
-    const formData = new FormData();
-    formData.set("cardId", card.id);
-    if (nextEstimate) {
-      formData.set("estimateHours", nextEstimate);
-    }
+    queueSave(async () => {
+      const formData = new FormData();
+      formData.set("cardId", card.id);
+      if (nextEstimate) {
+        formData.set("estimateHours", nextEstimate);
+      }
 
-    startTransition(async () => {
       const result = await updateCardEstimateAction(formData);
       if (!result.success) {
         setError(result.error);
         setDraftEstimateHours(card.estimateHours?.toString() ?? "");
-        return;
+        return false;
       }
       setError("");
       router.refresh();
+      return true;
     });
   }
 
-  function saveDueDate(nextDueDate: string) {
-    if (!canEdit || isPending) {
+  function queueSaveDueDate(nextDueDate: string) {
+    if (!canEdit) {
       return;
     }
 
-    const formData = new FormData();
-    formData.set("cardId", card.id);
-    if (nextDueDate) {
-      formData.set("dueDate", nextDueDate);
-    }
+    queueSave(async () => {
+      const formData = new FormData();
+      formData.set("cardId", card.id);
+      if (nextDueDate) {
+        formData.set("dueDate", nextDueDate);
+      }
 
-    startTransition(async () => {
       const result = await updateCardDueDateAction(formData);
       if (!result.success) {
         setError(result.error);
         setDraftDueDate(toDateInputValue(card.dueDate));
-        return;
+        return false;
       }
       setError("");
       router.refresh();
+      return true;
     });
   }
 
-  async function handleAssignMember(userId: string) {
-    if (!canEdit || isPending) {
+  function queueSavePriority(nextPriority: string) {
+    queueSave(async () => {
+      const fd = new FormData();
+      fd.set("cardId", card.id);
+      fd.set("priority", nextPriority);
+      const result = await updateCardPriorityAction(fd);
+      if (!result.success) {
+        setError(result.error);
+        setDraftPriority(card.priority ?? "NONE");
+        return false;
+      }
+      setError("");
+      router.refresh();
+      return true;
+    });
+  }
+
+  function handleAssignMember(userId: string) {
+    if (!canEdit) {
       return;
     }
 
     setError("");
 
-    startTransition(async () => {
+    queueSave(async () => {
       const formData = new FormData();
       formData.set("cardId", card.id);
       formData.set("userId", userId);
@@ -451,23 +544,24 @@ function CardDetailDialogBody({
       const result = await assignCardMemberAction(formData);
       if (!result.success) {
         setError(result.error);
-      } else {
-        if (result.changed) {
-          router.refresh();
-        }
-        setError("");
+        return false;
       }
+      if (result.changed) {
+        router.refresh();
+      }
+      setError("");
+      return true;
     });
   }
 
-  async function handleRemoveMember(userId: string) {
-    if (!canEdit || isPending) {
+  function handleRemoveMember(userId: string) {
+    if (!canEdit) {
       return;
     }
 
     setError("");
 
-    startTransition(async () => {
+    queueSave(async () => {
       const formData = new FormData();
       formData.set("cardId", card.id);
       formData.set("userId", userId);
@@ -475,12 +569,13 @@ function CardDetailDialogBody({
       const result = await removeCardMemberAction(formData);
       if (!result.success) {
         setError(result.error);
-      } else {
-        if (result.changed) {
-          router.refresh();
-        }
-        setError("");
+        return false;
       }
+      if (result.changed) {
+        router.refresh();
+      }
+      setError("");
+      return true;
     });
   }
 
@@ -536,7 +631,7 @@ function CardDetailDialogBody({
               }}
               onBlur={() => {
                 setTitleEditing(false);
-                saveDetails(draftTitle, draftDescription);
+                queueSaveDetails(draftTitle, draftDescription);
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
@@ -550,7 +645,6 @@ function CardDetailDialogBody({
                   setError("");
                 }
               }}
-              disabled={isPending}
               // card-title token: 22px / weight 500 / 1.25 / -0.4px tracking
               // (DESIGN.md §244 / §335), not the old text-2xl/600.
               className="-mx-2 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2 py-1 text-[22px] font-medium leading-[1.25] tracking-[-0.4px] outline-none hover:bg-muted/50 focus-visible:border-ring focus-visible:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-60"
@@ -567,13 +661,28 @@ function CardDetailDialogBody({
                 the top of the column that pushed the Description down (US-043). */}
             <span
               aria-live="polite"
-              title={error || (isPending ? "Saving…" : undefined)}
+              title={
+                error ||
+                (saveStatus === "saving"
+                  ? "Saving…"
+                  : saveStatus === "saved"
+                    ? "Saved"
+                    : undefined)
+              }
+              // No truncate on errors: a failure message must read in full
+              // (U3). Status text is short and wraps harmlessly within the cap.
               className={cn(
-                "max-w-56 truncate text-xs",
+                "max-w-56 text-xs",
                 error ? "text-destructive" : "text-muted-foreground",
               )}
             >
-              {error ? error : isPending ? "Saving…" : null}
+              {error
+                ? error
+                : saveStatus === "saving"
+                  ? "Saving…"
+                  : saveStatus === "saved"
+                    ? "Saved"
+                    : null}
             </span>
 
             {canArchive ? (
@@ -696,7 +805,6 @@ function CardDetailDialogBody({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      disabled={isPending}
                       onClick={() => submitCover("")}
                     >
                       Remove
@@ -724,7 +832,6 @@ function CardDetailDialogBody({
                           <button
                             key={attachment.id}
                             type="button"
-                            disabled={isPending}
                             title={attachment.fileName}
                             onClick={() => submitCover(attachment.fileUrl)}
                             className={cn(
@@ -759,13 +866,18 @@ function CardDetailDialogBody({
                     const file = e.target.files?.[0];
                     if (!file) return;
                     setError("");
-                    const fd = new FormData();
-                    fd.set("cardId", card.id);
-                    fd.set("file", file);
-                    startTransition(async () => {
+                    queueSave(async () => {
+                      const fd = new FormData();
+                      fd.set("cardId", card.id);
+                      fd.set("file", file);
                       const result = await setCardCoverAction(fd);
-                      if (!result.success) setError(result.error);
-                      else router.refresh();
+                      if (!result.success) {
+                        setError(result.error);
+                        return false;
+                      }
+                      setError("");
+                      router.refresh();
+                      return true;
                     });
                     e.target.value = "";
                   }}
@@ -775,7 +887,6 @@ function CardDetailDialogBody({
                   variant="outline"
                   size="sm"
                   className="w-full"
-                  disabled={isPending}
                   onClick={() => coverInputRef.current?.click()}
                 >
                   Upload new image
@@ -833,7 +944,6 @@ function CardDetailDialogBody({
                         size="icon"
                         aria-label={`Remove ${member.name}`}
                         className="h-4 w-4 p-0 rounded-full text-muted-foreground hover:text-foreground hover:bg-transparent"
-                        disabled={isPending}
                         onClick={() => handleRemoveMember(member.id)}
                       >
                         ×
@@ -867,7 +977,6 @@ function CardDetailDialogBody({
                             key={member.id}
                             variant="ghost"
                             className="h-auto w-full justify-start gap-3 py-1.5"
-                            disabled={isPending}
                             onClick={() => handleAssignMember(member.id)}
                           >
                             <MemberAvatar seed={member.id} name={member.name} image={member.image} size="sm" />
@@ -909,18 +1018,9 @@ function CardDetailDialogBody({
               onValueChange={(value) => {
                 setDraftPriority(value);
                 setError("");
-                const fd = new FormData();
-                fd.set("cardId", card.id);
-                fd.set("priority", value);
-                startTransition(async () => {
-                  const result = await updateCardPriorityAction(fd);
-                  if (!result.success) {
-                    setError(result.error);
-                    setDraftPriority(card.priority ?? "NONE");
-                  } else router.refresh();
-                });
+                queueSavePriority(value);
               }}
-              disabled={!canEdit || isPending}
+              disabled={!canEdit}
             >
               <SelectTrigger id="card-priority" className="w-full max-w-60">
                 <SelectValue placeholder="No priority" />
@@ -945,7 +1045,7 @@ function CardDetailDialogBody({
                   id="card-due-date"
                   type="button"
                   variant="outline"
-                  disabled={!canEdit || isPending}
+                  disabled={!canEdit}
                   aria-labelledby="card-due-date-label card-due-date"
                   aria-label={
                     selectedDueDate
@@ -979,7 +1079,7 @@ function CardDetailDialogBody({
                     const next = toDueDateValue(date);
                     setDraftDueDate(next);
                     setError("");
-                    saveDueDate(next);
+                    queueSaveDueDate(next);
                     setDueDateOpen(false);
                   }}
                 />
@@ -990,11 +1090,11 @@ function CardDetailDialogBody({
                       variant="ghost"
                       size="sm"
                       className="w-full justify-center"
-                      disabled={!canEdit || isPending}
+                      disabled={!canEdit}
                       onClick={() => {
                         setDraftDueDate("");
                         setError("");
-                        saveDueDate("");
+                        queueSaveDueDate("");
                         setDueDateOpen(false);
                       }}
                     >
@@ -1017,9 +1117,9 @@ function CardDetailDialogBody({
                   const next = value === "none" ? "" : value;
                   setDraftEstimateHours(next);
                   setError("");
-                  saveEstimate(next);
+                  queueSaveEstimate(next);
                 }}
-                disabled={!canEdit || isPending}
+                disabled={!canEdit}
               >
                 <SelectTrigger id="card-estimate-hours" className="w-full max-w-40">
                   <SelectValue placeholder="No estimate" />
@@ -1052,9 +1152,8 @@ function CardDetailDialogBody({
               onFocus={() => setDescriptionEditing(true)}
               onBlur={() => {
                 setDescriptionEditing(false);
-                saveDetails(draftTitle, draftDescription);
+                queueSaveDetails(draftTitle, draftDescription);
               }}
-              disabled={isPending}
               rows={8}
               placeholder="Add a more detailed description..."
               className="min-h-40 text-base leading-[1.55] md:text-base"

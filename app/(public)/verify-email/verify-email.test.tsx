@@ -93,4 +93,20 @@ describe("VerifyEmail", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("Token expired");
   });
+
+  it("shows the failure message once — in the alert, not duplicated in the description (U7)", async () => {
+    mockUseSearchParams.mockReturnValue(
+      new URLSearchParams("token=expired-token"),
+    );
+    mockVerifyEmail.mockResolvedValue({
+      error: { message: "Token expired" },
+    });
+
+    render(<VerifyEmail />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("Token expired");
+    });
+    expect(screen.getAllByText("Token expired")).toHaveLength(1);
+  });
 });
