@@ -133,6 +133,9 @@ function TodayEmptyState({ variant }: { variant: "no-workspaces" | "nothing-assi
 
   return (
     <section className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed p-12 text-center">
+      <span className="flex size-10 items-center justify-center rounded-lg bg-muted" aria-hidden="true">
+        <HugeiconsIcon icon={Calendar03Icon} className="size-5 text-muted-foreground" />
+      </span>
       <h2 className="text-sm font-medium text-foreground">{copy.heading}</h2>
       <p className="max-w-sm text-xs text-muted-foreground">{copy.body}</p>
       <Button asChild variant="secondary" size="sm">
@@ -231,7 +234,7 @@ export function TodayView({ workspaceCount, cards, now }: TodayViewProps) {
 function TodayPageHeader() {
   return (
     <header className="space-y-1">
-      <h1 className="text-2xl font-semibold text-foreground">Today</h1>
+      <h1 className="text-2xl font-semibold tracking-tight text-foreground">Today</h1>
       <p className="text-sm text-muted-foreground">
         Cards assigned to you across your workspaces, grouped by due date.
       </p>

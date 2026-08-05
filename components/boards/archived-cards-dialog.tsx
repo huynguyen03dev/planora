@@ -206,7 +206,7 @@ export function ArchivedCardsDialog({
             <HugeiconsIcon icon={ArchiveIcon} size={16} />
             Archived
             {totalCount > 0 ? (
-              <Badge className="ml-0.5 h-5 min-w-5 rounded-full px-1.5 font-semibold text-[10px] bg-primary text-primary-foreground hover:bg-primary">
+              <Badge className="ml-0.5 h-5 min-w-5 rounded-full px-1.5 font-semibold text-xs bg-primary text-primary-foreground hover:bg-primary">
                 {totalCount}
               </Badge>
             ) : null}

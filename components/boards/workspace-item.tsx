@@ -5,6 +5,8 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
   Analytics01Icon,
+  ChevronDown,
+  ChevronRight,
   KanbanIcon,
   Settings01Icon,
   UserMultipleIcon,
@@ -82,8 +84,14 @@ export function WorkspaceItem({ workspace }: WorkspaceItemProps) {
           {initial}
         </div>
         <span className="flex-1 truncate text-left">{workspace.name}</span>
-        <span className="text-xs text-muted-foreground" aria-hidden="true">
-          {expanded ? "▼" : "▶"}
+        <span
+          className="text-xs text-muted-foreground transition-transform duration-150"
+          aria-hidden="true"
+        >
+          <HugeiconsIcon
+            icon={expanded ? ChevronDown : ChevronRight}
+            className="size-4"
+          />
         </span>
       </button>
 
