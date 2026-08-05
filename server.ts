@@ -126,7 +126,7 @@ app.prepare().then(() => {
 
       if (!canJoin) {
         if (socket.connected && wantedWorkspaces.has(workspaceId)) {
-          socket.emit("board:error", { message: "Not authorized to join this workspace" });
+          socket.emit("workspace:error", { message: "Not authorized to join this workspace" });
         }
         return;
       }
@@ -169,7 +169,11 @@ app.prepare().then(() => {
 
   if (process.env.CRON_SECRET) {
     const CRON_INTERVAL_MS = 15 * 60 * 1000;
-    const appUrl = `http://${hostname}:${port}`;
+    // F8 (round-2): self-fetch targets 127.0.0.1 (IPv4 loopback) — `hostname`
+    // may be "0.0.0.0" (not connectable) or resolve localhost to ::1 while the
+    // server binds IPv4-only. CRON_SELF_URL overrides for custom setups
+    // (tunnels, load balancers).
+    const appUrl = process.env.CRON_SELF_URL ?? `http://127.0.0.1:${port}`;
 
     reminderInterval = setInterval(async () => {
       try {
