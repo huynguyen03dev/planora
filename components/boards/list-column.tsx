@@ -533,6 +533,7 @@ function ListColumnComponent({
                 handleDelete();
               }}
               disabled={isDeleting}
+              className="bg-destructive text-white hover:bg-destructive/90"
             >
               {isDeleting ? "Archiving..." : "Archive list"}
             </AlertDialogAction>

@@ -147,7 +147,7 @@ export function AutomationContent({
           role={toast.variant === "error" ? "alert" : "status"}
           aria-live={toast.variant === "error" ? "assertive" : "polite"}
           className={cn(
-            "fixed right-4 top-4 z-[60] flex max-w-sm items-start gap-2 rounded-md border px-3 py-2 text-sm shadow-md",
+            "fixed right-4 bottom-4 z-[60] flex max-w-sm items-start gap-2 rounded-lg border px-4 py-3 text-sm shadow-lg",
             toast.variant === "error"
               ? "border-destructive/30 bg-destructive/10 text-destructive"
               : "border-border bg-card text-foreground",

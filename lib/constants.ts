@@ -58,3 +58,42 @@ export function getBoardTheme(backgroundColor?: string | null): BoardThemeGradie
 
 export const MIN_BOARD_TITLE_LENGTH = 1;
 export const MAX_BOARD_TITLE_LENGTH = 64;
+
+/* ------------------------------------------------------------------ *
+ * Meta-chip semantic ramp — single shared source (V3)                *
+ * ------------------------------------------------------------------ *
+ * Card-face and Today chips (priority + due). Priority maps to the   *
+ * per-hue label tint pairs (US-051, decision 0014) and the US-050    *
+ * status tokens (decision 0013), all AA-measured in app/globals.css  *
+ * for both themes. The old copy in list-card-item.tsx + today-view   *
+ * used raw Tailwind palette utilities (bg-red-500/10 …) that bypass  *
+ * the token system; these utilities resolve from the CSS vars, so    *
+ * each pair adapts to dark mode automatically. The chips always      *
+ * render icon + word (+ aria-label where stateful) — never           *
+ * color-only (WCAG 1.4.1).                                           *
+ * ------------------------------------------------------------------ */
+export type CardPriority = "URGENT" | "HIGH" | "MEDIUM" | "LOW";
+
+export const PRIORITY_META_CHIP: Record<
+  CardPriority,
+  { label: string; className: string }
+> = {
+  URGENT: { label: "Urgent", className: "bg-label-red text-label-red-fg" },
+  HIGH: { label: "High", className: "bg-label-orange text-label-orange-fg" },
+  MEDIUM: {
+    label: "Medium",
+    className: "bg-warning text-warning-foreground",
+  },
+  LOW: { label: "Low", className: "bg-label-blue text-label-blue-fg" },
+};
+
+/** Card-face due-badge states (list-card-item). */
+export type CardDueState = "overdue" | "today" | "soon" | "upcoming" | "done";
+
+export const DUE_META_CHIP_CLASS: Record<CardDueState, string> = {
+  overdue: "bg-destructive/10 text-destructive",
+  today: "bg-warning text-warning-foreground",
+  soon: "text-warning-foreground",
+  upcoming: "text-muted-foreground",
+  done: "text-success-foreground",
+};

@@ -20,6 +20,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ArchiveCardDialog } from "@/components/boards/archive-card-dialog";
 import { CardCompletionToggle } from "@/components/boards/card-completion-toggle";
 import { LabelMark } from "@/components/boards/label-mark";
+import {
+  CardDueState,
+  DUE_META_CHIP_CLASS,
+  PRIORITY_META_CHIP,
+} from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 // How many assignee avatars the card face renders before collapsing the rest
@@ -27,40 +32,13 @@ import { cn } from "@/lib/utils";
 // needs it), so the cap is applied here at render rather than in the query.
 const MAX_CARD_FACE_AVATARS = 3;
 
-// Priority chip: soft tinted bg + tinted icon/text. Distinct from solid label
-// pills (different visual language) and accessible — icon + text, never
-// color-only. Colors are Tailwind palette utilities (not raw hex) so the chip
-// follows the token system and adapts in dark mode — lighter foreground over a
-// slightly stronger tint keeps contrast on the darker card surface (US-036).
-const PRIORITY_CONFIG: Record<string, { label: string; className: string }> = {
-  URGENT: {
-    label: "Urgent",
-    className: "bg-red-500/10 text-red-700 dark:bg-red-500/15 dark:text-red-400",
-  },
-  HIGH: {
-    label: "High",
-    className:
-      "bg-orange-500/10 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400",
-  },
-  MEDIUM: {
-    label: "Medium",
-    className:
-      "bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400",
-  },
-  LOW: {
-    label: "Low",
-    className:
-      "bg-blue-500/10 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400",
-  },
-};
-
 function startOfDay(date: Date): Date {
   const copy = new Date(date);
   copy.setHours(0, 0, 0, 0);
   return copy;
 }
 
-type DueState = "overdue" | "today" | "soon" | "upcoming" | "done";
+type DueState = CardDueState;
 
 // Card-face due-date badge: state + short label + accessible description. A
 // completed card (completedAt set) always reads as "done" and never as overdue.
@@ -101,13 +79,8 @@ function describeDueDate(
   return { state: "upcoming", label: dayLabel, a11yLabel: `Due ${dayLabel}` };
 }
 
-const DUE_STATE_CLASS: Record<DueState, string> = {
-  overdue: "bg-destructive/10 text-destructive",
-  today: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  soon: "text-amber-700 dark:text-amber-400",
-  upcoming: "text-muted-foreground",
-  done: "text-emerald-700 dark:text-emerald-500",
-};
+// Priority/due chips use the shared meta-chip ramp (lib/constants.ts) — token
+// pairs (label-*, success, warning, destructive), AA-measured in globals.css.
 
 type ListCardItemProps = {
   card: {
@@ -286,10 +259,12 @@ function ListCardItemComponent({
                     heavier than top). Edit (pencil) opens the card; Archive is
                     offered only on completed cards. opacity-0 (not display:none)
                     keeps them focusable/clickable for keyboard — focus-within
-                    reveals them, group-hover reveals them on mouse hover. */}
+                    reveals them, group-hover reveals them on mouse hover, and
+                    coarse-pointer devices (no :hover) keep them always shown,
+                    same fallback as the completion toggle below. */}
                 {showQuickActions ? (
                   <div
-                    className="absolute right-0.5 top-0.5 z-10 flex items-center gap-0.5 rounded-md bg-card/85 p-0.5 opacity-0 shadow-sm backdrop-blur-sm transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100 motion-reduce:transition-none"
+                    className="absolute right-0.5 top-0.5 z-10 flex items-center gap-0.5 rounded-md bg-card/85 p-0.5 opacity-0 shadow-sm backdrop-blur-sm transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none"
                     onClick={(event) => event.stopPropagation()}
                   >
                     {canEdit ? (
@@ -412,7 +387,7 @@ function ListCardItemComponent({
                         <span
                           className={cn(
                             "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium",
-                            PRIORITY_CONFIG[card.priority].className,
+                            PRIORITY_META_CHIP[card.priority].className,
                           )}
                         >
                           <HugeiconsIcon
@@ -421,7 +396,7 @@ function ListCardItemComponent({
                             strokeWidth={2}
                             className="text-current"
                           />
-                          {PRIORITY_CONFIG[card.priority].label}
+                          {PRIORITY_META_CHIP[card.priority].label}
                         </span>
                       ) : null}
 
@@ -432,7 +407,7 @@ function ListCardItemComponent({
                           title={due.a11yLabel}
                           className={cn(
                             "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium",
-                            DUE_STATE_CLASS[due.state],
+                            DUE_META_CHIP_CLASS[due.state],
                           )}
                         >
                           <HugeiconsIcon
@@ -452,7 +427,7 @@ function ListCardItemComponent({
                           className={cn(
                             "inline-flex items-center gap-1 text-xs font-medium",
                             card.checklistDone === card.checklistTotal
-                              ? "text-emerald-700 dark:text-emerald-500"
+                              ? "text-success-foreground"
                               : "text-muted-foreground",
                           )}
                         >
