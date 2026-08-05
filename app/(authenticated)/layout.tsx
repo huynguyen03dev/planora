@@ -6,14 +6,19 @@ import { verifySession } from "@/lib/dal";
 import { getPendingInvitationCount } from "@/lib/invitation";
 import { getUnreadNotificationCount } from "@/lib/notification";
 import { SocketLifecycleProvider } from "@/lib/realtime/socket-lifecycle-provider";
+import { listWorkspaceMembershipsByUserId } from "@/lib/workspace";
 
 export default async function AuthenticatedLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   const { userId, user } = await verifySession();
-  const [unreadCount, invitationCount] = await Promise.all([
+  const [unreadCount, invitationCount, memberships] = await Promise.all([
     getUnreadNotificationCount(userId),
     getPendingInvitationCount(user.email),
+    // U10 (round-2): the user-menu workspace switcher needs the workspace list;
+    // one membership query (single include, no N+1) fetched here once per
+    // authenticated page render.
+    listWorkspaceMembershipsByUserId(userId),
   ]);
 
   return (
@@ -29,6 +34,7 @@ export default async function AuthenticatedLayout({
           <AuthenticatedHeaderActions
             initialUnreadCount={unreadCount}
             initialInvitationCount={invitationCount}
+            initialWorkspaces={memberships.map((membership) => membership.workspace)}
           />
         </header>
         {children}
