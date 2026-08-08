@@ -152,6 +152,17 @@ export function CardDetailSheet({
   const storeSelectedCard = useBoardStore((state) => state.selectedCard);
   const [dismissedCardId, setDismissedCardId] = useState<string | null>(null);
 
+  // The URL is the authority for "is a card selected". The `open`/`card` props
+  // are server-derived and can lag reality: router.replace() is async, and a
+  // stale in-flight router.refresh() payload (fetched while ?cardId was still in
+  // the URL — queued autosave, socket reconnect, list:restored, drag resync) can
+  // land AFTER the close navigation. page.tsx keys this component by the server
+  // card id (`selectedCard?.id ?? "card-detail-sheet-closed"`), so that stale
+  // payload REMOUNTS the sheet with open=true and a reset dismissedCardId — the
+  // dialog would flash open even though the URL no longer selects a card. The
+  // urlCardId check keeps the dialog closed across that remount (close-flash).
+  const urlCardId = searchParams.get("cardId");
+
   const liveComments: UIComment[] =
     storeSelectedCard && card && storeSelectedCard.card.id === card.id
       ? storeSelectedCard.comments
@@ -202,7 +213,22 @@ export function CardDetailSheet({
   }
 
   const currentCard = card;
-  const isOpen = open && dismissedCardId !== currentCard.id;
+  const isOpen =
+    open &&
+    urlCardId === currentCard.id &&
+    dismissedCardId !== currentCard.id;
+
+  // Once the URL stops selecting this card, the dismissal latch is obsolete
+  // (the router.replace committed). Forget it so a later intentional reopen
+  // (BoardContent.openCard pushes ?cardId again) isn't swallowed — even when a
+  // stale server payload keeps this instance mounted with the same key. The
+  // urlCardId check above keeps the dialog closed regardless, so clearing the
+  // latch can never reopen it by itself. This is the React "adjust state during
+  // render" pattern (guarded, so it can't loop) — same as the title/description
+  // baseline sync below.
+  if (dismissedCardId === currentCard.id && urlCardId !== currentCard.id) {
+    setDismissedCardId(null);
+  }
 
   // Bind the hero title/description to the live store value (not the stale server
   // prop) so a remote rename or description edit isn't clobbered when the field
