@@ -10,6 +10,8 @@ import type {
   BurndownPoint,
   FlowPoint,
   LeadTimeRow,
+  LeadTimeRowsPage,
+  AnalyticsFilters,
   KPIValue,
   CardStateAtTime,
   HistoryEvent,
@@ -40,6 +42,16 @@ type CompletedMetric = {
   reopenDenominatorCardIds: Set<string>;
   reopenNumeratorCardIds: Set<string>;
   rows: LeadTimeRow[];
+  // Whether more detail rows exist past the returned window (false for the
+  // previous-period computation, which collects no rows).
+  hasMore: boolean;
+};
+
+/** Window applied to the lead-time detail rows (completedAt-descending set).
+ * Omitted → offset 0, limit MAX_LEAD_TIME_ROWS (the historical cap). */
+type LeadTimeRowsOptions = {
+  offset?: number;
+  limit?: number;
 };
 
 type CoverageMetric = {
@@ -564,6 +576,7 @@ function computeCompletedMetrics(
   range: AnalyticsRange,
   memberId?: string,
   includeRows = false,
+  rowsOptions?: LeadTimeRowsOptions,
 ): CompletedMetric {
   const leadTimes: number[] = [];
   const completedCardIds = new Set<string>();
@@ -659,13 +672,17 @@ function computeCompletedMetrics(
   // Capping during collection would let the table disagree with totalCompleted.
   rows.sort((a, b) => b.completedAt.getTime() - a.completedAt.getTime());
 
+  const offset = rowsOptions?.offset ?? 0;
+  const limit = rowsOptions?.limit ?? MAX_LEAD_TIME_ROWS;
+
   return {
     leadTimes,
     completedLateCount,
     completedCardIds,
     reopenDenominatorCardIds,
     reopenNumeratorCardIds,
-    rows: rows.slice(0, MAX_LEAD_TIME_ROWS),
+    rows: rows.slice(offset, offset + limit),
+    hasMore: rows.length > offset + limit,
   };
 }
 
@@ -779,11 +796,15 @@ async function getWorkspaceAnalyticsLaunch(workspaceId: string): Promise<Date | 
   return workspace?.analyticsLaunchAt ?? null;
 }
 
-export async function getWorkspaceAnalytics(
-  query: WorkspaceAnalyticsQuery,
-): Promise<WorkspaceAnalyticsPayload> {
-  const { workspaceId, filters } = query;
-
+/**
+ * Shared fetch + shape step behind `getWorkspaceAnalytics` and
+ * `getLeadTimeRows`: resolves the workspace timezone/launch boundary, derives
+ * the selected + previous ranges from the SAME filters, and loads the board
+ * scope + card history + card titles into the CardHistoryContext. Keeping this
+ * in one place guarantees the load-more action computes rows against exactly
+ * the range and filters the dashboard rendered.
+ */
+async function buildAnalyticsContext(workspaceId: string, filters: AnalyticsFilters) {
   const timezone = await getWorkspaceTimezone(workspaceId);
   const launchAt = await getWorkspaceAnalyticsLaunch(workspaceId);
   const range = parseDateRange(filters, timezone);
@@ -830,12 +851,28 @@ export async function getWorkspaceAnalytics(
       })
     : [];
   const cardTitles = new Map(cards.map((card) => [card.id, card.title]));
-  const context: CardHistoryContext = {
-    events,
-    eventsByCardId,
-    cardIds,
-    cardTitles,
+
+  return {
+    timezone,
+    launchAt,
+    range,
+    previousRange,
+    context: {
+      events,
+      eventsByCardId,
+      cardIds,
+      cardTitles,
+    } satisfies CardHistoryContext,
   };
+}
+
+export async function getWorkspaceAnalytics(
+  query: WorkspaceAnalyticsQuery,
+): Promise<WorkspaceAnalyticsPayload> {
+  const { workspaceId, filters } = query;
+
+  const { timezone, launchAt, range, previousRange, context } =
+    await buildAnalyticsContext(workspaceId, filters);
 
   const comparisonLowConfidence =
     rangeCrossesBoundary(range, launchAt) ||
@@ -855,6 +892,7 @@ export async function getWorkspaceAnalytics(
     range,
     filters.memberId,
     true,
+    query.leadTimeRows,
   );
   const previousCompleted = computeCompletedMetrics(
     context,
@@ -900,6 +938,7 @@ export async function getWorkspaceAnalytics(
       ),
       rows: currentCompleted.rows,
       totalCompleted: currentCompleted.completedCardIds.size,
+      hasMore: currentCompleted.hasMore,
     },
     remainingHours: buildKPI(
       remainingHoursCurrent,
@@ -940,5 +979,36 @@ export async function getWorkspaceAnalytics(
       from: previousRange.from,
       to: previousRange.to,
     },
+  };
+}
+
+/**
+ * Offset-paginated read of just the lead-time detail rows for the dashboard
+ * "Load more" action (US — no silent 100-row cap). Reuses the same context
+ * builder as `getWorkspaceAnalytics`, so the returned window is computed
+ * against EXACTLY the range and filters the dashboard rendered; `hasMore`
+ * reports whether rows exist past the window. KPIs are intentionally NOT
+ * computed here — they always cover every completion in range and are served
+ * by the initial payload.
+ */
+export async function getLeadTimeRows(
+  workspaceId: string,
+  filters: AnalyticsFilters,
+  options: LeadTimeRowsOptions,
+): Promise<LeadTimeRowsPage> {
+  const { range, context } = await buildAnalyticsContext(workspaceId, filters);
+
+  const currentCompleted = computeCompletedMetrics(
+    context,
+    range,
+    filters.memberId,
+    true,
+    options,
+  );
+
+  return {
+    rows: currentCompleted.rows,
+    hasMore: currentCompleted.hasMore,
+    totalCompleted: currentCompleted.completedCardIds.size,
   };
 }
