@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { z } from "zod";
 import { getWorkspaceAnalyticsAction } from "./actions";
-import { LEAD_TIME_PAGE_SIZE } from "@/lib/analytics/engine";
+import { LEAD_TIME_PAGE_SIZE } from "@/lib/analytics/types";
 import { DashboardShell } from "./components/dashboard-shell";
 import { BurndownChart } from "./components/burndown-chart";
 import { FlowChart } from "./components/flow-chart";

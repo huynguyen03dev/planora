@@ -21,12 +21,6 @@ const MS_PER_HOUR = 1000 * 60 * 60;
 const MS_PER_DAY = MS_PER_HOUR * 24;
 const MAX_LEAD_TIME_ROWS = 100;
 
-/** Window size for the dashboard's lead-time detail pagination (page 1 is
- * server-rendered, every later page fetched through the load-rows action).
- * The engine default stays MAX_LEAD_TIME_ROWS for other callers (CSV export
- * legacy cap); the dashboard explicitly requests this page size. */
-export const LEAD_TIME_PAGE_SIZE = 20;
-
 type AnalyticsRange = {
   from: Date;
   to: Date;

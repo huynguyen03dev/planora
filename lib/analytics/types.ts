@@ -2,6 +2,14 @@
  * Analytics types per PRD canonical metric definitions.
  */
 
+// Window size for the dashboard's lead-time detail pagination (page 1 is
+// server-rendered, every later page fetched through the load-rows action).
+// Lives here (NOT in engine.ts, which is a "use server" module — only async
+// functions may be exported there; a const export breaks `next build`).
+// The engine default stays MAX_LEAD_TIME_ROWS (100) for other callers (CSV
+// export legacy cap); the dashboard explicitly requests this page size.
+export const LEAD_TIME_PAGE_SIZE = 20;
+
 // Filter types
 export type AnalyticsRangePreset = "7d" | "30d" | "90d";
 
