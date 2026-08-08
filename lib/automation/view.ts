@@ -19,6 +19,9 @@ export type AutomationView = {
   options: AutomationOptions;
   rules: RuleRowData[];
   logs: LogEntry[];
+  // Exact (probed, not inferred): whether more logs exist behind the returned
+  // page. The infinite-scroll feed uses this for its initial sentinel state.
+  logsHasMore: boolean;
   lastRunByRule: Record<string, { status: string; executedAt: string }>;
 };
 
@@ -78,7 +81,9 @@ export async function loadAutomationView(
       // executedAt desc with an id tiebreak keeps cursor pages deterministic.
       orderBy: [{ executedAt: "desc" }, { id: "desc" }],
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      take: pageSize,
+      // take+1 probe: a full extra row means another page exists — exact
+      // `logsHasMore` with no second count query (mirrors the action).
+      take: pageSize + 1,
       select: {
         id: true,
         ruleId: true,
@@ -131,7 +136,8 @@ export async function loadAutomationView(
     boardTitle: rule.board?.title ?? null,
   }));
 
-  const logs: LogEntry[] = logRows.map((log) => ({
+  const logsHasMore = logRows.length > pageSize;
+  const logs: LogEntry[] = logRows.slice(0, pageSize).map((log) => ({
     id: log.id,
     ruleId: log.ruleId,
     ruleName: log.ruleName,
@@ -154,5 +160,5 @@ export async function loadAutomationView(
     };
   }
 
-  return { options, rules: ruleData, logs, lastRunByRule };
+  return { options, rules: ruleData, logs, logsHasMore, lastRunByRule };
 }

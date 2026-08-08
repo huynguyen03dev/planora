@@ -56,6 +56,7 @@ const SUCCESS_RESPONSE = {
     },
   ],
   logs: [],
+  logsHasMore: false,
   lastRunByRule: {} as Record<string, string>,
 };
 

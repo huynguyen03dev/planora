@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { hasWorkspacePermission, isWorkspaceMember } from "@/lib/authorization";
+import { EXECUTION_LOG_PAGE_SIZE } from "@/lib/automation/constants";
 import { loadAutomationView } from "@/lib/automation/view";
 import { verifySession } from "@/lib/dal";
 import { getWorkspaceIdBySlug } from "@/lib/workspace";
@@ -32,7 +33,9 @@ export default async function AutomationPage({ params }: AutomationPageProps) {
   // hidden for non-admins and the Server Actions re-enforce it regardless.
   const [canManage, view] = await Promise.all([
     hasWorkspacePermission(workspaceId, { organization: ["update"] }),
-    loadAutomationView(workspaceId),
+    // First feed batch = EXECUTION_LOG_PAGE_SIZE; logsHasMore is exact (the
+    // loader probes take+1), so the panel's sentinel state is correct on load.
+    loadAutomationView(workspaceId, { take: EXECUTION_LOG_PAGE_SIZE }),
   ]);
 
   return (
@@ -42,6 +45,7 @@ export default async function AutomationPage({ params }: AutomationPageProps) {
       rules={view.rules}
       options={view.options}
       logs={view.logs}
+      logsHasMore={view.logsHasMore}
       lastRunByRule={view.lastRunByRule}
     />
   );
