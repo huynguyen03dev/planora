@@ -99,6 +99,35 @@ describe("CreateBoardModal — synchronous single-flight submit", () => {
     );
   });
 
+  it("surfaces a generic error on a thrown action and allows a retry", async () => {
+    actions.createBoardAction
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValueOnce({ success: true, boardId: "b-2" });
+    renderModal();
+
+    const input = screen.getByLabelText("Board title");
+    await user.type(input, "Q2 Planning");
+
+    submitForm();
+    // The rejection is caught (no unhandled rejection): exactly one call and
+    // a visible generic error.
+    await waitFor(() =>
+      expect(
+        screen.getByText("Something went wrong. Please try again."),
+      ).toBeInTheDocument(),
+    );
+    expect(actions.createBoardAction).toHaveBeenCalledTimes(1);
+
+    // The guard released on the rejection — the same form retries successfully.
+    submitForm();
+    await waitFor(() =>
+      expect(actions.createBoardAction).toHaveBeenCalledTimes(2),
+    );
+    await waitFor(() =>
+      expect(routerMock.push).toHaveBeenCalledWith("/boards/b-2"),
+    );
+  });
+
   it("closes and resets on success; a later open can submit again", async () => {
     actions.createBoardAction.mockResolvedValue({ success: true, boardId: "b-2" });
     const { onClose } = renderModal();

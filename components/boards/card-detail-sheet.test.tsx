@@ -775,6 +775,33 @@ describe("CardDetailSheet — comment composer single-flight (same-tick)", () =>
     );
     await waitFor(() => expect(textarea).toHaveValue(""));
   });
+
+  it("surfaces a generic error on a thrown action and allows a retry", async () => {
+    actions.createCommentAction
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValueOnce({ success: true });
+    renderSheet();
+
+    const textarea = screen.getByPlaceholderText("Write a comment...");
+    await user.type(textarea, "Nice work");
+    await user.keyboard("{Enter}");
+
+    // The rejection is caught (no unhandled rejection): exactly one call and
+    // a visible generic error.
+    await waitFor(() =>
+      expect(
+        screen.getByText("Something went wrong. Please try again."),
+      ).toBeInTheDocument(),
+    );
+    expect(actions.createCommentAction).toHaveBeenCalledTimes(1);
+
+    // The guard released on the rejection — a retry posts successfully.
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() =>
+      expect(actions.createCommentAction).toHaveBeenCalledTimes(2),
+    );
+    await waitFor(() => expect(textarea).toHaveValue(""));
+  });
 });
 
 describe("CardDetailSheet — autosave queue recovery (rejected save)", () => {

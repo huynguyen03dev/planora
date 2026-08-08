@@ -1585,6 +1585,11 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
         } else {
           setError(result.error);
         }
+      } catch {
+        // A thrown/rejected action (network blip, unexpected server failure)
+        // surfaces a generic actionable error instead of an unhandled
+        // rejection; the guard still releases so a retry always works.
+        setError("Something went wrong. Please try again.");
       } finally {
         submittingRef.current = false;
       }
