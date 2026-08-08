@@ -7,6 +7,7 @@
  */
 import { expect, type Page } from "@playwright/test";
 
+import { getCardArchivedAt } from "./db";
 import { fetchVerificationLink } from "./mail";
 
 export type Creds = { name: string; email: string; password: string };
@@ -219,6 +220,16 @@ export async function archiveCard(page: Page, cardId: string): Promise<void> {
     .getByRole("alertdialog", { name: "Archive this card?" })
     .getByRole("button", { name: "Archive card" })
     .click();
+  // The confirm click fires the Server Action asynchronously (the dialog
+  // closes once it resolves), and Playwright's click() does not await that
+  // transition — so the archive can still be committing when this helper
+  // returns. Callers that navigate straight away (today.spec.ts AC5 arrange:
+  // archive then `goto("/today")`) would race the commit and assert on a
+  // stale /today render. A non-null archivedAt is only visible after the
+  // transaction commits, so polling the DB is the exact commit barrier.
+  await expect
+    .poll(() => getCardArchivedAt(cardId), { timeout: 15_000 })
+    .not.toBeNull();
 }
 
 // ── List rename / archive (real list-column UI, US-074) ───────────────────

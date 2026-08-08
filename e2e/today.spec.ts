@@ -55,6 +55,7 @@ import {
   getCardIdByTitle,
   setCardDueDate,
   assignCardMember,
+  getBoardArchivedAt,
   cleanup,
   disconnect,
 } from "./helpers/db";
@@ -237,6 +238,10 @@ test("assigned cards across workspaces land in the four buckets; deep links and 
     .getByRole("alertdialog")
     .getByRole("button", { name: "Archive", exact: true })
     .click();
+  // Same commit barrier as the card archive above: the confirm click fires
+  // the deleteBoardAction asynchronously, and /today's read model filters
+  // board.archivedAt — the goto below must not race the commit.
+  await expect.poll(() => getBoardArchivedAt(sprintId), { timeout: 15_000 }).not.toBeNull();
   await page.goto("/today");
   await expect(todaySection(page, "Due Today").getByText("1", { exact: true })).toBeVisible();
   await expect(

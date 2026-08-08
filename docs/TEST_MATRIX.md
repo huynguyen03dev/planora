@@ -16,6 +16,17 @@ representative set of client-component tests; most React component internals are
 still unverified (thin coverage, not zero). Async Server Components stay covered
 by E2E, not RTL.
 
+**2026-08-08 E2E baseline repair (`fix/e2e-today-ci`):** two test-side defects,
+no product change. (1) `demo-rehearsal.spec.ts` toast assertion filtered to the
+quick-capture `role="status"` toast (`filter({ hasText: "Card created" })`) —
+`/today` now also renders the polite end-of-list status, making the bare
+`getByRole("status")` strict-mode ambiguous. (2) `today.spec.ts` AC5 arrange
+steps now wait for the archive Server Action to commit (DB poll in
+`archiveCard` + `getBoardArchivedAt`) before navigating to `/today` — the
+immediate goto raced the transaction, so the archived card/board leaked into
+Due Today and the count badges read 3/2 instead of 2/1. All card/link/count
+assertions preserved verbatim.
+
 ## Status Values
 
 | Status | Meaning |
