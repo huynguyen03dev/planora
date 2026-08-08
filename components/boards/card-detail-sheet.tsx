@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition, useRef } from "react";
+import { useEffect, useMemo, useState, useTransition, useRef } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -20,6 +20,7 @@ import { format } from "date-fns";
 import {
   assignCardMemberAction,
   createCommentAction,
+  loadMoreCardDetailAction,
   removeCardMemberAction,
   updateCardCoverAction,
   setCardCoverAction,
@@ -109,7 +110,11 @@ type CardDetailSheetProps = {
   open: boolean;
   card: CardDetailRecord | null;
   comments: CommentRecord[];
+  /** True when more comments exist behind the seeded page (server-derived). */
+  commentsHasMore: boolean;
   activity: ActivityRecord[];
+  /** True when more activity exists behind the seeded page (server-derived). */
+  activityHasMore: boolean;
   attachments: AttachmentRecord[];
   assignees: CardMemberRecord[];
   assignableMembers: AssignableWorkspaceMemberRecord[];
@@ -126,7 +131,9 @@ export function CardDetailSheet({
   open,
   card,
   comments: initialComments,
+  commentsHasMore,
   activity: initialActivity,
+  activityHasMore,
   attachments,
   assignees,
   assignableMembers,
@@ -248,7 +255,9 @@ export function CardDetailSheet({
           key={currentCard.id}
           card={liveCard}
           comments={liveComments}
+          commentsHasMore={commentsHasMore}
           activity={liveActivity}
+          activityHasMore={activityHasMore}
           attachments={attachments}
           assignees={liveAssignees}
           assignableMembers={liveAssignableMembers}
@@ -268,7 +277,11 @@ export function CardDetailSheet({
 type CardDetailDialogBodyProps = {
   card: CardDetailRecord;
   comments: UIComment[];
+  /** True when more comments exist behind the seeded page (server-derived). */
+  commentsHasMore: boolean;
   activity: UIActivity[];
+  /** True when more activity exists behind the seeded page (server-derived). */
+  activityHasMore: boolean;
   attachments: AttachmentRecord[];
   assignees: CardMemberRecord[];
   // Role-less: the dropdown renders name/email only, and the live store snapshot
@@ -287,7 +300,9 @@ type CardDetailDialogBodyProps = {
 function CardDetailDialogBody({
   card,
   comments,
+  commentsHasMore,
   activity,
+  activityHasMore,
   attachments,
   assignees,
   assignableMembers,
@@ -315,7 +330,16 @@ function CardDetailDialogBody({
   // Failures surface through `error` (full text, no truncation).
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
-
+  // Cursor-paginated comments/activity: the first page is server-seeded (props),
+  // and these hold the pages appended via "Load more". The body is keyed by
+  // card id, so all of this resets when a different card opens. `hasMore` is
+  // seeded from the server flag and updated from each action response.
+  const [extraComments, setExtraComments] = useState<UIComment[]>([]);
+  const [extraActivity, setExtraActivity] = useState<UIActivity[]>([]);
+  const [commentsHasMoreState, setCommentsHasMoreState] = useState(commentsHasMore);
+  const [activityHasMoreState, setActivityHasMoreState] = useState(activityHasMore);
+  const [commentsPending, startCommentsTransition] = useTransition();
+  const [activityPending, startActivityTransition] = useTransition();
   const selectedDueDate = parseDateInputValue(draftDueDate);
 
   // The hero title/description bind to the live store value (passed in via
@@ -425,6 +449,117 @@ function CardDetailDialogBody({
   const imageAttachments = attachments.filter((attachment) =>
     attachment.fileType.startsWith("image/"),
   );
+
+  // One canonical list per section: seeded items + loaded pages, deduped by id
+  // and sorted by the same key the cursors use. Comments render oldest first
+  // (createdAt asc, id asc — the DB order); activity newest first (createdAt
+  // desc, id desc). Sorting keeps realtime-appended rows (store) interleaved
+  // correctly with loaded pages instead of drifting to the wrong end.
+  const displayedComments = useMemo(() => {
+    const seen = new Set<string>();
+    return [...comments, ...extraComments]
+      .sort(
+        (a, b) =>
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() ||
+          a.id.localeCompare(b.id),
+      )
+      .filter((item) => {
+        if (seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      });
+  }, [comments, extraComments]);
+
+  const displayedActivity = useMemo(() => {
+    const seen = new Set<string>();
+    return [...activity, ...extraActivity]
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() ||
+          b.id.localeCompare(a.id),
+      )
+      .filter((item) => {
+        if (seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      });
+  }, [activity, extraActivity]);
+
+  // Fetches the next page behind the last loaded row. The cursor is the
+  // (createdAt, id) of the last displayed item — matching the server order —
+  // so rows appended by realtime while the sheet is open never shift or
+  // duplicate pages. Appends with an id dedupe as a safety net.
+  function loadMoreComments() {
+    const cursor = displayedComments[displayedComments.length - 1];
+    if (!cursor) return;
+    startCommentsTransition(async () => {
+      const formData = new FormData();
+      formData.set("cardId", card.id);
+      formData.set("section", "comments");
+      formData.set("cursorCreatedAt", new Date(cursor.createdAt).toISOString());
+      formData.set("cursorId", cursor.id);
+      const result = await loadMoreCardDetailAction(formData);
+      if (!result.success) {
+        setError(result.error);
+        return;
+      }
+      if (result.section !== "comments") {
+        // Defensive: the action must echo the requested section.
+        return;
+      }
+      setError("");
+      setExtraComments((prev) => {
+        const seen = new Set(prev.map((item) => item.id));
+        const additions = result.items
+          .map((item) => ({
+            id: item.id,
+            content: item.content,
+            createdAt: new Date(item.createdAt),
+            user: item.user,
+          }))
+          .filter((item) => !seen.has(item.id));
+        return [...prev, ...additions];
+      });
+      setCommentsHasMoreState(result.hasMore);
+    });
+  }
+
+  function loadMoreActivity() {
+    const cursor = displayedActivity[displayedActivity.length - 1];
+    if (!cursor) return;
+    startActivityTransition(async () => {
+      const formData = new FormData();
+      formData.set("cardId", card.id);
+      formData.set("section", "activity");
+      formData.set("cursorCreatedAt", new Date(cursor.createdAt).toISOString());
+      formData.set("cursorId", cursor.id);
+      const result = await loadMoreCardDetailAction(formData);
+      if (!result.success) {
+        setError(result.error);
+        return;
+      }
+      if (result.section !== "activity") {
+        // Defensive: the action must echo the requested section.
+        return;
+      }
+      setError("");
+      setExtraActivity((prev) => {
+        const seen = new Set(prev.map((item) => item.id));
+        const additions = result.items
+          .map((item) => ({
+            id: item.id,
+            action: item.action,
+            entityType: item.entityType,
+            createdAt: new Date(item.createdAt),
+            user: item.user,
+            metadata: item.metadata,
+          }))
+          .filter((item) => !seen.has(item.id));
+        return [...prev, ...additions];
+      });
+      setActivityHasMoreState(result.hasMore);
+    });
+  }
 
   function submitCover(coverImage: string) {
     setError("");
@@ -1205,27 +1340,51 @@ function CardDetailDialogBody({
 
           <CommentComposer cardId={card.id} canComment={canComment} assignableMembers={assignableMembers} />
 
-          {comments.length === 0 && activity.length === 0 ? (
+          {displayedComments.length === 0 && displayedActivity.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No comments or activity yet. Start the conversation!
             </p>
           ) : (
             <div className="space-y-5">
-              {comments.length > 0 && (
+              {displayedComments.length > 0 && (
                 <div className="space-y-3">
                   <h4 className="text-sm font-medium text-muted-foreground">Comments</h4>
-                  {comments.map((comment) => (
+                  {displayedComments.map((comment) => (
                     <CommentItem key={comment.id} comment={comment} memberNames={assignableMembers.map((m) => m.name)} />
                   ))}
+                  {commentsHasMoreState && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={loadMoreComments}
+                      disabled={commentsPending}
+                    >
+                      {commentsPending ? "Loading..." : "Load more comments"}
+                    </Button>
+                  )}
                 </div>
               )}
 
-              {activity.length > 0 && (
+              {displayedActivity.length > 0 && (
                 <div className="space-y-3">
                   <h4 className="text-sm font-medium text-muted-foreground">Activity</h4>
-                  {activity.map((entry) => (
+                  {displayedActivity.map((entry) => (
                     <ActivityItem key={entry.id} activity={entry} />
                   ))}
+                  {activityHasMoreState && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={loadMoreActivity}
+                      disabled={activityPending}
+                    >
+                      {activityPending ? "Loading..." : "Load more activity"}
+                    </Button>
+                  )}
                 </div>
               )}
             </div>

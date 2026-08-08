@@ -24,7 +24,7 @@ import {
   updateCardCover,
   updateCardPriority,
 } from "@/lib/card";
-import { createComment } from "@/lib/comment";
+import { createComment, getCommentsByCardId, COMMENT_PAGE_SIZE } from "@/lib/comment";
 import { createAttachment, getAttachmentsByCardId } from "@/lib/attachment";
 import {
   type ChecklistWithItems,
@@ -56,12 +56,12 @@ import {
   restoreList,
   reorderListByNeighbors,
 } from "@/lib/list";
-import { createActivityEntry } from "@/lib/activity";
+import { createActivityEntry, getActivityByCardId, ACTIVITY_PAGE_SIZE } from "@/lib/activity";
 import {
   type CardMemberRecord,
   getCardMembers,
 } from "@/lib/card-member";
-import { hasWorkspacePermission } from "@/lib/authorization";
+import { hasWorkspacePermission, isWorkspaceMember } from "@/lib/authorization";
 import { verifySession } from "@/lib/dal";
 import {
   emitAnalyticsRefresh,
@@ -118,6 +118,7 @@ import {
   createChecklistItemSchema,
   toggleChecklistItemSchema,
   deleteChecklistItemSchema,
+  loadMoreCardDetailSchema,
 } from "@/lib/schemas";
 import {
   buildCardArchivedEvent,
@@ -1951,6 +1952,126 @@ export async function createCommentAction(
   } catch {
     return { success: false, error: "Failed to create comment. Please try again." };
   }
+}
+
+// ─── loadMoreCardDetailAction (any workspace member — read gate) ───────────
+
+/** A comment row returned by loadMoreCardDetailAction (sheet UI shape). */
+export type LoadMoreCommentItem = {
+  id: string;
+  content: string;
+  createdAt: string;
+  user: {
+    id: string;
+    name: string;
+    image: string | null;
+  };
+};
+
+/** An activity row returned by loadMoreCardDetailAction (sheet UI shape). */
+export type LoadMoreActivityItem = {
+  id: string;
+  action: string;
+  entityType: string;
+  createdAt: string;
+  user: {
+    id: string;
+    name: string;
+    image: string | null;
+  };
+  metadata: Record<string, unknown> | null;
+};
+
+export type LoadMoreCardDetailResult =
+  | {
+      success: true;
+      section: "comments";
+      items: LoadMoreCommentItem[];
+      hasMore: boolean;
+    }
+  | {
+      success: true;
+      section: "activity";
+      items: LoadMoreActivityItem[];
+      hasMore: boolean;
+    }
+  | { success: false; error: string };
+
+/**
+ * Cursor-paginated fetch of the next page of comments or activity for a card
+ * detail sheet section (page size 50, matching the server-side seed). The
+ * cursor is the (createdAt, id) of the last loaded entry; rows are returned
+ * with `hasMore` so the sheet can show/keep the "Load more" affordance.
+ *
+ * Reads are open to any workspace member — viewers already see comments and
+ * activity on the board — so membership is the read gate (mirrors the
+ * automation read actions); a non-member gets the same not-found posture as
+ * a missing card.
+ */
+export async function loadMoreCardDetailAction(
+  formData: FormData,
+): Promise<LoadMoreCardDetailResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = loadMoreCardDetailSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  const { userId } = await verifySession();
+
+  const { cardId, section, cursorCreatedAt, cursorId } = parsed.data;
+
+  const result = await getCardWithListAndBoard(cardId);
+  if (!result || result.board.archivedAt) {
+    return { success: false, error: "Card not found" };
+  }
+
+  if (!(await isWorkspaceMember(userId, result.board.workspaceId))) {
+    return { success: false, error: "Card not found" };
+  }
+
+  const cursor =
+    cursorCreatedAt && cursorId
+      ? { createdAt: cursorCreatedAt, id: cursorId }
+      : undefined;
+
+  if (section === "comments") {
+    const page = await getCommentsByCardId(cardId, {
+      limit: COMMENT_PAGE_SIZE,
+      ...(cursor ? { after: cursor } : {}),
+    });
+    return {
+      success: true,
+      section: "comments",
+      hasMore: page.hasMore,
+      items: page.items.map((comment) => ({
+        id: comment.id,
+        content: comment.content,
+        createdAt: comment.createdAt.toISOString(),
+        user: comment.user,
+      })),
+    };
+  }
+
+  const page = await getActivityByCardId(cardId, {
+    limit: ACTIVITY_PAGE_SIZE,
+    ...(cursor ? { before: cursor } : {}),
+  });
+  return {
+    success: true,
+    section: "activity",
+    hasMore: page.hasMore,
+    items: page.items.map((entry) => ({
+      id: entry.id,
+      action: entry.action,
+      entityType: entry.entityType,
+      createdAt: entry.createdAt.toISOString(),
+      user: entry.user,
+      metadata: entry.metadata as Record<string, unknown> | null,
+    })),
+  };
 }
 
 export async function assignCardMemberAction(
