@@ -9,12 +9,21 @@
  * board/list/workspace context, due + priority meta chips (non-color-only
  * labels), and the two accessible empty states.
  */
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TodayView } from "./today-view";
 import type { TodayCard } from "@/lib/today";
+
+const h = vi.hoisted(() => ({
+  loadMoreTodayCardsAction: vi.fn(),
+}));
+
+vi.mock("@/app/(authenticated)/(dashboard)/today/actions", () => ({
+  loadMoreTodayCardsAction: h.loadMoreTodayCardsAction,
+}));
 
 // Aug 3, 2026 14:30 local — matches the lib/today.test.ts fixture clock.
 const NOW = new Date(2026, 7, 3, 14, 30, 0, 0);
@@ -39,8 +48,10 @@ function card(overrides: Partial<TodayCard> & { id: string; title: string }): To
   };
 }
 
-function renderToday(cards: TodayCard[], workspaceCount = 1) {
-  return render(<TodayView workspaceCount={workspaceCount} cards={cards} now={NOW} />);
+function renderToday(cards: TodayCard[], workspaceCount = 1, hasMore = false) {
+  return render(
+    <TodayView workspaceCount={workspaceCount} cards={cards} hasMore={hasMore} now={NOW} />,
+  );
 }
 
 describe("TodayView — sections and tiles", () => {
@@ -160,10 +171,20 @@ describe("TodayView — hydration safety (US-083 W6 corrections)", () => {
     // rebucket on hydration and mismatch. Two wildly different clocks prove
     // the server output carries no time-dependent grouping at all.
     const htmlWinter = renderToStaticMarkup(
-      <TodayView workspaceCount={1} cards={groupedCards} now={new Date(2026, 0, 15, 9, 0)} />,
+      <TodayView
+        workspaceCount={1}
+        cards={groupedCards}
+        hasMore={false}
+        now={new Date(2026, 0, 15, 9, 0)}
+      />,
     );
     const htmlSummer = renderToStaticMarkup(
-      <TodayView workspaceCount={1} cards={groupedCards} now={new Date(2026, 7, 3, 9, 0)} />,
+      <TodayView
+        workspaceCount={1}
+        cards={groupedCards}
+        hasMore={false}
+        now={new Date(2026, 7, 3, 9, 0)}
+      />,
     );
 
     expect(htmlWinter).toBe(htmlSummer);
@@ -175,12 +196,12 @@ describe("TodayView — hydration safety (US-083 W6 corrections)", () => {
 
   it("still server-renders the accessible empty states (props-only, deterministic)", () => {
     const noWorkspaces = renderToStaticMarkup(
-      <TodayView workspaceCount={0} cards={[]} now={new Date(2026, 0, 15)} />,
+      <TodayView workspaceCount={0} cards={[]} hasMore={false} now={new Date(2026, 0, 15)} />,
     );
     expect(noWorkspaces).toContain("No workspaces yet");
 
     const nothingAssigned = renderToStaticMarkup(
-      <TodayView workspaceCount={1} cards={[]} now={new Date(2026, 7, 3)} />,
+      <TodayView workspaceCount={1} cards={[]} hasMore={false} now={new Date(2026, 7, 3)} />,
     );
     expect(nothingAssigned).toContain("Nothing assigned");
   });
@@ -200,5 +221,156 @@ describe("TodayView — empty states", () => {
 
     expect(screen.getByRole("heading", { name: "Nothing assigned" })).toBeInTheDocument();
     expect(screen.getByText(/later/i)).toBeInTheDocument();
+  });
+});
+
+describe("TodayView — Load more pagination (no silent cap)", () => {
+  beforeEach(() => {
+    h.loadMoreTodayCardsAction.mockReset();
+  });
+
+  it("shows the Load more button when hasMore is true", () => {
+    renderToday([card({ id: "c-1", title: "First", dueDate: due(2026, 7, 3) })], 1, true);
+    expect(screen.getByRole("button", { name: "Load more" })).toBeInTheDocument();
+  });
+
+  it("hides the Load more button when hasMore is false", () => {
+    renderToday([card({ id: "c-1", title: "First", dueDate: due(2026, 7, 3) })], 1, false);
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+  });
+
+  it("appends the next page behind the last loaded cursor, dedupes, and re-groups", async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderToday(
+      [card({ id: "c-1", title: "First", dueDate: due(2026, 7, 3) })],
+      1,
+      true,
+    );
+    h.loadMoreTodayCardsAction.mockResolvedValue({
+      success: true,
+      hasMore: false,
+      items: [
+        card({ id: "c-2", title: "Appended today", dueDate: due(2026, 7, 3) }),
+        // A duplicate of an already-displayed card — must not render twice.
+        card({ id: "c-1", title: "First", dueDate: due(2026, 7, 3) }),
+      ],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+
+    // The cursor is the last loaded card in server (dueDate, id) order.
+    const fd = h.loadMoreTodayCardsAction.mock.calls[0][0] as FormData;
+    expect(fd.get("limit")).toBe("50");
+    expect(fd.get("cursorId")).toBe("c-1");
+    expect(fd.get("cursorDueDate")).toBe(due(2026, 7, 3));
+
+    // The appended card re-groups into the right section; the duplicate id
+    // renders exactly once.
+    expect(
+      screen.getByRole("link", { name: "Open card Appended today" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open card First" })).toBeInTheDocument();
+    const todaySection = screen.getByRole("heading", { name: "Due Today" }).closest("section")!;
+    expect(within(todaySection).getAllByRole("link")).toHaveLength(2);
+    // hasMore false → the affordance disappears (nothing hidden silently).
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+  });
+
+  it("keeps already-displayed sections intact while appending (load lands in a new section)", async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderToday(
+      [card({ id: "c-overdue", title: "Late", dueDate: due(2026, 6, 20) })],
+      1,
+      true,
+    );
+    h.loadMoreTodayCardsAction.mockResolvedValue({
+      success: true,
+      hasMore: false,
+      items: [card({ id: "c-week", title: "Next week", dueDate: due(2026, 7, 6) })],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+
+    const overdue = screen.getByRole("heading", { name: "Overdue" }).closest("section")!;
+    expect(within(overdue).getByRole("link", { name: "Open card Late" })).toBeInTheDocument();
+    const week = screen.getByRole("heading", { name: "Due This Week" }).closest("section")!;
+    expect(within(week).getByRole("link", { name: "Open card Next week" })).toBeInTheDocument();
+  });
+
+  it("sends an empty cursorDueDate for a no-due last card (null-dueDate cursor position)", async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderToday([card({ id: "c-nodue", title: "No due" })], 1, true);
+    h.loadMoreTodayCardsAction.mockResolvedValue({
+      success: true,
+      hasMore: false,
+      items: [],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+
+    const fd = h.loadMoreTodayCardsAction.mock.calls[0][0] as FormData;
+    expect(fd.get("cursorId")).toBe("c-nodue");
+    expect(fd.get("cursorDueDate")).toBe("");
+  });
+
+  it("disables the button while a page is loading", async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    let resolvePage!: (value: {
+      success: true;
+      items: TodayCard[];
+      hasMore: boolean;
+    }) => void;
+    h.loadMoreTodayCardsAction.mockReturnValue(
+      new Promise((resolve) => {
+        resolvePage = resolve;
+      }),
+    );
+    renderToday(
+      [card({ id: "c-1", title: "First", dueDate: due(2026, 7, 3) })],
+      1,
+      true,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+
+    const loading = screen.getByRole("button", { name: "Loading..." });
+    expect(loading).toBeDisabled();
+
+    resolvePage({ success: true, hasMore: false, items: [] });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Loading..." })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("shows the action error inline and keeps the button for a retry", async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    h.loadMoreTodayCardsAction.mockResolvedValue({
+      success: false,
+      error: "Failed to load cards",
+    });
+    renderToday(
+      [card({ id: "c-1", title: "First", dueDate: due(2026, 7, 3) })],
+      1,
+      true,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Failed to load cards");
+    expect(screen.getByRole("button", { name: "Load more" })).toBeInTheDocument();
+  });
+
+  it("shows a generic error when the action throws", async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    h.loadMoreTodayCardsAction.mockRejectedValue(new Error("network"));
+    renderToday(
+      [card({ id: "c-1", title: "First", dueDate: due(2026, 7, 3) })],
+      1,
+      true,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/failed to load more cards/i);
   });
 });
