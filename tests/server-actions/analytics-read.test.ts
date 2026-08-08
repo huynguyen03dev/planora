@@ -97,6 +97,33 @@ describe.each([
       expect.objectContaining({ workspaceId: WS_A_ID }),
     );
   });
+
+  it("allow: forwards an explicit lead-time page window when provided (dashboard page 1)", async () => {
+    // The dashboard server-renders page 1 at the pagination page size instead
+    // of the engine's MAX_LEAD_TIME_ROWS default, so the window must flow
+    // through the action to the engine verbatim.
+    signIn("member");
+    h.db.workspace.findUnique.mockResolvedValue({ id: WS_A_ID, name: "A", timezone: "UTC", analyticsLaunchAt: null });
+    h.db.workspaceMember.findFirst.mockResolvedValue({ id: "m" });
+    h.getWorkspaceAnalytics.mockResolvedValue({ marker: true });
+    await getWorkspaceAnalyticsAction("ws-a", FILTERS, { offset: 0, limit: 20 });
+    expect(h.getWorkspaceAnalytics).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: WS_A_ID, leadTimeRows: { offset: 0, limit: 20 } }),
+    );
+  });
+
+  it("allow: omits the window when not provided (historical default preserved)", async () => {
+    signIn("member");
+    h.db.workspace.findUnique.mockResolvedValue({ id: WS_A_ID, name: "A", timezone: "UTC", analyticsLaunchAt: null });
+    h.db.workspaceMember.findFirst.mockResolvedValue({ id: "m" });
+    h.getWorkspaceAnalytics.mockResolvedValue({ marker: true });
+    await getWorkspaceAnalyticsAction("ws-a", FILTERS);
+    expect(h.getWorkspaceAnalytics).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: WS_A_ID }),
+    );
+    const arg = h.getWorkspaceAnalytics.mock.calls[0][0];
+    expect("leadTimeRows" in arg).toBe(false);
+  });
 });
 
 describe("loadMoreLeadTimeRowsAction — read isolation + filter parity", () => {
