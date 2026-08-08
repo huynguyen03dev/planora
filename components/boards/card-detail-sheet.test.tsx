@@ -27,10 +27,20 @@ const actions = vi.hoisted(() => ({
   archiveCardAction: vi.fn(),
 }));
 
+// Shared, controllable doubles: the close/reopen lifecycle tests drive the URL
+// (as router.replace/push would) and assert against router.replace. The default
+// `?cardId=card-1` keeps every existing test rendering an OPEN sheet.
+const routerMock = vi.hoisted(() => ({
+  replace: vi.fn(),
+  refresh: vi.fn(),
+  push: vi.fn(),
+}));
+const urlParams = vi.hoisted(() => new URLSearchParams("cardId=card-1"));
+
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn() }),
+  useRouter: () => routerMock,
   usePathname: () => "/boards/board-1",
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => urlParams,
 }));
 
 vi.mock("@/app/(authenticated)/(dashboard)/boards/[boardId]/actions", () => actions);
@@ -708,5 +718,144 @@ describe("CardDetailSheet — comment composer", () => {
 
     expect(screen.getByText("Comment cannot be empty")).toBeInTheDocument();
     expect(actions.createCommentAction).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Close/reopen lifecycle (close-flash regression, fix/card-detail-close-flash)
+//
+// page.tsx keys CardDetailSheet by the server-selected card:
+//   key={selectedCard?.id ?? "card-detail-sheet-closed"}
+// so a card → no-card → card server re-render UNMOUNTS and REMOUNTS the sheet,
+// destroying the dismissedCardId latch. The close-flash happens when an
+// in-flight router.refresh() payload (fetched while ?cardId was still in the
+// URL — queued autosave, socket reconnect, list:restored, drag resync) lands
+// AFTER the close navigation: the server re-renders with the card selected
+// again, the key flips back, and a fresh sheet mounts with open=true and
+// dismissedCardId=null. The URL no longer selects a card, so the dialog must
+// stay closed — the open state must be URL-authoritative, not server-payload
+// authoritative.
+//
+// These tests drive the same sequences with a keyed harness, asserting the
+// dialog never flashes open after close and that intentional reopens still
+// work.
+//
+// The harness mirrors page.tsx: key follows the card prop, open=!!card.
+function keyedSheet(
+  card: CardDetailRecord | null,
+  overrides: Partial<Parameters<typeof CardDetailSheet>[0]> = {},
+) {
+  return (
+    <CardDetailSheet
+      key={card?.id ?? "card-detail-sheet-closed"}
+      open={Boolean(card)}
+      card={card}
+      comments={[]}
+      commentsHasMore={false}
+      activity={[]}
+      activityHasMore={false}
+      attachments={[]}
+      assignees={[]}
+      assignableMembers={[]}
+      boardId="board-1"
+      boardLabels={[]}
+      cardLabelIds={[]}
+      checklists={[]}
+      canEdit
+      canArchive={false}
+      canComment
+      {...overrides}
+    />
+  );
+}
+
+describe("CardDetailSheet — close/reopen lifecycle (close-flash regression)", () => {
+  const card = makeCard();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useBoardStore.getState().reset();
+    urlParams.set("cardId", "card-1");
+  });
+
+  it("stays closed when a stale RSC payload remounts the sheet after close (the close-flash bug)", async () => {
+    const { rerender } = render(keyedSheet(card));
+    expect(screen.getByLabelText("Card title")).toBeInTheDocument();
+
+    // User closes (outside click / X / Escape all funnel through
+    // onOpenChange(false)) → handleClose: latch the dismissal and strip ?cardId.
+    await user.click(screen.getByRole("button", { name: "Close card" }));
+    expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
+      scroll: false,
+    });
+
+    // The close navigation lands: server renders with no selected card → the
+    // key flips to the closed marker → the sheet unmounts (latch destroyed).
+    urlParams.delete("cardId");
+    rerender(keyedSheet(null));
+    expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
+
+    // A STALE refresh payload (fetched while ?cardId was still in the URL)
+    // lands after the close navigation: server re-renders with card-1 selected
+    // again → key flips back → the sheet REMOUNTS with open=true. The URL has
+    // no cardId, so the dialog must stay closed. This is the reported flash.
+    rerender(keyedSheet(card));
+    expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
+  });
+
+  it("reopens the same card when the user intentionally navigates to it again", async () => {
+    const { rerender } = render(keyedSheet(card));
+    await user.click(screen.getByRole("button", { name: "Close card" }));
+
+    urlParams.delete("cardId");
+    rerender(keyedSheet(null));
+    // Stale payload between close and reopen — must stay closed.
+    rerender(keyedSheet(card));
+    expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
+
+    // Intentional reopen: BoardContent.openCard pushes ?cardId again → the URL
+    // and the server payload agree → the dialog opens.
+    urlParams.set("cardId", "card-1");
+    rerender(keyedSheet(card));
+    expect(await screen.findByLabelText("Card title")).toBeInTheDocument();
+  });
+
+  it("reopens the same card when a stale payload kept the sheet mounted (latch is cleared once the URL drops the card)", async () => {
+    const { rerender } = render(keyedSheet(card));
+    expect(screen.getByLabelText("Card title")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Close card" }));
+    expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
+      scroll: false,
+    });
+
+    // The replace commits (URL loses cardId) but a stale payload keeps the
+    // sheet MOUNTED with the same key — no remount, so the dismissal latch
+    // would survive and block a later reopen.
+    urlParams.delete("cardId");
+    rerender(keyedSheet(card));
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument(),
+    );
+
+    // User re-clicks the same card: push re-adds ?cardId, same key → no
+    // remount. The latch must have been cleared when the URL dropped the card.
+    urlParams.set("cardId", "card-1");
+    rerender(keyedSheet(card));
+    expect(await screen.findByLabelText("Card title")).toBeInTheDocument();
+  });
+
+  it("Escape closes the dialog through the same handleClose path", async () => {
+    const { rerender } = render(keyedSheet(card));
+    expect(screen.getByLabelText("Card title")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
+      scroll: false,
+    });
+
+    urlParams.delete("cardId");
+    rerender(keyedSheet(null));
+    expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
   });
 });
