@@ -75,8 +75,9 @@ export type WorkspaceAnalyticsPayload = {
   leadTime: {
     median: KPIValue;
     average: KPIValue;
-    rows: LeadTimeRow[]; // capped at MAX_LEAD_TIME_ROWS; see totalCompleted
+    rows: LeadTimeRow[]; // capped at MAX_LEAD_TIME_ROWS by default; see hasMore/totalCompleted
     totalCompleted: number; // total cards first-completed in range (>= rows.length)
+    hasMore: boolean; // whether more detail rows exist past the returned window
   };
   remainingHours: KPIValue;
   overdue: KPIValue;
@@ -141,6 +142,20 @@ export type AnalyticsExportPayload = {
 export type WorkspaceAnalyticsQuery = {
   workspaceId: string;
   filters: AnalyticsFilters;
+  /** Optional offset/limit window for the lead-time detail rows. Omitted → the
+   * first MAX_LEAD_TIME_ROWS rows (offset 0). KPIs are never windowed — they
+   * always cover every completion in range. */
+  leadTimeRows?: { offset?: number; limit?: number };
+};
+
+/** A page of lead-time detail rows — the offset/limit window of the full
+ * completedAt-descending set, plus the window-independent totals. */
+export type LeadTimeRowsPage = {
+  rows: LeadTimeRow[];
+  /** Whether rows exist past the returned window. */
+  hasMore: boolean;
+  /** Total cards first-completed in range (>= rows.length). */
+  totalCompleted: number;
 };
 
 // Internal computation state

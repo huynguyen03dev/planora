@@ -191,8 +191,17 @@ export default async function DashboardPage({
       <DataQualitySection analytics={analytics} workspaceSlug={slug} />
 
       <LeadTimeTable
+        workspaceId={workspaceRef.id}
         rows={analytics.leadTime.rows}
         totalCompleted={analytics.leadTime.totalCompleted}
+        hasMore={analytics.leadTime.hasMore}
+        filterSnapshot={{
+          from: analytics.filters.from.toISOString(),
+          to: analytics.filters.to.toISOString(),
+          boardId: analytics.filters.boardId ?? null,
+          memberId: analytics.filters.memberId ?? null,
+          includeArchivedBoards: analytics.filters.includeArchivedBoards ?? false,
+        }}
       />
     </DashboardShell>
   );

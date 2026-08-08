@@ -1,14 +1,16 @@
 "use server";
 
-import { getWorkspaceAnalytics } from "@/lib/analytics/engine";
+import { getLeadTimeRows, getWorkspaceAnalytics } from "@/lib/analytics/engine";
 import type {
   AnalyticsExportPayload,
   AnalyticsFilters,
+  LeadTimeRow,
   WorkspaceAnalyticsPayload,
 } from "@/lib/analytics/types";
 import { isWorkspaceMember } from "@/lib/authorization";
 import db from "@/lib/prisma";
 import { verifySession } from "@/lib/dal";
+import { loadMoreLeadTimeRowsSchema } from "@/lib/schemas";
 
 export type AnalyticsActionResult<T> =
   | { success: true; data: T }
@@ -54,6 +56,86 @@ export async function getWorkspaceAnalyticsAction(
   } catch (error) {
     console.error("Failed to get workspace analytics:", error);
     return { success: false, error: "Failed to load analytics" };
+  }
+}
+
+export type LoadMoreLeadTimeRowsResult =
+  | {
+      success: true;
+      rows: LeadTimeRow[];
+      hasMore: boolean;
+      totalCompleted: number;
+    }
+  | { success: false; error: string };
+
+/**
+ * Offset-paginated read of the next lead-time detail window (no silent cap).
+ * The dashboard renders the first page server-side; "Load more" appends the
+ * next window against the SAME resolved range/filters the dashboard used —
+ * from/to arrive as the payload's resolved dates, boardId/memberId/
+ * includeArchivedBoards echo the page's parsed searchParams — so appended rows
+ * can never drift from the displayed view. Read gate mirrors
+ * getWorkspaceAnalyticsAction: any workspace member (viewers included) may
+ * read analytics rows.
+ */
+export async function loadMoreLeadTimeRowsAction(
+  formData: FormData,
+): Promise<LoadMoreLeadTimeRowsResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = loadMoreLeadTimeRowsSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  const { userId } = await verifySession();
+
+  const {
+    workspaceId,
+    from,
+    to,
+    boardId,
+    memberId,
+    includeArchivedBoards,
+    offset,
+    limit,
+  } = parsed.data;
+
+  const workspace = await db.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { id: true },
+  });
+  if (!workspace) {
+    return { success: false, error: "Workspace not found" };
+  }
+
+  if (!(await isWorkspaceMember(userId, workspace.id))) {
+    return { success: false, error: "Access denied" };
+  }
+
+  try {
+    const page = await getLeadTimeRows(
+      workspace.id,
+      {
+        from,
+        to,
+        ...(boardId ? { boardId } : {}),
+        ...(memberId ? { memberId } : {}),
+        includeArchivedBoards,
+      },
+      { offset, limit },
+    );
+
+    return {
+      success: true,
+      rows: page.rows,
+      hasMore: page.hasMore,
+      totalCompleted: page.totalCompleted,
+    };
+  } catch (error) {
+    console.error("Failed to load more lead-time rows:", error);
+    return { success: false, error: "Failed to load rows" };
   }
 }
 
