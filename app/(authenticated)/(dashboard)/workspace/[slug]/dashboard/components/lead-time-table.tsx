@@ -1,18 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { loadMoreLeadTimeRowsAction } from "../actions";
 import { Button } from "@/components/ui/button";
 import type { LeadTimeRow } from "@/lib/analytics/types";
 
-/** Page size for the "Load more" window — matches the engine default cap so
- * the first server-rendered page and every appended page are the same size. */
-const LEAD_TIME_PAGE_SIZE = 100;
-
 /** The RESOLVED filters the dashboard rendered, echoed verbatim to the
- * load-more action so appended rows come from the identical set. from/to are
- * the payload's resolved range (workspace-timezone-aware), not a re-derivation. */
+ * pagination action so every fetched page comes from the identical set.
+ * from/to are the payload's resolved range (workspace-timezone-aware), not a
+ * re-derivation. */
 type LeadTimeFilterSnapshot = {
   from: string; // ISO-8601
   to: string; // ISO-8601
@@ -28,6 +25,10 @@ type LeadTimeTableProps = {
   /** Whether more detail rows exist behind the server-rendered page. */
   hasMore: boolean;
   filterSnapshot: LeadTimeFilterSnapshot;
+  /** Pagination window size (LEAD_TIME_PAGE_SIZE from the analytics engine —
+   * page 1 is server-rendered at this size, every later page fetched with the
+   * same limit). */
+  pageSize: number;
 };
 
 function formatHours(hours: number): string {
@@ -73,21 +74,53 @@ export function LeadTimeTable({
   totalCompleted: initialTotalCompleted,
   hasMore: initialHasMore,
   filterSnapshot,
+  pageSize,
 }: LeadTimeTableProps) {
   const [rows, setRows] = useState(initialRows);
   const [totalCompleted, setTotalCompleted] = useState(initialTotalCompleted);
   const [hasMore, setHasMore] = useState(initialHasMore);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const isTruncated = totalCompleted > rows.length;
+  // Primitive key for the filter effect: only the resolved filter VALUES
+  // matter, never the props object identity.
+  const filterKey = [
+    filterSnapshot.from,
+    filterSnapshot.to,
+    filterSnapshot.boardId ?? "",
+    filterSnapshot.memberId ?? "",
+    filterSnapshot.includeArchivedBoards ? "archived" : "",
+  ].join("|");
 
-  async function handleLoadMore() {
-    if (isLoadingMore) {
+  // Filters/range changed server-side: the fresh page-1 window just arrived
+  // via props — reset the client pagination state onto it. Guarded by the
+  // previous-key ref so re-renders that keep the SAME filter values (e.g. tab
+  // away/back) never clobber the current page.
+  const prevFilterKey = useRef(filterKey);
+  useEffect(() => {
+    if (prevFilterKey.current === filterKey) {
       return;
     }
-    setIsLoadingMore(true);
-    setLoadError(null);
+    prevFilterKey.current = filterKey;
+    setPage(1);
+    setRows(initialRows);
+    setTotalCompleted(initialTotalCompleted);
+    setHasMore(initialHasMore);
+    setError(null);
+    setIsLoading(false);
+  }, [filterKey, initialRows, initialTotalCompleted, initialHasMore]);
+
+  const totalPages = totalCompleted > 0 ? Math.ceil(totalCompleted / pageSize) : 1;
+  const firstRow = totalCompleted > 0 ? (page - 1) * pageSize + 1 : 0;
+  const lastRow = Math.min(page * pageSize, totalCompleted);
+
+  async function fetchPage(targetPage: number) {
+    if (isLoading) {
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
     try {
       const formData = new FormData();
       formData.set("workspaceId", workspaceId);
@@ -102,28 +135,25 @@ export function LeadTimeTable({
       if (filterSnapshot.includeArchivedBoards) {
         formData.set("includeArchivedBoards", "1");
       }
-      // The next window starts after every row already displayed. Cards that
-      // complete between renders can shift the sorted set, so the append is
-      // deduped by cardId as a safety net.
-      formData.set("offset", String(rows.length));
-      formData.set("limit", String(LEAD_TIME_PAGE_SIZE));
+      // The requested page's window starts after every row on the pages
+      // before it; rows REPLACE the displayed set (no append/dedupe needed —
+      // each page is an independent window of the same sorted set).
+      formData.set("offset", String((targetPage - 1) * pageSize));
+      formData.set("limit", String(pageSize));
 
       const result = await loadMoreLeadTimeRowsAction(formData);
       if (!result.success) {
-        setLoadError(result.error);
+        setError(result.error);
         return;
       }
-      setRows((prev) => {
-        const seen = new Set(prev.map((row) => row.cardId));
-        const additions = result.rows.filter((row) => !seen.has(row.cardId));
-        return [...prev, ...additions];
-      });
+      setRows(result.rows);
       setTotalCompleted(result.totalCompleted);
       setHasMore(result.hasMore);
+      setPage(targetPage);
     } catch {
-      setLoadError("Failed to load more rows. Please try again.");
+      setError("Failed to load rows. Please try again.");
     } finally {
-      setIsLoadingMore(false);
+      setIsLoading(false);
     }
   }
 
@@ -171,32 +201,44 @@ export function LeadTimeTable({
         </div>
       )}
 
-      {(isTruncated || hasMore) && (
-        <div className="flex flex-col items-center gap-2 border-t p-3 text-center">
-          {isTruncated && (
-            <p className="text-xs text-muted-foreground">
-              Showing {rows.length} of {totalCompleted} completed cards. Narrow
-              the date range or filters to see the rest.
+      {totalPages > 1 && (
+        <div className="flex flex-col items-center justify-between gap-3 border-t p-3 sm:flex-row">
+          <p className="text-xs text-muted-foreground">
+            Showing {firstRow}–{lastRow} of {totalCompleted} completed cards
+          </p>
+
+          <div className="flex items-center gap-2" aria-busy={isLoading}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => fetchPage(page - 1)}
+              disabled={page <= 1 || isLoading}
+            >
+              Previous
+            </Button>
+            <span
+              className="min-w-24 text-center text-xs text-muted-foreground"
+              aria-live="polite"
+            >
+              Page {page} of {totalPages}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => fetchPage(page + 1)}
+              disabled={!hasMore || isLoading}
+            >
+              Next
+            </Button>
+          </div>
+
+          {error ? (
+            <p role="alert" className="text-xs text-destructive">
+              {error}
             </p>
-          )}
-          {hasMore && (
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleLoadMore}
-                disabled={isLoadingMore}
-              >
-                {isLoadingMore ? "Loading..." : "Load more"}
-              </Button>
-              {loadError ? (
-                <p role="alert" className="text-xs text-destructive">
-                  {loadError}
-                </p>
-              ) : null}
-            </>
-          )}
+          ) : null}
         </div>
       )}
     </section>

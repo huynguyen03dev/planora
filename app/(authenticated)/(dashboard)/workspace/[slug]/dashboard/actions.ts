@@ -27,11 +27,15 @@ async function getWorkspaceBySlug(slug: string) {
 }
 
 /**
- * Get workspace analytics with permission check.
+ * Get workspace analytics with permission check. `leadTimeRows` optionally
+ * windows the lead-time detail rows (offset/limit) so the dashboard can
+ * server-render page 1 at the pagination page size instead of the engine's
+ * MAX_LEAD_TIME_ROWS cap. Omitted → historical default (offset 0, limit 100).
  */
 export async function getWorkspaceAnalyticsAction(
   slug: string,
   filters: AnalyticsFilters,
+  leadTimeRows?: { offset?: number; limit?: number },
 ): Promise<AnalyticsActionResult<WorkspaceAnalyticsPayload>> {
   const { userId } = await verifySession();
 
@@ -50,6 +54,7 @@ export async function getWorkspaceAnalyticsAction(
     const payload = await getWorkspaceAnalytics({
       workspaceId: workspace.id,
       filters,
+      ...(leadTimeRows ? { leadTimeRows } : {}),
     });
 
     return { success: true, data: payload };
