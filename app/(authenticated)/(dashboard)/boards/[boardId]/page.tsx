@@ -12,11 +12,11 @@ import {
   hasWorkspacePermission,
 } from "@/lib/authorization";
 import { getCardDetailForBoard } from "@/lib/card";
-import { getCommentsByCardId } from "@/lib/comment";
+import { getCommentsByCardId, COMMENT_PAGE_SIZE } from "@/lib/comment";
 import type { CommentRecord } from "@/lib/comment";
 import { getAttachmentsByCardId } from "@/lib/attachment";
 import type { AttachmentRecord } from "@/lib/attachment";
-import { getActivityByCardId } from "@/lib/activity";
+import { getActivityByCardId, ACTIVITY_PAGE_SIZE } from "@/lib/activity";
 import type { ActivityRecord } from "@/lib/activity";
 import { getBoardTheme } from "@/lib/constants";
 import { verifySession } from "@/lib/dal";
@@ -134,6 +134,10 @@ export default async function BoardPage({
   let comments: CommentRecord[] = [];
   let attachments: AttachmentRecord[] = [];
   let activity: ActivityRecord[] = [];
+  // Whether more comments/activity exist behind the seeded page (drives the
+  // sheet's "Load more" affordance).
+  let commentsHasMore = false;
+  let activityHasMore = false;
   let assignees: CardMemberRecord[] = [];
   let assignableMembers: AssignableWorkspaceMemberRecord[] = [];
   let cardLabels: LabelRecord[] = [];
@@ -158,17 +162,19 @@ export default async function BoardPage({
         cardLabelRecords,
         cardChecklists,
       ] = await Promise.all([
-        getCommentsByCardId(selectedCard.id),
+        getCommentsByCardId(selectedCard.id, { limit: COMMENT_PAGE_SIZE }),
         getAttachmentsByCardId(selectedCard.id),
-        getActivityByCardId(selectedCard.id),
+        getActivityByCardId(selectedCard.id, { limit: ACTIVITY_PAGE_SIZE }),
         getCardMembers(selectedCard.id),
         getCardLabels(selectedCard.id),
         getCardChecklists(selectedCard.id),
       ]);
 
-      comments = cardComments;
+      comments = cardComments.items;
+      commentsHasMore = cardComments.hasMore;
       attachments = cardAttachments;
-      activity = cardActivity;
+      activity = cardActivity.items;
+      activityHasMore = cardActivity.hasMore;
       assignees = cardAssignees;
       cardLabels = cardLabelRecords;
       checklists = cardChecklists;
@@ -332,7 +338,9 @@ export default async function BoardPage({
           open={Boolean(selectedCard)}
           card={selectedCard}
           comments={comments}
+          commentsHasMore={commentsHasMore}
           activity={activity}
+          activityHasMore={activityHasMore}
           attachments={attachments}
           assignees={assignees}
           assignableMembers={assignableMembers}
