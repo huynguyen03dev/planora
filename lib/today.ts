@@ -44,12 +44,14 @@ export type TodaySectionGroup = {
 
 /**
  * Explicit pagination page size for `/today` (US-083 follow-up). No silent
- * cap: the initial render + every "Load more" page fetch this many rows with
- * `hasMore` reported exactly (limit+1 probe), so the whole personal read
- * model stays reachable. Client-safe (no server-only import) so both the RSC
- * seam and the client "Load more" button share the same value.
+ * cap: the initial render + every infinite-scroll batch fetch this many rows
+ * with `hasMore` reported exactly (limit+1 probe), so the whole personal
+ * read model stays reachable. 30 keeps each auto-loaded batch light (≈ a
+ * viewport of tiles) while the sentinel-driven loop never hides cards.
+ * Client-safe (no server-only import) so both the RSC seam and the client
+ * boundary share the same value.
  */
-export const TODAY_PAGE_SIZE = 50;
+export const TODAY_PAGE_SIZE = 30;
 
 /**
  * The client-side cursor for the next `/today` page. The query layer sorts

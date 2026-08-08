@@ -78,7 +78,7 @@ describe("TodayPage — RSC wiring (US-083 W6)", () => {
     expect(h.verifySession).toHaveBeenCalledTimes(1);
     expect(h.getPersonalWorkCards).toHaveBeenCalledTimes(1);
     expect(h.getPersonalWorkCards).toHaveBeenCalledWith(SESSION_USER_ID, {
-      limit: 50,
+      limit: 30,
     });
     expect(h.TodayView.mock.calls[0][0]).toMatchObject({
       workspaceCount: 2,
