@@ -182,6 +182,11 @@ export type ListRulesInput = z.infer<typeof listRulesSchema>;
 export const ruleExecutionLogSchema = z.object({
   workspaceId: workspaceIdSchema,
   ruleId: z.string().uuid("Invalid rule ID").optional(),
+  // US-066 cursor pagination: `cursor` is the id of the last log of the
+  // previous page; `take` overrides the default page size (100). Omitting both
+  // keeps the legacy behavior (the 100 newest logs).
+  cursor: z.string().uuid("Invalid cursor").optional(),
+  take: z.number().int().min(1).max(200).optional(),
 });
 
 export type RuleExecutionLogInput = z.infer<typeof ruleExecutionLogSchema>;

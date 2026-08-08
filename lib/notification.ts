@@ -34,13 +34,18 @@ export async function getUnreadNotificationCount(userId: string): Promise<number
 
 export async function getNotificationsForUser(
   userId: string,
-  options?: { limit?: number },
+  options?: { limit?: number; cursor?: string },
 ): Promise<NotificationRecord[]> {
   return db.notification.findMany({
     // INVITE notifications are surfaced directly from the invitation table in
     // the unified inbox; exclude them so the feed never double-lists an invite.
     where: { userId, type: { not: "INVITE" } },
-    orderBy: { createdAt: "desc" },
+    // createdAt desc with an id tiebreak keeps cursor pages deterministic.
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    // Cursor pagination: `cursor` = the id of the last notification of the
+    // previous page (skipped via `skip: 1` so it is not returned twice).
+    // Omitting it keeps the legacy behavior (the newest `limit`, default 50).
+    ...(options?.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
     take: options?.limit ?? 50,
     select: {
       id: true,

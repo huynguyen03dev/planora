@@ -88,7 +88,7 @@ type ListRulesResult =
   | { success: false; error: string };
 
 type RuleLogResult =
-  | { success: true; logs: SerializedRuleLog[] }
+  | { success: true; logs: SerializedRuleLog[]; hasMore: boolean }
   | { success: false; error: string };
 
 type DryRunResult =
@@ -439,6 +439,11 @@ export async function listRulesAction(input: unknown): Promise<ListRulesResult> 
 
 // ─── getRuleExecutionLogAction (any workspace member) ──────────────
 
+// Default page size for the execution-log cursor pagination (US-066). Kept at
+// 100 — the pre-pagination take — so callers that omit `take` get exactly the
+// legacy behavior (the 100 newest logs).
+const EXECUTION_LOG_PAGE_SIZE = 100;
+
 export async function getRuleExecutionLogAction(input: unknown): Promise<RuleLogResult> {
   const { userId } = await verifySession();
 
@@ -447,18 +452,26 @@ export async function getRuleExecutionLogAction(input: unknown): Promise<RuleLog
     return { success: false, error: WORKSPACE_NOT_FOUND };
   }
 
-  const { workspaceId, ruleId } = parsed.data;
+  const { workspaceId, ruleId, cursor, take } = parsed.data;
 
   if (!(await isWorkspaceMember(userId, workspaceId))) {
     return { success: false, error: WORKSPACE_NOT_FOUND };
   }
 
-  const logs = await db.ruleExecutionLog.findMany({
+  // US-066 cursor pagination: `cursor` = the id of the last log of the
+  // previous page (skipped via `skip: 1` so it is not returned twice), `take`
+  // overrides the default page size. Fetching take+1 lets us report `hasMore`
+  // exactly (a full extra row means another page exists) without a second
+  // count query. Ordering breaks executedAt ties by id so pages are
+  // deterministic — equal timestamps can't shift rows between pages.
+  const pageSize = take ?? EXECUTION_LOG_PAGE_SIZE;
+  const rows = await db.ruleExecutionLog.findMany({
     // Logs carry a denormalized workspaceId, so they stay scoped (and visible)
     // even after their rule is deleted — the rule link goes null, the log stays.
     where: { workspaceId, ...(ruleId ? { ruleId } : {}) },
-    orderBy: { executedAt: "desc" },
-    take: 100,
+    orderBy: [{ executedAt: "desc" }, { id: "desc" }],
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    take: pageSize + 1,
     select: {
       id: true,
       ruleId: true,
@@ -474,9 +487,13 @@ export async function getRuleExecutionLogAction(input: unknown): Promise<RuleLog
     },
   });
 
+  const hasMore = rows.length > pageSize;
+  const page = rows.slice(0, pageSize);
+
   return {
     success: true,
-    logs: logs.map((log) => ({
+    hasMore,
+    logs: page.map((log) => ({
       id: log.id,
       ruleId: log.ruleId,
       ruleName: log.ruleName,

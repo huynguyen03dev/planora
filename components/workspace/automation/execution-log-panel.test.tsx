@@ -184,6 +184,7 @@ describe("ExecutionLogPanel", () => {
     it("calls getRuleExecutionLogAction when onRefresh is not provided", async () => {
       getRuleExecutionLogAction.mockResolvedValue({
         success: true,
+        hasMore: false,
         logs: [],
       });
       renderPanel({ onRefresh: undefined });
@@ -228,12 +229,13 @@ describe("ExecutionLogPanel", () => {
       );
 
       // Clean up: resolve so the transition can finish.
-      resolveAction!({ success: true, logs: [] });
+      resolveAction!({ success: true, hasMore: false, logs: [] });
     });
 
     it("updates logs after a successful fetch", async () => {
       getRuleExecutionLogAction.mockResolvedValue({
         success: true,
+        hasMore: false,
         logs: makeLogs([
           { ruleName: "Fetched rule", status: "success" },
         ]),
@@ -246,6 +248,147 @@ describe("ExecutionLogPanel", () => {
         expect(screen.getByText("Fetched rule")).toBeInTheDocument(),
       );
       expect(screen.getByText("Execution log (1)")).toBeInTheDocument();
+    });
+  });
+
+  describe("load more (US-066 cursor pagination)", () => {
+    it("shows Load more when the initial page is full (100 logs)", () => {
+      const logs = makeLogs(Array.from({ length: 100 }, () => ({})));
+      renderPanel({ initialLogs: logs });
+
+      expect(
+        screen.getByRole("button", { name: "Load more" }),
+      ).toBeInTheDocument();
+    });
+
+    it("hides Load more when initial logs are under a page", () => {
+      const logs = makeLogs([{}, {}]);
+      renderPanel({ initialLogs: logs });
+
+      expect(
+        screen.queryByRole("button", { name: "Load more" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("hides Load more when the panel is host-driven (board modal, onRefresh)", () => {
+      const logs = makeLogs(Array.from({ length: 100 }, () => ({})));
+      renderPanel({ initialLogs: logs, onRefresh: vi.fn().mockResolvedValue(undefined) });
+
+      expect(
+        screen.queryByRole("button", { name: "Load more" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("fetches the next page with a cursor (last loaded id) and appends it", async () => {
+      const firstPage = makeLogs(
+        Array.from({ length: 100 }, (_, i) => ({ id: `log-${i}`, ruleName: `Rule ${i}` })),
+      );
+      getRuleExecutionLogAction.mockResolvedValue({
+        success: true,
+        hasMore: false,
+        logs: makeLogs([{ id: "log-100", ruleName: "Older run" }]),
+      });
+      renderPanel({ initialLogs: firstPage });
+
+      await user.click(screen.getByRole("button", { name: "Load more" }));
+
+      await waitFor(() =>
+        expect(getRuleExecutionLogAction).toHaveBeenCalledWith({
+          workspaceId: "ws-1",
+          cursor: "log-99",
+          take: 100,
+        }),
+      );
+      expect(await screen.findByText("Older run")).toBeInTheDocument();
+      expect(screen.getByText("Execution log (101)")).toBeInTheDocument();
+      // The short batch means the end of the feed → button disappears.
+      expect(
+        screen.queryByRole("button", { name: "Load more" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("keeps Load more visible while a returned batch still fills a page", async () => {
+      const firstPage = makeLogs(
+        Array.from({ length: 100 }, (_, i) => ({ id: `log-${i}`, ruleName: `Rule ${i}` })),
+      );
+      getRuleExecutionLogAction.mockResolvedValue({
+        success: true,
+        hasMore: true,
+        logs: makeLogs(
+          Array.from({ length: 100 }, (_, i) => ({ id: `log-${100 + i}`, ruleName: `Rule ${100 + i}` })),
+        ),
+      });
+      renderPanel({ initialLogs: firstPage });
+
+      await user.click(screen.getByRole("button", { name: "Load more" }));
+
+      await waitFor(() =>
+        expect(screen.getByText("Execution log (200)")).toBeInTheDocument(),
+      );
+      // A full batch may hide more rows → the button stays (wait for the
+      // transition to settle so it is no longer showing "Loading...").
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Load more" })).toBeEnabled(),
+      );
+    });
+
+    it("drops a row whose id is already listed (id dedupe on append)", async () => {
+      const firstPage = makeLogs(
+        Array.from({ length: 100 }, (_, i) => ({ id: `log-${i}`, ruleName: `Rule ${i}` })),
+      );
+      // Page 2 would overlap page 1 if the server misbehaved; the panel must
+      // not render the duplicate at all (count stays at the first page's).
+      getRuleExecutionLogAction.mockResolvedValue({
+        success: true,
+        hasMore: false,
+        logs: makeLogs([{ id: "log-99", ruleName: "Dup" }]),
+      });
+      renderPanel({ initialLogs: firstPage });
+
+      await user.click(screen.getByRole("button", { name: "Load more" }));
+
+      await waitFor(() => expect(screen.queryByText("Dup")).not.toBeInTheDocument());
+      expect(screen.getByText("Execution log (100)")).toBeInTheDocument();
+    });
+
+    it("refresh after load more resets to the first page and its hasMore", async () => {
+      const firstPage = makeLogs(
+        Array.from({ length: 100 }, (_, i) => ({ id: `log-${i}`, ruleName: `Rule ${i}` })),
+      );
+      // Page 2 returns a full page → button stays. A later refresh returns the
+      // first page with hasMore true → button stays (refreshed, not appended).
+      getRuleExecutionLogAction
+        .mockResolvedValueOnce({
+          success: true,
+          hasMore: true,
+          logs: makeLogs(
+            Array.from({ length: 100 }, (_, i) => ({ id: `log-${100 + i}`, ruleName: `Rule ${100 + i}` })),
+          ),
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          hasMore: true,
+          logs: firstPage,
+        });
+      renderPanel({ initialLogs: firstPage });
+
+      await user.click(screen.getByRole("button", { name: "Load more" }));
+      await waitFor(() =>
+        expect(screen.getByText("Execution log (200)")).toBeInTheDocument(),
+      );
+      // Let the load-more transition settle before clicking Refresh (both
+      // buttons share the pending state).
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Load more" })).toBeEnabled(),
+      );
+
+      await user.click(screen.getByRole("button", { name: "Refresh" }));
+      await waitFor(() =>
+        expect(screen.getByText("Execution log (100)")).toBeInTheDocument(),
+      );
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Load more" })).toBeEnabled(),
+      );
     });
   });
 

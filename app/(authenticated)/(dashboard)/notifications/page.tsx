@@ -8,9 +8,16 @@ import { verifySession } from "@/lib/dal";
 import { getNotificationsForUser } from "@/lib/notification";
 import { NotificationsListClient } from "./notifications-list-client";
 
+// Inbox cursor pagination: first page = the newest 50 (matches the server
+// default limit in lib/notification.ts and the /api/notifications route). The
+// client uses the same page size for its Load-more fetches.
+const NOTIFICATIONS_PAGE_SIZE = 50;
+
 export default async function NotificationsPage() {
   const { userId } = await verifySession();
-  const notifications = await getNotificationsForUser(userId);
+  const notifications = await getNotificationsForUser(userId, {
+    limit: NOTIFICATIONS_PAGE_SIZE,
+  });
 
   if (notifications.length === 0) {
     return (
@@ -28,7 +35,10 @@ export default async function NotificationsPage() {
   return (
     <div className="mx-auto w-full max-w-2xl px-6 py-8">
       <h1 className="mb-6 text-2xl font-semibold tracking-tight">Notifications</h1>
-      <NotificationsListClient notifications={notifications} />
+      <NotificationsListClient
+        notifications={notifications}
+        hasMore={notifications.length === NOTIFICATIONS_PAGE_SIZE}
+      />
     </div>
   );
 }

@@ -39,6 +39,11 @@ type ExecutionLogPanelProps = {
   onRefresh?: () => void | Promise<void>;
 };
 
+// US-066 cursor pagination page size. The workspace page's initial logs come
+// from `loadAutomationView`'s default (100), so a full initial page means more
+// logs may exist and the Load more affordance appears.
+const LOG_PAGE_SIZE = 100;
+
 function statusVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
   if (status === "error") return "destructive";
   if (status === "success") return "outline";
@@ -61,12 +66,20 @@ export function ExecutionLogPanel({
 }: ExecutionLogPanelProps) {
   const [logs, setLogs] = useState<LogEntry[]>(initialLogs);
   const [isPending, startTransition] = useTransition();
+  // True while another page of logs may exist behind the last loaded row. The
+  // board modal (host-driven, `onRefresh`) can't page through its scoped host
+  // fetch, so Load more is workspace-page only. Initial state is inferred from
+  // the page size; later fetches report `hasMore` exactly.
+  const [hasMore, setHasMore] = useState(!onRefresh && initialLogs.length >= LOG_PAGE_SIZE);
 
   // Reflect externally-supplied logs when a host re-fetches (board modal). On
   // the workspace page `initialLogs` is stable between self-refreshes, so this
-  // never fights the built-in fetch below.
+  // never fights the built-in fetch below. hasMore follows the page heuristic:
+  // a full fresh page means more logs may exist. (In the board modal the
+  // button is hidden anyway via `hasMore && !onRefresh`.)
   useEffect(() => {
     setLogs(initialLogs);
+    setHasMore(initialLogs.length >= LOG_PAGE_SIZE);
   }, [initialLogs]);
 
   function refresh() {
@@ -85,6 +98,27 @@ export function ExecutionLogPanel({
         return;
       }
       setLogs(result.logs);
+      setHasMore(result.hasMore);
+    });
+  }
+
+  // Fetches the next page behind the last loaded log (US-066 cursor
+  // pagination). Appends with an id dedupe so a refresh racing the load can
+  // never double-list a row.
+  function loadMore() {
+    const cursor = logs[logs.length - 1]?.id;
+    if (!cursor) return;
+    startTransition(async () => {
+      const result = await getRuleExecutionLogAction({ workspaceId, cursor, take: LOG_PAGE_SIZE });
+      if (!result.success) {
+        notify(result.error, "error");
+        return;
+      }
+      setLogs((prev) => {
+        const seen = new Set(prev.map((log) => log.id));
+        return [...prev, ...result.logs.filter((log) => !seen.has(log.id))];
+      });
+      setHasMore(result.hasMore);
     });
   }
 
@@ -102,38 +136,54 @@ export function ExecutionLogPanel({
 
       <div className="overflow-hidden rounded-lg border bg-card">
         {logs.length > 0 ? (
-          <div className="divide-y">
-            {logs.map((log) => (
-              <div key={log.id} className="flex items-start justify-between gap-4 px-4 py-2.5">
-                <div className="min-w-0 space-y-0.5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="truncate text-sm font-medium">{log.ruleName}</span>
-                    {/* The rule survives in the log after deletion (ruleId goes
-                        null); flag it so the name here — which has no matching
-                        row in the rules list above — is explained. */}
-                    {log.ruleId === null ? (
-                      <span className="text-xs text-muted-foreground">(deleted)</span>
-                    ) : null}
-                    <Badge variant={statusVariant(log.status)} className="capitalize">
-                      {log.status}
-                    </Badge>
-                    {log.chainDepth > 0 ? (
-                      <span className="text-xs text-muted-foreground">chain depth {log.chainDepth}</span>
+          <>
+            <div className="divide-y">
+              {logs.map((log) => (
+                <div key={log.id} className="flex items-start justify-between gap-4 px-4 py-2.5">
+                  <div className="min-w-0 space-y-0.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-sm font-medium">{log.ruleName}</span>
+                      {/* The rule survives in the log after deletion (ruleId goes
+                          null); flag it so the name here — which has no matching
+                          row in the rules list above — is explained. */}
+                      {log.ruleId === null ? (
+                        <span className="text-xs text-muted-foreground">(deleted)</span>
+                      ) : null}
+                      <Badge variant={statusVariant(log.status)} className="capitalize">
+                        {log.status}
+                      </Badge>
+                      {log.chainDepth > 0 ? (
+                        <span className="text-xs text-muted-foreground">chain depth {log.chainDepth}</span>
+                      ) : null}
+                    </div>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {triggerLabel(log.triggerType)} → {actionLabel(log.actionType)}
+                    </p>
+                    {log.error ? (
+                      <p className="truncate text-xs text-destructive">{log.error}</p>
                     ) : null}
                   </div>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {triggerLabel(log.triggerType)} → {actionLabel(log.actionType)}
-                  </p>
-                  {log.error ? (
-                    <p className="truncate text-xs text-destructive">{log.error}</p>
-                  ) : null}
+                  <time className="shrink-0 text-xs text-muted-foreground" dateTime={log.executedAt}>
+                    {new Date(log.executedAt).toLocaleString()}
+                  </time>
                 </div>
-                <time className="shrink-0 text-xs text-muted-foreground" dateTime={log.executedAt}>
-                  {new Date(log.executedAt).toLocaleString()}
-                </time>
+              ))}
+            </div>
+            {hasMore && !onRefresh ? (
+              <div className="border-t p-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={loadMore}
+                  disabled={isPending}
+                >
+                  {isPending ? "Loading..." : "Load more"}
+                </Button>
               </div>
-            ))}
-          </div>
+            ) : null}
+          </>
         ) : (
           <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
             <div className="flex size-10 items-center justify-center rounded-full bg-secondary text-muted-foreground">
