@@ -441,8 +441,9 @@ export async function listRulesAction(input: unknown): Promise<ListRulesResult> 
 
 // Default page size for the execution-log cursor pagination (US-066). Kept at
 // 100 — the pre-pagination take — so callers that omit `take` get exactly the
-// legacy behavior (the 100 newest logs).
-const EXECUTION_LOG_PAGE_SIZE = 100;
+// legacy behavior (the 100 newest logs). The infinite-scroll feed always
+// passes `EXECUTION_LOG_PAGE_SIZE` (30, lib/automation/constants) explicitly.
+const LEGACY_EXECUTION_LOG_PAGE_SIZE = 100;
 
 export async function getRuleExecutionLogAction(input: unknown): Promise<RuleLogResult> {
   const { userId } = await verifySession();
@@ -464,7 +465,7 @@ export async function getRuleExecutionLogAction(input: unknown): Promise<RuleLog
   // exactly (a full extra row means another page exists) without a second
   // count query. Ordering breaks executedAt ties by id so pages are
   // deterministic — equal timestamps can't shift rows between pages.
-  const pageSize = take ?? EXECUTION_LOG_PAGE_SIZE;
+  const pageSize = take ?? LEGACY_EXECUTION_LOG_PAGE_SIZE;
   const rows = await db.ruleExecutionLog.findMany({
     // Logs carry a denormalized workspaceId, so they stay scoped (and visible)
     // even after their rule is deleted — the rule link goes null, the log stays.

@@ -74,6 +74,7 @@ describe("AutomationContent", () => {
         rules={[rule()]}
         options={OPTIONS}
         logs={[]}
+        logsHasMore={false}
         lastRunByRule={{}}
       />,
     );
@@ -89,6 +90,7 @@ describe("AutomationContent", () => {
         rules={[rule({ id: "r1" }), rule({ id: "r2" })]}
         options={OPTIONS}
         logs={[]}
+        logsHasMore={false}
         lastRunByRule={{}}
       />,
     );
@@ -104,6 +106,7 @@ describe("AutomationContent", () => {
         rules={[rule()]}
         options={OPTIONS}
         logs={[]}
+        logsHasMore={false}
         lastRunByRule={{}}
       />,
     );
@@ -121,6 +124,7 @@ describe("AutomationContent", () => {
         rules={[rule()]}
         options={OPTIONS}
         logs={[]}
+        logsHasMore={false}
         lastRunByRule={{}}
       />,
     );
@@ -141,6 +145,7 @@ describe("AutomationContent", () => {
         rules={[rule()]}
         options={OPTIONS}
         logs={[]}
+        logsHasMore={false}
         lastRunByRule={{}}
       />,
     );
@@ -158,6 +163,7 @@ describe("AutomationContent", () => {
         rules={[rule()]}
         options={OPTIONS}
         logs={[]}
+        logsHasMore={false}
         lastRunByRule={{}}
       />,
     );
@@ -176,6 +182,7 @@ describe("AutomationContent", () => {
         rules={[]}
         options={OPTIONS}
         logs={[]}
+        logsHasMore={false}
         lastRunByRule={{}}
       />,
     );
@@ -194,6 +201,7 @@ describe("AutomationContent", () => {
         rules={[]}
         options={OPTIONS}
         logs={[]}
+        logsHasMore={false}
         lastRunByRule={{}}
       />,
     );
@@ -210,6 +218,7 @@ describe("AutomationContent", () => {
         rules={[]}
         options={OPTIONS}
         logs={[]}
+        logsHasMore={false}
         lastRunByRule={{}}
       />,
     );
@@ -232,6 +241,7 @@ describe("AutomationContent", () => {
         rules={[rule({ id: "r1", name: "Rule A" }), rule({ id: "r2", name: "Rule B" })]}
         options={OPTIONS}
         logs={[]}
+        logsHasMore={false}
         lastRunByRule={{}}
       />,
     );
@@ -251,6 +261,7 @@ describe("AutomationContent", () => {
         rules={[rule()]}
         options={OPTIONS}
         logs={[log()]}
+        logsHasMore={false}
         lastRunByRule={{}}
       />,
     );

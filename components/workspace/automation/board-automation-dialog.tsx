@@ -90,6 +90,7 @@ export function BoardAutomationDialog({ boardId, boardTitle }: BoardAutomationDi
             options: res.options,
             rules: res.rules,
             logs: res.logs,
+            logsHasMore: res.logsHasMore,
             lastRunByRule: res.lastRunByRule,
           });
         } else {
@@ -150,6 +151,7 @@ export function BoardAutomationDialog({ boardId, boardTitle }: BoardAutomationDi
                 rules={data.rules}
                 options={data.options}
                 logs={data.logs}
+                logsHasMore={data.logsHasMore}
                 lastRunByRule={data.lastRunByRule}
                 defaultBoardId={boardId}
                 onMutated={load}

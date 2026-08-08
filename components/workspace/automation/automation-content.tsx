@@ -21,6 +21,9 @@ export type AutomationContentProps = {
   rules: RuleRowData[];
   options: AutomationOptions;
   logs: LogEntry[];
+  // Exact (server-probed) "more logs may exist" flag for the initial feed
+  // state — never inferred from a page-size heuristic.
+  logsHasMore: boolean;
   lastRunByRule: Record<string, { status: string; executedAt: string }>;
   // Board-level modal (US-067): preset the "New rule" builder's board scope and
   // re-fetch the host's lazily-loaded data after each successful mutation. Both
@@ -43,6 +46,7 @@ export function AutomationContent({
   rules,
   options,
   logs,
+  logsHasMore,
   lastRunByRule,
   defaultBoardId,
   onMutated,
@@ -137,6 +141,7 @@ export function AutomationContent({
       <ExecutionLogPanel
         workspaceId={workspaceId}
         initialLogs={logs}
+        initialHasMore={logsHasMore}
         notify={notify}
         onRefresh={onMutated}
       />
