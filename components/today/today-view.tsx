@@ -3,7 +3,7 @@
 import { Calendar03Icon, Flag01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import Link from "next/link";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { loadMoreTodayCardsAction } from "@/app/(authenticated)/(dashboard)/today/actions";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +26,7 @@ type TodayViewProps = {
   workspaceCount: number;
   cards: TodayCard[];
   /** Whether more assigned cards may exist behind the first page (the RSC
-   * fetched a full page). The client keeps "Load more" until it is false. */
+   * fetched a full page). The sentinel keeps auto-loading until it is false. */
   hasMore: boolean;
   /** Injected clock for deterministic grouping; defaults to the browser clock. */
   now?: Date;
@@ -190,6 +190,81 @@ function TodayGroups({ cards, now }: { cards: TodayCard[]; now: Date }) {
   );
 }
 
+/**
+ * End-of-list status + fallback affordance for the infinite-scroll loop.
+ *
+ * DESIGN.md voice: all states are quiet secondary text (`text-muted-foreground`)
+ * or the action's own error in `text-destructive`; nothing here is a
+ * prominent CTA and nothing animates (safe under prefers-reduced-motion).
+ *
+ *  - loading → polite `role="status"` line while a batch is in flight;
+ *  - auto-load failure → `role="alert"` with the action's message + a subtle
+ *    ghost retry button (keyboard/SR-accessible retry, never steals focus);
+ *  - observer-less environment (no IntersectionObserver) → the same subtle
+ *    ghost button as the standing manual affordance;
+ *  - end of data → polite "All assigned cards are shown" completion status.
+ */
+function TodayEndStatus({
+  hasMore,
+  isLoadingMore,
+  loadError,
+  observerSupported,
+  onRetry,
+}: {
+  hasMore: boolean;
+  isLoadingMore: boolean;
+  loadError: string | null;
+  observerSupported: boolean;
+  onRetry: () => void;
+}) {
+  if (isLoadingMore) {
+    return (
+      <div className="flex flex-col items-center py-1">
+        <p role="status" className="text-xs text-muted-foreground">
+          Loading more cards…
+        </p>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center gap-2 py-1">
+        <p role="alert" className="text-xs text-destructive">
+          {loadError}
+        </p>
+        <Button type="button" variant="ghost" size="sm" onClick={onRetry}>
+          Load more
+        </Button>
+      </div>
+    );
+  }
+
+  if (!hasMore) {
+    return (
+      <div className="flex flex-col items-center py-1">
+        <p role="status" className="text-xs text-muted-foreground">
+          All assigned cards are shown
+        </p>
+      </div>
+    );
+  }
+
+  // More data may exist but auto-load is unavailable — keep a subtle manual
+  // affordance as the only path (never a prominent permanent CTA).
+  if (!observerSupported) {
+    return (
+      <div className="flex flex-col items-center py-1">
+        <Button type="button" variant="ghost" size="sm" onClick={onRetry}>
+          Load more
+        </Button>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 export function TodayView({
   workspaceCount,
   cards: initialCards,
@@ -203,16 +278,25 @@ export function TodayView({
   // midnight differs from the server's can never rebucket on hydration.
   const [clock] = useState(() => now ?? new Date());
 
-  // Explicit pagination (no silent cap): the first page arrives via props;
-  // "Load more" appends the next page behind the last loaded (dueDate, id)
-  // and re-groups, so every assigned card stays reachable.
+  // Explicit keyset pagination (no silent cap): the first page arrives via
+  // props; every later batch is fetched behind the last loaded (dueDate, id)
+  // and appended (deduped, then re-grouped), so every assigned card stays
+  // reachable. An IntersectionObserver sentinel drives the auto-load loop; a
+  // subtle manual fallback covers observer-less environments and doubles as
+  // the error-retry affordance.
   const [cards, setCards] = useState(initialCards);
   const [hasMore, setHasMore] = useState(initialHasMore);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  async function handleLoadMore() {
-    if (isLoadingMore) {
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  // Synchronous in-flight flag: set before the first await, so two observer
+  // callbacks in the SAME tick (or a double-click on the fallback) collapse
+  // into one request — the state guard alone cannot see the update yet.
+  const requestInFlightRef = useRef(false);
+
+  const handleLoadMore = useCallback(async () => {
+    if (isLoadingMore || requestInFlightRef.current) {
       return;
     }
     // The cursor is the last loaded card in the server's (dueDate, id) order
@@ -223,6 +307,7 @@ export function TodayView({
       setHasMore(false);
       return;
     }
+    requestInFlightRef.current = true;
     setIsLoadingMore(true);
     setLoadError(null);
     try {
@@ -246,9 +331,10 @@ export function TodayView({
     } catch {
       setLoadError("Failed to load more cards. Please try again.");
     } finally {
+      requestInFlightRef.current = false;
       setIsLoadingMore(false);
     }
-  }
+  }, [cards, isLoadingMore]);
 
   // Hydration-safe "mounted" flag (React-docs pattern, no effect): SSR and
   // the first client paint read the SERVER snapshot (false) → deterministic
@@ -260,6 +346,59 @@ export function TodayView({
     () => true,
     () => false,
   );
+
+  // Client-only capability flag: used exclusively inside the mounted branch
+  // (never server-rendered), so the SSR skeleton and the first client paint
+  // can never disagree. When IntersectionObserver is missing, the manual
+  // fallback becomes the permanent (subtle) affordance.
+  const observerSupported = typeof IntersectionObserver !== "undefined";
+
+  // Latest-state mirrors for the observer callback: reading these avoids
+  // re-creating the observer on every render while guaranteeing a request is
+  // never fired against stale state (the refs are the single gate against
+  // concurrent/duplicate auto-loads).
+  const hasMoreRef = useRef(hasMore);
+  const isLoadingMoreRef = useRef(isLoadingMore);
+  const loadErrorRef = useRef<string | null>(loadError);
+  hasMoreRef.current = hasMore;
+  isLoadingMoreRef.current = isLoadingMore;
+  loadErrorRef.current = loadError;
+
+  // Auto-load loop: observes the end-of-list sentinel and fetches the next
+  // keyset page when it scrolls near. The observer is torn down whenever a
+  // load is in flight, an error is showing, the end was reached, or the list
+  // changed — and re-created after every append — so one request can never
+  // overlap or duplicate the same window. SSR never reaches this: pre-mount
+  // renders the deterministic skeleton with no sentinel.
+  useEffect(() => {
+    if (!mounted || !hasMore || isLoadingMore || loadError) {
+      return;
+    }
+    const sentinel = sentinelRef.current;
+    if (!sentinel || typeof IntersectionObserver === "undefined") {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) {
+          return;
+        }
+        if (
+          hasMoreRef.current === false ||
+          isLoadingMoreRef.current ||
+          loadErrorRef.current
+        ) {
+          return;
+        }
+        void handleLoadMore();
+      },
+      // 600px lookahead: the next batch starts loading just before the
+      // sentinel is on screen, so scrolling feels continuous.
+      { rootMargin: "600px 0px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [mounted, hasMore, isLoadingMore, loadError, handleLoadMore]);
 
   // Empty states are props-only (no clock read): they render identically on
   // the server and the client, so they stay immediate and accessible.
@@ -287,25 +426,15 @@ export function TodayView({
       {mounted ? (
         <>
           <TodayGroups cards={cards} now={clock} />
-          {hasMore && (
-            <div className="flex flex-col items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleLoadMore}
-                disabled={isLoadingMore}
-                className="w-full sm:w-auto"
-              >
-                {isLoadingMore ? "Loading..." : "Load more"}
-              </Button>
-              {loadError ? (
-                <p role="alert" className="text-xs text-destructive">
-                  {loadError}
-                </p>
-              ) : null}
-            </div>
-          )}
+          <TodayEndStatus
+            hasMore={hasMore}
+            isLoadingMore={isLoadingMore}
+            loadError={loadError}
+            observerSupported={observerSupported}
+            onRetry={handleLoadMore}
+          />
+          {/* Scroll sentinel: pure trigger, no content. */}
+          <div ref={sentinelRef} aria-hidden="true" className="h-px" />
         </>
       ) : (
         <TodaySkeletonSections />

@@ -9,10 +9,11 @@
  * board/list/workspace context, due + priority meta chips (non-color-only
  * labels), and the two accessible empty states.
  */
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 import { TodayView } from "./today-view";
 import type { TodayCard } from "@/lib/today";
@@ -24,6 +25,76 @@ const h = vi.hoisted(() => ({
 vi.mock("@/app/(authenticated)/(dashboard)/today/actions", () => ({
   loadMoreTodayCardsAction: h.loadMoreTodayCardsAction,
 }));
+
+// Next's own <Link> mounts an internal IntersectionObserver (use-intersection)
+// that would pollute the fake-IO instances below and crash when the global is
+// stubbed to undefined. Render plain anchors instead: the suite asserts the
+// href/aria-label/className contract, not Link's internals (real navigation
+// is covered by e2e/today.spec.ts).
+vi.mock("next/link", () => {
+  type MockLinkProps = {
+    href: string;
+    children?: ReactNode;
+    "aria-label"?: string;
+    className?: string;
+  };
+  const MockLink = ({ href, children, ...rest }: MockLinkProps) => (
+    <a href={href} {...rest}>
+      {children}
+    </a>
+  );
+  return { default: MockLink };
+});
+
+/**
+ * Test double for IntersectionObserver: installed via vi.stubGlobal inside
+ * the infinite-scroll suite. Every observer created by the component is
+ * recorded (instances) and each test drives intersections manually — proving
+ * the sentinel trigger without a layout engine. `disconnected` mirrors the
+ * component's cleanup contract: an in-flight load, an error, or the end of
+ * data must tear the observer down so auto-load can never double-fire.
+ */
+class FakeIntersectionObserver {
+  static instances: FakeIntersectionObserver[] = [];
+
+  readonly callback: IntersectionObserverCallback;
+  readonly elements = new Set<Element>();
+  disconnected = false;
+
+  constructor(callback: IntersectionObserverCallback) {
+    this.callback = callback;
+    FakeIntersectionObserver.instances.push(this);
+  }
+
+  observe(element: Element) {
+    this.elements.add(element);
+  }
+
+  unobserve(element: Element) {
+    this.elements.delete(element);
+  }
+
+  disconnect() {
+    this.disconnected = true;
+    this.elements.clear();
+  }
+
+  /** Test driver: fire an intersection (or non-intersection) for every
+   * element currently observed, exactly like the real observer would. */
+  fire(intersecting: boolean) {
+    const entries = [...this.elements].map(
+      (element) =>
+        ({
+          isIntersecting: intersecting,
+          target: element,
+        }) as IntersectionObserverEntry,
+    );
+    this.callback(
+      entries as unknown as IntersectionObserverEntry[],
+      this as unknown as IntersectionObserver,
+    );
+  }
+}
 
 // Aug 3, 2026 14:30 local — matches the lib/today.test.ts fixture clock.
 const NOW = new Date(2026, 7, 3, 14, 30, 0, 0);
@@ -52,6 +123,13 @@ function renderToday(cards: TodayCard[], workspaceCount = 1, hasMore = false) {
   return render(
     <TodayView workspaceCount={workspaceCount} cards={cards} hasMore={hasMore} now={NOW} />,
   );
+}
+
+/** The component's most recently created observer (the active one). */
+function currentObserver() {
+  const observer = FakeIntersectionObserver.instances.at(-1);
+  expect(observer).toBeDefined();
+  return observer!;
 }
 
 describe("TodayView — sections and tiles", () => {
@@ -192,6 +270,9 @@ describe("TodayView — hydration safety (US-083 W6 corrections)", () => {
     expect(htmlWinter).not.toContain("Overdue");
     expect(htmlWinter).not.toContain("Due Today");
     expect(htmlWinter).not.toContain("Open card ");
+    // The infinite-scroll status area is client-only too — the server never
+    // emits the end-of-list completion line.
+    expect(htmlWinter).not.toContain("All assigned cards are shown");
   });
 
   it("still server-renders the accessible empty states (props-only, deterministic)", () => {
@@ -224,23 +305,42 @@ describe("TodayView — empty states", () => {
   });
 });
 
-describe("TodayView — Load more pagination (no silent cap)", () => {
+describe("TodayView — infinite scroll (no silent cap)", () => {
   beforeEach(() => {
     h.loadMoreTodayCardsAction.mockReset();
+    FakeIntersectionObserver.instances = [];
+    vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
   });
 
-  it("shows the Load more button when hasMore is true", () => {
-    renderToday([card({ id: "c-1", title: "First", dueDate: due(2026, 7, 3) })], 1, true);
-    expect(screen.getByRole("button", { name: "Load more" })).toBeInTheDocument();
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
-  it("hides the Load more button when hasMore is false", () => {
-    renderToday([card({ id: "c-1", title: "First", dueDate: due(2026, 7, 3) })], 1, false);
+  it("renders the completion status (no CTA) when nothing is left", () => {
+    renderToday(
+      [card({ id: "c-1", title: "First", dueDate: due(2026, 7, 3) })],
+      1,
+      false,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "All assigned cards are shown",
+    );
     expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
   });
 
-  it("appends the next page behind the last loaded cursor, dedupes, and re-groups", async () => {
-    const user = userEvent.setup({ pointerEventsCheck: 0 });
+  it("hides the prominent Load more CTA while the observer is active", () => {
+    renderToday(
+      [card({ id: "c-1", title: "First", dueDate: due(2026, 7, 3) })],
+      1,
+      true,
+    );
+
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+    expect(FakeIntersectionObserver.instances.length).toBeGreaterThan(0);
+  });
+
+  it("auto-loads the next keyset page on sentinel intersection; dedupes and re-groups", async () => {
     renderToday(
       [card({ id: "c-1", title: "First", dueDate: due(2026, 7, 3) })],
       1,
@@ -256,11 +356,17 @@ describe("TodayView — Load more pagination (no silent cap)", () => {
       ],
     });
 
-    await user.click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(() => expect(FakeIntersectionObserver.instances.length).toBe(1));
+    act(() => currentObserver().fire(true));
 
-    // The cursor is the last loaded card in server (dueDate, id) order.
+    await waitFor(() =>
+      expect(h.loadMoreTodayCardsAction).toHaveBeenCalledTimes(1),
+    );
+
+    // The cursor is the last loaded card in server (dueDate, id) order and
+    // the batch size is TODAY_PAGE_SIZE = 30.
     const fd = h.loadMoreTodayCardsAction.mock.calls[0][0] as FormData;
-    expect(fd.get("limit")).toBe("50");
+    expect(fd.get("limit")).toBe("30");
     expect(fd.get("cursorId")).toBe("c-1");
     expect(fd.get("cursorDueDate")).toBe(due(2026, 7, 3));
 
@@ -269,15 +375,23 @@ describe("TodayView — Load more pagination (no silent cap)", () => {
     expect(
       screen.getByRole("link", { name: "Open card Appended today" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open card First" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Open card First" }),
+    ).toBeInTheDocument();
     const todaySection = screen.getByRole("heading", { name: "Due Today" }).closest("section")!;
     expect(within(todaySection).getAllByRole("link")).toHaveLength(2);
-    // hasMore false → the affordance disappears (nothing hidden silently).
-    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+
+    // hasMore false → completion status replaces the loop (nothing hidden
+    // silently) and the observer is torn down.
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "All assigned cards are shown",
+      ),
+    );
+    expect(currentObserver().disconnected).toBe(true);
   });
 
   it("keeps already-displayed sections intact while appending (load lands in a new section)", async () => {
-    const user = userEvent.setup({ pointerEventsCheck: 0 });
     renderToday(
       [card({ id: "c-overdue", title: "Late", dueDate: due(2026, 6, 20) })],
       1,
@@ -289,7 +403,13 @@ describe("TodayView — Load more pagination (no silent cap)", () => {
       items: [card({ id: "c-week", title: "Next week", dueDate: due(2026, 7, 6) })],
     });
 
-    await user.click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(() => expect(FakeIntersectionObserver.instances.length).toBe(1));
+    act(() => currentObserver().fire(true));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("link", { name: "Open card Next week" }),
+      ).toBeInTheDocument(),
+    );
 
     const overdue = screen.getByRole("heading", { name: "Overdue" }).closest("section")!;
     expect(within(overdue).getByRole("link", { name: "Open card Late" })).toBeInTheDocument();
@@ -298,7 +418,6 @@ describe("TodayView — Load more pagination (no silent cap)", () => {
   });
 
   it("sends an empty cursorDueDate for a no-due last card (null-dueDate cursor position)", async () => {
-    const user = userEvent.setup({ pointerEventsCheck: 0 });
     renderToday([card({ id: "c-nodue", title: "No due" })], 1, true);
     h.loadMoreTodayCardsAction.mockResolvedValue({
       success: true,
@@ -306,15 +425,18 @@ describe("TodayView — Load more pagination (no silent cap)", () => {
       items: [],
     });
 
-    await user.click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(() => expect(FakeIntersectionObserver.instances.length).toBe(1));
+    act(() => currentObserver().fire(true));
+    await waitFor(() =>
+      expect(h.loadMoreTodayCardsAction).toHaveBeenCalledTimes(1),
+    );
 
     const fd = h.loadMoreTodayCardsAction.mock.calls[0][0] as FormData;
     expect(fd.get("cursorId")).toBe("c-nodue");
     expect(fd.get("cursorDueDate")).toBe("");
   });
 
-  it("disables the button while a page is loading", async () => {
-    const user = userEvent.setup({ pointerEventsCheck: 0 });
+  it("shows a muted loading status while a batch is in flight", async () => {
     let resolvePage!: (value: {
       success: true;
       items: TodayCard[];
@@ -331,18 +453,55 @@ describe("TodayView — Load more pagination (no silent cap)", () => {
       true,
     );
 
-    await user.click(screen.getByRole("button", { name: "Load more" }));
-
-    const loading = screen.getByRole("button", { name: "Loading..." });
-    expect(loading).toBeDisabled();
+    await waitFor(() => expect(FakeIntersectionObserver.instances.length).toBe(1));
+    act(() => currentObserver().fire(true));
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("Loading more cards…"),
+    );
 
     resolvePage({ success: true, hasMore: false, items: [] });
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Loading..." })).not.toBeInTheDocument(),
+      expect(screen.queryByText("Loading more cards…")).not.toBeInTheDocument(),
     );
   });
 
-  it("shows the action error inline and keeps the button for a retry", async () => {
+  it("never fires a second request while a batch is loading (single flight)", async () => {
+    let resolvePage!: (value: {
+      success: true;
+      items: TodayCard[];
+      hasMore: boolean;
+    }) => void;
+    h.loadMoreTodayCardsAction.mockReturnValue(
+      new Promise((resolve) => {
+        resolvePage = resolve;
+      }),
+    );
+    renderToday(
+      [card({ id: "c-1", title: "First", dueDate: due(2026, 7, 3) })],
+      1,
+      true,
+    );
+
+    await waitFor(() => expect(FakeIntersectionObserver.instances.length).toBe(1));
+    const observer = currentObserver();
+
+    // Two intersections in the same tick: the in-flight guard must collapse
+    // them into exactly one request.
+    act(() => {
+      observer.fire(true);
+      observer.fire(true);
+    });
+    await waitFor(() =>
+      expect(h.loadMoreTodayCardsAction).toHaveBeenCalledTimes(1),
+    );
+
+    resolvePage({ success: true, hasMore: false, items: [] });
+    await waitFor(() =>
+      expect(screen.queryByText("Loading more cards…")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("tears the observer down on error and offers a subtle retry fallback that re-arms", async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 });
     h.loadMoreTodayCardsAction.mockResolvedValue({
       success: false,
@@ -354,14 +513,38 @@ describe("TodayView — Load more pagination (no silent cap)", () => {
       true,
     );
 
-    await user.click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(() => expect(FakeIntersectionObserver.instances.length).toBe(1));
+    const observer = currentObserver();
+    act(() => observer.fire(true));
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Failed to load cards");
-    expect(screen.getByRole("button", { name: "Load more" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("Failed to load cards"),
+    );
+    // The observer is gone: an auto-retry loop can never hammer the action.
+    expect(observer.disconnected).toBe(true);
+    const retry = screen.getByRole("button", { name: "Load more" });
+    expect(retry).toBeInTheDocument();
+
+    // A successful retry appends, clears the error, and re-arms auto-load.
+    h.loadMoreTodayCardsAction.mockResolvedValue({
+      success: true,
+      hasMore: true,
+      items: [card({ id: "c-2", title: "Appended", dueDate: due(2026, 7, 3) })],
+    });
+    await user.click(retry);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("link", { name: "Open card Appended" }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+    await waitFor(() => expect(FakeIntersectionObserver.instances.length).toBe(2));
+    expect(FakeIntersectionObserver.instances[1].disconnected).toBe(false);
   });
 
-  it("shows a generic error when the action throws", async () => {
-    const user = userEvent.setup({ pointerEventsCheck: 0 });
+  it("shows the action's generic error and keeps the retry affordance when the action throws", async () => {
     h.loadMoreTodayCardsAction.mockRejectedValue(new Error("network"));
     renderToday(
       [card({ id: "c-1", title: "First", dueDate: due(2026, 7, 3) })],
@@ -369,8 +552,43 @@ describe("TodayView — Load more pagination (no silent cap)", () => {
       true,
     );
 
-    await user.click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(() => expect(FakeIntersectionObserver.instances.length).toBe(1));
+    act(() => currentObserver().fire(true));
 
-    expect(screen.getByRole("alert")).toHaveTextContent(/failed to load more cards/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /failed to load more cards/i,
+    );
+    expect(screen.getByRole("button", { name: "Load more" })).toBeInTheDocument();
+  });
+
+  it("falls back to a standing manual affordance when IntersectionObserver is unavailable", async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    vi.stubGlobal("IntersectionObserver", undefined);
+    renderToday(
+      [card({ id: "c-1", title: "First", dueDate: due(2026, 7, 3) })],
+      1,
+      true,
+    );
+
+    // No observer was created; the subtle ghost button is the only path to
+    // more cards.
+    expect(FakeIntersectionObserver.instances.length).toBe(0);
+    const loadMore = screen.getByRole("button", { name: "Load more" });
+
+    h.loadMoreTodayCardsAction.mockResolvedValue({
+      success: true,
+      hasMore: false,
+      items: [card({ id: "c-2", title: "Appended", dueDate: due(2026, 7, 3) })],
+    });
+    await user.click(loadMore);
+
+    const fd = h.loadMoreTodayCardsAction.mock.calls[0][0] as FormData;
+    expect(fd.get("limit")).toBe("30");
+    expect(fd.get("cursorId")).toBe("c-1");
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "All assigned cards are shown",
+      ),
+    );
   });
 });

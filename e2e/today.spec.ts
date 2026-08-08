@@ -220,6 +220,10 @@ test("assigned cards across workspaces land in the four buckets; deep links and 
     later.getByRole("link", { name: "Open card No due date card" }),
   ).toBeVisible();
 
+  // The 8-card fixture fits one page (< TODAY_PAGE_SIZE = 30), so the
+  // infinite-scroll loop reports completion instead of offering a CTA.
+  await expect(page.getByText("All assigned cards are shown")).toBeVisible();
+
   // ── AC3: tile → real board/card deep link, detail sheet opens ──────────
   await dueToday.getByRole("link", { name: "Open card Due today card" }).click();
   await expect(page).toHaveURL(new RegExp(`/boards/${roadmapId}\\?cardId=`));

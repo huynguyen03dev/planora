@@ -247,7 +247,7 @@ describe("getPersonalWorkCards — explicit pagination (US-083 follow-up)", () =
 
     await getPersonalWorkCards(USER_ID, {});
 
-    expect(h.db.card.findMany.mock.calls[0][0].take).toBe(51);
+    expect(h.db.card.findMany.mock.calls[0][0].take).toBe(31);
   });
 
   it("keeps the legacy unbounded behavior without options (no take, legacy orderBy)", async () => {
@@ -407,7 +407,7 @@ describe("loadMoreTodayCardsAction — auth, isolation & cursor forwarding", () 
 
     expect(r.success).toBe(true);
     const args = h.db.card.findMany.mock.calls[0][0];
-    expect(args.take).toBe(51);
+    expect(args.take).toBe(31);
     expect(args.where.OR).toBeUndefined();
   });
 

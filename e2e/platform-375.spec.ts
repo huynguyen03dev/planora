@@ -111,6 +111,9 @@ test("/today renders all four buckets at 375px without horizontal overflow", asy
   await expect(todaySection(page, "Due Today").getByText("Due today card")).toBeVisible();
   await expect(todaySection(page, "Due This Week").getByText("Nothing here yet.")).toBeVisible();
   await expect(todaySection(page, "Later").getByText("Nothing here yet.")).toBeVisible();
+  // Completion status at 375px: the end-of-list state is a plain muted line
+  // that must not overflow the narrow viewport.
+  await expect(page.getByText("All assigned cards are shown")).toBeVisible();
   await expectNoHorizontalOverflow(page);
 });
 
