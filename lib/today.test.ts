@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 import {
   calendarDayDiff,
   describeTodayDue,
+  getTodayLoadMoreCursor,
   getTodaySectionKey,
   groupTodayCards,
   type TodayCard,
@@ -135,7 +136,73 @@ describe("describeTodayDue", () => {
   });
 });
 
-// ── groupTodayCards ─────────────────────────────────────────────────────────
+describe("getTodayLoadMoreCursor", () => {
+  it("returns null for an empty list (nothing loaded yet)", () => {
+    expect(getTodayLoadMoreCursor([])).toBeNull();
+  });
+
+  it("returns the card that sorts last in the server (dueDate asc nulls last, id asc) order", () => {
+    const cursor = getTodayLoadMoreCursor([
+      card({ id: "c-earlier", title: "Earliest", dueDate: due(2026, 7, 3) }),
+      card({ id: "c-nodue", title: "No due" }),
+      card({ id: "c-2", title: "Beta", dueDate: due(2026, 7, 5) }),
+    ]);
+    // The no-due card sorts after every dated card (nulls last).
+    expect(cursor).toEqual({ dueDate: null, id: "c-nodue" });
+  });
+
+  it("breaks equal due dates by id ascending — the max is the last loaded row", () => {
+    const sameDue = due(2026, 7, 5);
+    const cursor = getTodayLoadMoreCursor([
+      card({ id: "b", title: "Beta", dueDate: sameDue }),
+      card({ id: "z", title: "Zulu", dueDate: sameDue }),
+      card({ id: "a", title: "Alpha", dueDate: sameDue }),
+    ]);
+    expect(cursor).toEqual({ dueDate: sameDue, id: "z" });
+  });
+
+  it("a dated card is never after a no-due cursor position", () => {
+    const cursor = getTodayLoadMoreCursor([
+      card({ id: "c-nodue", title: "No due" }),
+      card({ id: "c-dated", title: "Dated far away", dueDate: due(2026, 12, 31) }),
+    ]);
+    expect(cursor).toEqual({ dueDate: null, id: "c-nodue" });
+  });
+
+  it("skips completed cards (the read model never returns them)", () => {
+    const cursor = getTodayLoadMoreCursor([
+      card({
+        id: "c-done",
+        title: "Done",
+        dueDate: due(2026, 7, 5),
+        completedAt: due(2026, 7, 2),
+      }),
+      card({ id: "c-live", title: "Live", dueDate: due(2026, 7, 6) }),
+    ]);
+    expect(cursor).toEqual({ dueDate: due(2026, 7, 6), id: "c-live" });
+  });
+
+  it("is order-independent: over any deduped prefix it returns the prefix's last server-order row", () => {
+    const serverOrder = [
+      card({ id: "a", title: "A", dueDate: due(2026, 7, 3) }),
+      card({ id: "b", title: "B", dueDate: due(2026, 7, 3) }),
+      card({ id: "c", title: "C", dueDate: due(2026, 7, 10) }),
+      card({ id: "d", title: "D", dueDate: null }),
+      card({ id: "e", title: "E", dueDate: null }),
+    ];
+    // Shuffled first three (the first page, re-sorted for display): the cursor
+    // must still be the last row of that prefix in SERVER order (c).
+    expect(
+      getTodayLoadMoreCursor([serverOrder[2], serverOrder[0], serverOrder[1]]),
+    ).toEqual({ dueDate: due(2026, 7, 10), id: "c" });
+    // The whole set, reversed: the very last server row (no-due, highest id).
+    expect(getTodayLoadMoreCursor([...serverOrder].reverse())).toEqual({
+      dueDate: null,
+      id: "e",
+    });
+  });
+});
+
 
 const BOARD_A = {
   id: "board-1",
@@ -154,6 +221,8 @@ function card(overrides: Partial<TodayCard> & { id: string; title: string }): To
     ...overrides,
   };
 }
+
+// ── groupTodayCards ─────────────────────────────────────────────────────────
 
 describe("groupTodayCards", () => {
   it("returns the four sections in fixed order with correct counts", () => {

@@ -5,6 +5,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import Link from "next/link";
 import { useMemo, useState, useSyncExternalStore } from "react";
 
+import { loadMoreTodayCardsAction } from "@/app/(authenticated)/(dashboard)/today/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,8 +13,10 @@ import { DUE_META_CHIP_CLASS, PRIORITY_META_CHIP } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import {
   describeTodayDue,
+  getTodayLoadMoreCursor,
   getTodaySectionKey,
   groupTodayCards,
+  TODAY_PAGE_SIZE,
   type TodayCard,
   type TodaySectionGroup,
   type TodaySectionKey,
@@ -22,6 +25,9 @@ import {
 type TodayViewProps = {
   workspaceCount: number;
   cards: TodayCard[];
+  /** Whether more assigned cards may exist behind the first page (the RSC
+   * fetched a full page). The client keeps "Load more" until it is false. */
+  hasMore: boolean;
   /** Injected clock for deterministic grouping; defaults to the browser clock. */
   now?: Date;
 };
@@ -184,13 +190,65 @@ function TodayGroups({ cards, now }: { cards: TodayCard[]; now: Date }) {
   );
 }
 
-export function TodayView({ workspaceCount, cards, now }: TodayViewProps) {
+export function TodayView({
+  workspaceCount,
+  cards: initialCards,
+  hasMore: initialHasMore,
+  now,
+}: TodayViewProps) {
   // The viewer's clock, captured once at the FIRST client render. SSR never
   // reads it: pre-mount we render the deterministic skeleton, and hydration's
   // first client paint matches the server HTML exactly. Grouping/labels use
   // this captured clock only after mount, so a remote viewer whose local
   // midnight differs from the server's can never rebucket on hydration.
   const [clock] = useState(() => now ?? new Date());
+
+  // Explicit pagination (no silent cap): the first page arrives via props;
+  // "Load more" appends the next page behind the last loaded (dueDate, id)
+  // and re-groups, so every assigned card stays reachable.
+  const [cards, setCards] = useState(initialCards);
+  const [hasMore, setHasMore] = useState(initialHasMore);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  async function handleLoadMore() {
+    if (isLoadingMore) {
+      return;
+    }
+    // The cursor is the last loaded card in the server's (dueDate, id) order
+    // — the displayed set is always a deduped prefix, so the max IS the last
+    // loaded row and the next page continues exactly (no skip, no duplicate).
+    const cursor = getTodayLoadMoreCursor(cards);
+    if (!cursor) {
+      setHasMore(false);
+      return;
+    }
+    setIsLoadingMore(true);
+    setLoadError(null);
+    try {
+      const formData = new FormData();
+      formData.set("limit", String(TODAY_PAGE_SIZE));
+      formData.set("cursorId", cursor.id);
+      // Empty string = a null dueDate (the no-due Later group) — a real
+      // cursor position, not "no cursor".
+      formData.set("cursorDueDate", cursor.dueDate ?? "");
+      const result = await loadMoreTodayCardsAction(formData);
+      if (!result.success) {
+        setLoadError(result.error);
+        return;
+      }
+      setCards((prev) => {
+        const seen = new Set(prev.map((card) => card.id));
+        const additions = result.items.filter((card) => !seen.has(card.id));
+        return [...prev, ...additions];
+      });
+      setHasMore(result.hasMore);
+    } catch {
+      setLoadError("Failed to load more cards. Please try again.");
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }
 
   // Hydration-safe "mounted" flag (React-docs pattern, no effect): SSR and
   // the first client paint read the SERVER snapshot (false) → deterministic
@@ -226,7 +284,32 @@ export function TodayView({ workspaceCount, cards, now }: TodayViewProps) {
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 p-6">
       <TodayPageHeader />
-      {mounted ? <TodayGroups cards={cards} now={clock} /> : <TodaySkeletonSections />}
+      {mounted ? (
+        <>
+          <TodayGroups cards={cards} now={clock} />
+          {hasMore && (
+            <div className="flex flex-col items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleLoadMore}
+                disabled={isLoadingMore}
+                className="w-full sm:w-auto"
+              >
+                {isLoadingMore ? "Loading..." : "Load more"}
+              </Button>
+              {loadError ? (
+                <p role="alert" className="text-xs text-destructive">
+                  {loadError}
+                </p>
+              ) : null}
+            </div>
+          )}
+        </>
+      ) : (
+        <TodaySkeletonSections />
+      )}
     </main>
   );
 }
