@@ -23,10 +23,22 @@ type NotificationItem = {
 
 type NotificationsListClientProps = {
   notifications: NotificationItem[];
+  // Whether more notifications may exist behind the initial batch (the first
+  // page filled its limit). Later pages infer it from the fetched batch size.
+  hasMore: boolean;
 };
 
-export function NotificationsListClient({ notifications: initialNotifications }: NotificationsListClientProps) {
+// Inbox cursor pagination page size — matches the server default limit (50)
+// in lib/notification.ts and the /api/notifications route.
+const PAGE_SIZE = 50;
+
+export function NotificationsListClient({
+  notifications: initialNotifications,
+  hasMore: initialHasMore,
+}: NotificationsListClientProps) {
   const [notifications, setNotifications] = useState(initialNotifications);
+  const [hasMore, setHasMore] = useState(initialHasMore);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const router = useRouter();
 
   async function handleMarkAllRead() {
@@ -52,6 +64,32 @@ export function NotificationsListClient({ notifications: initialNotifications }:
   }
 
   const hasUnread = notifications.some((n) => !n.isRead);
+
+  // Fetches the next page behind the last loaded notification (cursor
+  // pagination via /api/notifications?cursor=…). Appends with an id dedupe so
+  // a load racing a mark-read re-render can never double-list a row.
+  async function handleLoadMore() {
+    const cursor = notifications[notifications.length - 1]?.id;
+    if (!cursor || isLoadingMore) return;
+    setIsLoadingMore(true);
+    try {
+      const res = await fetch(
+        `/api/notifications?cursor=${encodeURIComponent(cursor)}&limit=${PAGE_SIZE}`,
+      );
+      if (!res.ok) throw new Error("Failed to load more notifications");
+      const data = (await res.json()) as { notifications: NotificationItem[] };
+      setNotifications((prev) => {
+        const seen = new Set(prev.map((n) => n.id));
+        return [...prev, ...data.notifications.filter((n) => !seen.has(n.id))];
+      });
+      // A short batch means the end of the feed; a full batch may hide more.
+      setHasMore(data.notifications.length >= PAGE_SIZE);
+    } catch {
+      // Leave the button in place on failure so the user can retry.
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }
 
   return (
     <div className="space-y-2">
@@ -107,6 +145,20 @@ export function NotificationsListClient({ notifications: initialNotifications }:
           </button>
         ))}
       </div>
+
+      {hasMore && (
+        <div className="flex justify-center pt-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleLoadMore}
+            disabled={isLoadingMore}
+          >
+            {isLoadingMore ? "Loading..." : "Load more"}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

@@ -24,9 +24,13 @@ export type AutomationView = {
 
 export async function loadAutomationView(
   workspaceId: string,
-  opts: { boardId?: string } = {},
+  opts: { boardId?: string; cursor?: string; take?: number } = {},
 ): Promise<AutomationView> {
-  const { boardId } = opts;
+  const { boardId, cursor, take } = opts;
+  // US-066 cursor pagination: `cursor` = id of the last log of the previous
+  // page; `take` overrides the default page size (100). Omitting both keeps the
+  // legacy behavior (the 100 newest logs).
+  const pageSize = take ?? 100;
 
   const ruleWhere = boardId
     ? { workspaceId, OR: [{ boardId }, { boardId: null }] }
@@ -71,8 +75,10 @@ export async function loadAutomationView(
   const [logRows, lastRuns] = await Promise.all([
     db.ruleExecutionLog.findMany({
       where: logWhere,
-      orderBy: { executedAt: "desc" },
-      take: 100,
+      // executedAt desc with an id tiebreak keeps cursor pages deterministic.
+      orderBy: [{ executedAt: "desc" }, { id: "desc" }],
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      take: pageSize,
       select: {
         id: true,
         ruleId: true,

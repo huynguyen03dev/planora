@@ -82,3 +82,29 @@ describe("loadAutomationView — board scope", () => {
     }
   });
 });
+
+describe("loadAutomationView — log pagination options (US-066)", () => {
+  it("accepts cursor + take and passes them to the log query (skip:1, deterministic id tiebreak)", async () => {
+    const { loadAutomationView } = await import("./view");
+    await loadAutomationView(WS, { cursor: "log-9", take: 25 });
+
+    const pagedLogQuery = mockDb.ruleExecutionLog.findMany.mock.calls[0][0];
+    expect(pagedLogQuery).toMatchObject({
+      where: { workspaceId: WS },
+      cursor: { id: "log-9" },
+      skip: 1,
+      take: 25,
+      orderBy: [{ executedAt: "desc" }, { id: "desc" }],
+    });
+  });
+
+  it("defaults to the legacy take-100 with no cursor (behavior unchanged)", async () => {
+    const { loadAutomationView } = await import("./view");
+    await loadAutomationView(WS);
+
+    const pagedLogQuery = mockDb.ruleExecutionLog.findMany.mock.calls[0][0];
+    expect(pagedLogQuery.take).toBe(100);
+    expect(pagedLogQuery.cursor).toBeUndefined();
+    expect(pagedLogQuery.skip).toBeUndefined();
+  });
+});

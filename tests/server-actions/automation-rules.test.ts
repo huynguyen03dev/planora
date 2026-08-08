@@ -24,6 +24,8 @@ const RULE_A = "33333333-3333-4333-8333-333333333333";
 const BOARD_A = "44444444-4444-4444-8444-444444444444";
 const BOARD_B = "55555555-5555-4555-8555-555555555555";
 const LIST_ID = "66666666-6666-4666-8666-666666666666";
+// UUID-shaped cursor for the pagination tests (the schema requires uuid()).
+const CURSOR_A = "99999999-9999-4999-8999-999999999999";
 
 const h = vi.hoisted(() => {
   const state = {
@@ -479,6 +481,28 @@ describe("listRulesAction (any workspace member)", () => {
 
 /* ─── getRuleExecutionLogAction (any member) ────────────────────────── */
 
+// Minimal row shape the action's findMany select reads (mocked Prisma).
+function makeLogRow(
+  id: string,
+  executedAt: Date,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    id,
+    ruleId: RULE_A,
+    ruleName: "R",
+    chainId: null,
+    chainDepth: 0,
+    cardId: null,
+    actionType: "set-priority",
+    triggerType: "card-created",
+    status: "success",
+    error: null,
+    executedAt,
+    ...overrides,
+  };
+}
+
 describe("getRuleExecutionLogAction (any workspace member)", () => {
   it("non-member denied", async () => {
     signInBare("u");
@@ -508,6 +532,8 @@ describe("getRuleExecutionLogAction (any workspace member)", () => {
     expect(r.success).toBe(true);
     if (r.success) {
       expect(r.logs[0]).toMatchObject({ id: "log-1", ruleName: "R", executedAt: at.toISOString() });
+      // New US-066 contract: a short batch means no further page.
+      expect(r.hasMore).toBe(false);
     }
     expect(h.db.ruleExecutionLog.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ workspaceId: WS_A }) }),
@@ -518,19 +544,11 @@ describe("getRuleExecutionLogAction (any workspace member)", () => {
     signInAs("u", WS_A, "viewer");
     const at = new Date("2026-07-06T01:00:00Z");
     h.db.ruleExecutionLog.findMany.mockResolvedValue([
-      {
-        id: "log-orphan",
+      makeLogRow("log-orphan", at, {
         ruleId: null,
         ruleName: "Deleted but remembered",
-        chainId: null,
-        chainDepth: 0,
-        cardId: null,
         actionType: "sequence",
-        triggerType: "card-created",
-        status: "success",
-        error: null,
-        executedAt: at,
-      },
+      }),
     ]);
     const r = await getRuleExecutionLogAction({ workspaceId: WS_A });
     expect(r.success).toBe(true);
@@ -541,6 +559,98 @@ describe("getRuleExecutionLogAction (any workspace member)", () => {
         ruleName: "Deleted but remembered",
       });
     }
+  });
+
+  /* ─── US-066 cursor pagination ──────────────────────────────────────── */
+
+  it("pagination: cursor + take are passed through (cursor id, skip 1, take+1 for hasMore)", async () => {
+    signInAs("u", WS_A, "viewer");
+    const at = new Date("2026-07-06T01:00:00Z");
+    // 26 rows fetched → 25 returned + hasMore true (a full page plus one more).
+    h.db.ruleExecutionLog.findMany.mockResolvedValue(
+      Array.from({ length: 26 }, (_, i) => makeLogRow(`log-${i}`, at)),
+    );
+    const r = await getRuleExecutionLogAction({
+      workspaceId: WS_A,
+      cursor: CURSOR_A,
+      take: 25,
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.logs).toHaveLength(25);
+      expect(r.hasMore).toBe(true);
+      expect(r.logs[0].id).toBe("log-0"); // newest first, page slice kept
+    }
+    expect(h.db.ruleExecutionLog.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ workspaceId: WS_A }),
+        cursor: { id: CURSOR_A },
+        skip: 1,
+        take: 26, // take + 1 so hasMore needs no extra count query
+        // executedAt ties break by id so pages are deterministic (no
+        // duplicates or skipped rows when two logs share a timestamp).
+        orderBy: [{ executedAt: "desc" }, { id: "desc" }],
+      }),
+    );
+  });
+
+  it("pagination: no duplicates across pages — skip:1 excludes the cursor row (the last row of page 1)", async () => {
+    signInAs("u", WS_A, "viewer");
+    const at = new Date("2026-07-06T01:00:00Z");
+    // Page 2 begins AFTER the cursor row, so the row that ended page 1 is not
+    // returned again — pages are disjoint by construction.
+    h.db.ruleExecutionLog.findMany.mockResolvedValue(
+      Array.from({ length: 5 }, (_, i) => makeLogRow(`log-${i + 1}`, at)),
+    );
+    const r = await getRuleExecutionLogAction({
+      workspaceId: WS_A,
+      cursor: CURSOR_A,
+      take: 5,
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.logs.map((l) => l.id)).toEqual(["log-1", "log-2", "log-3", "log-4", "log-5"]);
+      expect(r.logs.map((l) => l.id)).not.toContain("log-0");
+    }
+    expect(h.db.ruleExecutionLog.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ cursor: { id: CURSOR_A }, skip: 1 }),
+    );
+  });
+
+  it("pagination: default (no cursor/take) keeps the legacy take-100 newest, hasMore false at the boundary", async () => {
+    signInAs("u", WS_A, "viewer");
+    const at = new Date("2026-07-06T01:00:00Z");
+    // Exactly one page of rows → no more data, no cursor, legacy behavior.
+    h.db.ruleExecutionLog.findMany.mockResolvedValue(
+      Array.from({ length: 100 }, (_, i) => makeLogRow(`log-${i}`, at)),
+    );
+    const r = await getRuleExecutionLogAction({ workspaceId: WS_A });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.logs).toHaveLength(100);
+      expect(r.hasMore).toBe(false);
+    }
+    expect(h.db.ruleExecutionLog.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 101 }),
+    );
+    // No cursor key is sent at all when none was requested.
+    const logCalls = h.db.ruleExecutionLog.findMany.mock.calls as unknown[][];
+    expect(logCalls[0][0]).not.toHaveProperty("cursor");
+    expect(logCalls[0][0]).not.toHaveProperty("skip");
+  });
+
+  it("pagination: take outside 1..200 is rejected (legacy not-found posture, no query)", async () => {
+    signInAs("u", WS_A, "viewer");
+    const r = await getRuleExecutionLogAction({ workspaceId: WS_A, take: 0 });
+    expect(r).toEqual({ success: false, error: "Workspace not found" });
+    expect(h.db.ruleExecutionLog.findMany).not.toHaveBeenCalled();
+  });
+
+  it("pagination: a non-UUID cursor is rejected (legacy not-found posture, no query)", async () => {
+    signInAs("u", WS_A, "viewer");
+    const r = await getRuleExecutionLogAction({ workspaceId: WS_A, cursor: "not-a-uuid" });
+    expect(r).toEqual({ success: false, error: "Workspace not found" });
+    expect(h.db.ruleExecutionLog.findMany).not.toHaveBeenCalled();
   });
 });
 
