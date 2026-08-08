@@ -149,6 +149,37 @@ describe("loadMoreLeadTimeRowsAction — read isolation + filter parity", () => 
     expect(h.getLeadTimeRows).not.toHaveBeenCalled();
   });
 
+  it("allow: a real 32-char Better Auth nanoid workspace id passes the gate (production regression)", async () => {
+    signIn("member");
+    // Workspaces created through the app carry Better Auth nanoid ids (no
+    // dashes) — a z.string().uuid() gate used to reject them with "Invalid
+    // workspace ID" before any DB read. The 32-char id must now flow through
+    // to the workspace lookup and the analytics engine.
+    const NANO_ID = "n".repeat(31) + "1";
+    h.db.workspace.findUnique.mockResolvedValue({ id: NANO_ID });
+    h.db.workspaceMember.findFirst.mockResolvedValue({ id: "m" });
+    h.getLeadTimeRows.mockResolvedValue({
+      rows: [],
+      hasMore: false,
+      totalCompleted: 0,
+    });
+
+    const result = await loadMoreLeadTimeRowsAction(
+      validFormData({ workspaceId: NANO_ID, offset: "0", limit: "100" }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(h.db.workspace.findUnique).toHaveBeenCalledWith({
+      where: { id: NANO_ID },
+      select: { id: true },
+    });
+    expect(h.getLeadTimeRows).toHaveBeenCalledWith(
+      NANO_ID,
+      { from: new Date(FROM), to: new Date(TO), includeArchivedBoards: false },
+      { offset: 0, limit: 100 },
+    );
+  });
+
   it("isolation: a non-member cannot load rows for the workspace", async () => {
     signIn("outsider");
     h.db.workspace.findUnique.mockResolvedValue({ id: WS_UUID });

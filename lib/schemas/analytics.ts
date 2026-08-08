@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { workspaceIdSchema } from "./invitation";
+
 /**
  * Input for `loadMoreLeadTimeRowsAction` — offset-paginated read of the next
  * window of lead-time detail rows for the Analytics dashboard table.
@@ -14,7 +16,17 @@ import { z } from "zod";
  * without a window position would silently repeat page 1).
  */
 export const loadMoreLeadTimeRowsSchema = z.object({
-  workspaceId: z.string().uuid({ message: "Invalid workspace ID" }),
+  // Real workspace ids are Better Auth 32-char nanoids (workspaceIdSchema —
+  // the same contract every other workspace schema uses); a plain
+  // z.string().uuid() rejected them and broke load-more on real workspaces.
+  // UUID ids are still accepted for seeded/legacy workspaces.
+  workspaceId: z.union(
+    [
+      workspaceIdSchema,
+      z.string().uuid({ message: "Invalid workspace ID" }),
+    ],
+    { error: "Invalid workspace ID" },
+  ),
   from: z
     .string()
     .datetime({ offset: true })
