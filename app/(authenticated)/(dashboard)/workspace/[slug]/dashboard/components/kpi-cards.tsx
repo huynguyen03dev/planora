@@ -98,7 +98,7 @@ export function KPICards({ analytics }: KPICardsProps) {
   const hasCompletions = leadTime.totalCompleted > 0;
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
       <Card
         title="Median Lead Time"
         value={hasCompletions ? formatHours(leadTime.median.current) : "—"}

@@ -176,6 +176,10 @@ export function BoardFilter() {
             active && boardHeaderControlActiveClass,
           )}
           aria-label="Filter cards"
+          // Pairs with the active fill (boardHeaderControlActiveClass) so the
+          // applied state is never conveyed by fill alone (see
+          // board-header-controls.ts contract). Radix injects aria-expanded.
+          aria-pressed={active}
         >
           <HugeiconsIcon icon={FilterIcon} size={16} />
           Filter

@@ -1458,17 +1458,47 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
     });
   }
 
+  // Form submit path (submit button + Enter). A textarea does not implicitly
+  // submit its form, so the textarea keydown handler below routes Enter here;
+  // Shift+Enter stays a newline. When the mention list is open, Enter/Tab
+  // select a mention instead — the hook preventDefaults, which also stops
+  // submission, so a mention pick never posts the comment.
+  function handleFormSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    handleSubmit();
+  }
+
+  function handleCommentKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey && !isMentionOpen) {
+      event.preventDefault();
+      handleSubmit();
+      return;
+    }
+    // Delegate arrows/Enter/Escape to the mention combobox while its list is
+    // open (and let plain typing fall through to the browser).
+    mentionComboboxProps.onKeyDown?.(event);
+  }
+
   return (
     <div className="space-y-2">
-      <Textarea
-        ref={textareaRef}
-        value={content}
-        disabled={isPending || !canComment}
-        rows={3}
-        placeholder={canComment ? "Write a comment..." : "You do not have permission to comment on this card."}
-        className="min-h-20"
-        {...mentionComboboxProps}
-      />
+      <form onSubmit={handleFormSubmit} className="space-y-2">
+        <Textarea
+          ref={textareaRef}
+          value={content}
+          disabled={isPending || !canComment}
+          rows={3}
+          placeholder={canComment ? "Write a comment..." : "You do not have permission to comment on this card."}
+          className="min-h-20"
+          {...mentionComboboxProps}
+          onKeyDown={handleCommentKeyDown}
+        />
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        {canComment && (
+          <Button type="submit" disabled={isPending || !content.trim()}>
+            {isPending ? "Posting..." : "Post comment"}
+          </Button>
+        )}
+      </form>
       {isMentionOpen
         ? createPortal(
             <div
@@ -1513,16 +1543,6 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
             document.body,
           )
         : null}
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      {canComment && (
-        <Button
-          type="button"
-          disabled={isPending || !content.trim()}
-          onClick={handleSubmit}
-        >
-          {isPending ? "Posting..." : "Post comment"}
-        </Button>
-      )}
     </div>
   );
 }

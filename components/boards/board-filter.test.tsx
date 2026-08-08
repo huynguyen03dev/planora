@@ -80,4 +80,29 @@ describe("BoardFilter", () => {
     await user.click(clear);
     expect(useBoardStore.getState().filterStatuses).toEqual([]);
   });
+
+  it("marks the trigger aria-pressed when a filter or search is active", () => {
+    const clean = render(<BoardFilter />);
+    const trigger = clean.getByRole("button", { name: "Filter cards" });
+    expect(trigger).toHaveAttribute("aria-pressed", "false");
+    clean.unmount();
+
+    // An applied dimension flips the pressed state.
+    useBoardStore.getState().toggleStatusFilter("incomplete");
+    const filtered = render(<BoardFilter />);
+    expect(filtered.getByRole("button", { name: "Filter cards" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    filtered.unmount();
+
+    // A keyword search counts as active too.
+    useBoardStore.getState().clearFilters();
+    useBoardStore.getState().setSearchQuery("foo");
+    const searching = render(<BoardFilter />);
+    expect(searching.getByRole("button", { name: "Filter cards" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
 });
