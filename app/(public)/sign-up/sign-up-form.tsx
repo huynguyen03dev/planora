@@ -148,6 +148,7 @@ export function SignUpForm() {
                 onChange={(e) => setName(e.target.value)}
                 required
                 autoComplete="name"
+                autoFocus
                 aria-invalid={hasError}
                 aria-describedby={hasError ? "form-error" : undefined}
               />

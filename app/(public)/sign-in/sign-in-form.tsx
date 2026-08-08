@@ -136,6 +136,7 @@ export function SignInForm() {
                 }}
                 required
                 autoComplete="email"
+                autoFocus
                 aria-invalid={hasError}
                 aria-describedby={hasError ? "form-error" : undefined}
               />

@@ -51,7 +51,11 @@ vi.mock("@/components/boards/card-labels-section", () => ({
   },
 }));
 vi.mock("./use-mention-autocomplete", () => ({
-  useMentionAutocomplete: () => ({
+  useMentionAutocomplete: ({
+    setValue,
+  }: {
+    setValue: (value: string) => void;
+  }) => ({
     open: false,
     items: [],
     activeIndex: 0,
@@ -61,7 +65,13 @@ vi.mock("./use-mention-autocomplete", () => ({
     listboxId: "mentions",
     optionId: (i: number) => `mention-${i}`,
     selectMember: vi.fn(),
-    comboboxProps: {},
+    // Emulate the real hook's combobox contract: onChange pushes the typed
+    // value through the setValue callback the component passes in, so the
+    // controlled textarea state stays in sync during tests.
+    comboboxProps: {
+      onChange: (event: { target: { value: string } }) =>
+        setValue(event.target.value),
+    },
   }),
 }));
 
@@ -634,5 +644,69 @@ describe("CardDetailSheet — comments/activity load more (cap 50)", () => {
         screen.getByRole("button", { name: "Load more comments" }),
       ).toBeInTheDocument(),
     );
+  });
+});
+
+describe("CardDetailSheet — comment composer", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useBoardStore.getState().reset();
+  });
+
+  it("posts the comment when Enter is pressed in the textarea", async () => {
+    actions.createCommentAction.mockResolvedValue({ success: true });
+    renderSheet();
+
+    const textarea = screen.getByPlaceholderText("Write a comment...");
+    await user.type(textarea, "Nice work");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() =>
+      expect(actions.createCommentAction).toHaveBeenCalledTimes(1),
+    );
+    const formData = actions.createCommentAction.mock.calls[0][0] as FormData;
+    expect(formData.get("cardId")).toBe("card-1");
+    expect(formData.get("content")).toBe("Nice work");
+    // Success clears the composer.
+    await waitFor(() => expect(textarea).toHaveValue(""));
+  });
+
+  it("posts the comment when the submit button is clicked", async () => {
+    actions.createCommentAction.mockResolvedValue({ success: true });
+    renderSheet();
+
+    await user.type(
+      screen.getByPlaceholderText("Write a comment..."),
+      "Via button",
+    );
+    await user.click(screen.getByRole("button", { name: "Post comment" }));
+
+    await waitFor(() =>
+      expect(actions.createCommentAction).toHaveBeenCalledTimes(1),
+    );
+    const formData = actions.createCommentAction.mock.calls[0][0] as FormData;
+    expect(formData.get("content")).toBe("Via button");
+  });
+
+  it("keeps Shift+Enter a newline instead of submitting", async () => {
+    actions.createCommentAction.mockResolvedValue({ success: true });
+    renderSheet();
+
+    const textarea = screen.getByPlaceholderText("Write a comment...");
+    await user.type(textarea, "line one{Shift>}{Enter}{/Shift}line two");
+
+    await waitFor(() => expect(textarea).toHaveValue("line one\nline two"));
+    expect(actions.createCommentAction).not.toHaveBeenCalled();
+  });
+
+  it("shows the empty-comment error on Enter instead of posting", async () => {
+    renderSheet();
+
+    const textarea = screen.getByPlaceholderText("Write a comment...");
+    await user.click(textarea);
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByText("Comment cannot be empty")).toBeInTheDocument();
+    expect(actions.createCommentAction).not.toHaveBeenCalled();
   });
 });
