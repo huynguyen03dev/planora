@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import { createBoardAction } from "@/app/(authenticated)/(dashboard)/boards/actions";
@@ -33,6 +33,11 @@ export function CreateBoardModal({
   const [backgroundColor, setBackgroundColor] = useState<string>(DEFAULT_BOARD_COLOR);
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
+  // Synchronous same-tick single-flight: `isPending` only flips on the next
+  // render, so a double Enter (or Enter + click) in the same tick would create
+  // the board twice. The ref guards immediately and releases on completion or
+  // failure, so a retry after either always works.
+  const submittingRef = useRef(false);
 
   const isSubmitDisabled = useMemo(() => {
     return title.trim().length === 0 || isPending;
@@ -55,6 +60,10 @@ export function CreateBoardModal({
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submittingRef.current) {
+      return;
+    }
+    submittingRef.current = true;
     setError("");
 
     const formData = new FormData(event.currentTarget);
@@ -63,17 +72,21 @@ export function CreateBoardModal({
     formData.set("backgroundColor", backgroundColor);
 
     startTransition(async () => {
-      const result = await createBoardAction(formData);
+      try {
+        const result = await createBoardAction(formData);
 
-      if (!result.success) {
-        setError(result.error);
-        return;
+        if (!result.success) {
+          setError(result.error);
+          return;
+        }
+
+        resetState();
+        onClose();
+        router.push(`/boards/${result.boardId}`);
+        router.refresh();
+      } finally {
+        submittingRef.current = false;
       }
-
-      resetState();
-      onClose();
-      router.push(`/boards/${result.boardId}`);
-      router.refresh();
     });
   }
 
