@@ -111,6 +111,15 @@ export async function getListArchivedAt(listId: string): Promise<Date | null> {
   return rows[0]?.archivedAt ?? null;
 }
 
+/** A board's current archivedAt (null = active). */
+export async function getBoardArchivedAt(boardId: string): Promise<Date | null> {
+  const { rows } = await pool().query<{ archivedAt: Date | null }>(
+    `SELECT "archivedAt" FROM "board" WHERE id = $1`,
+    [boardId],
+  );
+  return rows[0]?.archivedAt ?? null;
+}
+
 /** Whether a list row still exists (false after permanent deletion). */
 export async function listExists(listId: string): Promise<boolean> {
   const { rows } = await pool().query<{ id: string }>(

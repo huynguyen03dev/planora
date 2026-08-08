@@ -361,7 +361,15 @@ test("the locked demo path runs continuously from the seeded fixture", async ({ 
   await expect(quickCaptureDialog(ownerPage)).toBeVisible();
   await ownerPage.getByRole("textbox", { name: "Title" }).fill("Rehearsal capture card");
   await ownerPage.getByRole("button", { name: "Create card" }).click();
-  await expect(ownerPage.getByRole("status")).toContainText("Card created");
+  // The quick-capture success toast is the only status surface carrying
+  // "Card created" — /today now also renders a polite end-of-list
+  // role=status ("All assigned cards are shown", US-083 infinite scroll),
+  // so the bare getByRole("status") is strict-mode ambiguous. Filter to the
+  // toast (same pattern as the Card/List restored assertions below); the
+  // product's own status roles are untouched.
+  await expect(
+    ownerPage.getByRole("status").filter({ hasText: "Card created" }),
+  ).toContainText("Card created");
 
   // Live on the collaborator's already-loaded board — no reload/reconnect/
   // route POST in the window.
