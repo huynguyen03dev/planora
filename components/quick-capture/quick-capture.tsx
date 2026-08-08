@@ -345,7 +345,7 @@ export function QuickCapture() {
                 <Input
                   id="quick-capture-due-date"
                   type="date"
-                  className="w-full"
+                  className={`w-full ${dueDate ? "" : "text-muted-foreground"}`}
                   value={dueDate}
                   onChange={(event) => setDueDate(event.target.value)}
                 />
