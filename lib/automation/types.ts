@@ -8,8 +8,6 @@
 
 import type { TriggerType, TriggerConfig } from "@/lib/schemas/automation";
 
-// ─── Action types (one per action-step `type` discriminator) ─────────
-
 export const ACTION_TYPES = [
   "move-card-to-list",
   "set-priority",
@@ -23,18 +21,14 @@ export const ACTION_TYPES = [
 
 export type ActionType = (typeof ACTION_TYPES)[number];
 
-// ─── Priority (matches Prisma enum; local literal union to avoid
-//     importing generated client into pure-logic code) ────────────────
-
+// Local literal union of the Prisma enum so pure-logic code never imports the
+// generated client.
 export type Priority = "URGENT" | "HIGH" | "MEDIUM" | "LOW";
 
-// ─── RuleEventPayload ───────────────────────────────────────────────
-// Matches the design.md "### RuleEventPayload" block exactly, plus an
-// optional `priority` field so the matcher can evaluate priority
-// conditions against the card's current priority at trigger time.
-// (Design note: the base payload doesn't carry priority; adding it here
-// is a deviation documented in the US-066 implementation notes.)
-
+// Matches design.md's "### RuleEventPayload" block exactly, plus an optional
+// `priority` field so the matcher can evaluate priority conditions against the
+// card's current priority at trigger time. The base payload doesn't carry
+// priority; adding it here is a deviation documented in the US-066 notes.
 export interface RuleEventPayload {
   cardId?: string;
   boardId?: string;
@@ -54,7 +48,6 @@ export interface RuleEventPayload {
   _chainDepth?: number;
 }
 
-// ─── RuleExecutionError ───────────────────────────────────────────
 // Shared error class thrown when a rule action fails inside the trigger
 // transaction. Two-class taxonomy (decision 0030):
 //
@@ -104,7 +97,5 @@ export class RuleExecutionError extends Error {
     this.code = code;
   }
 }
-
-// ─── Re-exports from schema (convenience) ───────────────────────────
 
 export type { TriggerType, TriggerConfig };

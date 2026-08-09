@@ -5,11 +5,8 @@ import { v2 as cloudinary } from "cloudinary";
 import { ATTACHMENT_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/schemas/file";
 
 /**
- * Cloudinary integration for file uploads.
- * Stores metadata about uploaded files and manages upload requests.
- *
- * MVP: Server-side signed uploads from Next.js Server Actions.
- * Future: Can support direct client uploads with signed URLs.
+ * Cloudinary integration for file uploads: server-side signed uploads from
+ * Next.js Server Actions (metadata + upload requests live here).
  */
 
 export type CloudinaryUploadConfig = {
@@ -42,8 +39,7 @@ export type CloudinaryUploadResponse = {
 };
 
 /**
- * Validate file before upload to Cloudinary.
- * MVP validation: file exists, not empty, size limit, allowed MIME types.
+ * Validate a file before upload: exists, non-empty, size limit, allowed MIME.
  */
 export function validateFileForUpload(
   file: File,
@@ -71,8 +67,7 @@ export function validateFileForUpload(
 }
 
 /**
- * Parse Cloudinary upload response and extract metadata.
- * This is called after a successful Cloudinary API response.
+ * Extract metadata from a successful Cloudinary API response.
  */
 export function parseCloudinaryResponse(response: Record<string, unknown>): CloudinaryUploadResponse {
   return {

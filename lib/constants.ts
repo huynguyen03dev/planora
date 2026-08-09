@@ -65,12 +65,9 @@ export const MAX_BOARD_TITLE_LENGTH = 64;
  * Card-face and Today chips (priority + due). Priority maps to the   *
  * per-hue label tint pairs (US-051, decision 0014) and the US-050    *
  * status tokens (decision 0013), all AA-measured in app/globals.css  *
- * for both themes. The old copy in list-card-item.tsx + today-view   *
- * used raw Tailwind palette utilities (bg-red-500/10 …) that bypass  *
- * the token system; these utilities resolve from the CSS vars, so    *
- * each pair adapts to dark mode automatically. The chips always      *
- * render icon + word (+ aria-label where stateful) — never           *
- * color-only (WCAG 1.4.1).                                           *
+ * for both themes. The classes resolve from CSS vars, so each pair   *
+ * adapts to dark mode automatically. The chips always render icon +  *
+ * word (+ aria-label where stateful) — never color-only (WCAG 1.4.1).*
  * ------------------------------------------------------------------ */
 export type CardPriority = "URGENT" | "HIGH" | "MEDIUM" | "LOW";
 

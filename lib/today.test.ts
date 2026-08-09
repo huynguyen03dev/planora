@@ -203,7 +203,6 @@ describe("getTodayLoadMoreCursor", () => {
   });
 });
 
-
 const BOARD_A = {
   id: "board-1",
   title: "Product Roadmap",
@@ -221,8 +220,6 @@ function card(overrides: Partial<TodayCard> & { id: string; title: string }): To
     ...overrides,
   };
 }
-
-// ── groupTodayCards ─────────────────────────────────────────────────────────
 
 describe("groupTodayCards", () => {
   it("returns the four sections in fixed order with correct counts", () => {

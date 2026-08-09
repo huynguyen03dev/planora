@@ -6,31 +6,25 @@ import type { Prisma } from "@/app/generated/prisma/client";
 export const CARD_POSITION_GAP = 16384;
 
 /**
- * Smallest gap we allow between a card and either neighbour before forcing a
- * renumber. Below this, repeated float bisection loses precision and two
- * positions can round equal — which the `card_listId_position_live_key` partial
- * unique index would then reject.
+ * Minimum gap before forcing a renumber: below this, float bisection can round
+ * two positions equal, which `card_listId_position_live_key` would reject.
  */
 export const MIN_POSITION_GAP = 0.0001;
 
 /**
- * The where-fragment that defines a "live" card, i.e. one the app treats as
- * present on the board and eligible for a position. It MUST match the predicate
- * of the `card_listId_position_live_key` partial unique index
- * (`archivedAt IS NULL AND deletedAt IS NULL`, per decision 0015). If the app's
- * notion of "live" is broader than the index predicate, two rows the app both
- * considers live can share `(listId, position)` with no P2002 to stop them —
- * exactly the dup-position hole this constant closes. Reuse it everywhere a card
- * is positioned, normalized, or read for reordering.
+ * The where-fragment defining a "live" card. MUST match the predicate of the
+ * `card_listId_position_live_key` partial unique index (`archivedAt IS NULL AND
+ * deletedAt IS NULL`, decision 0015); a broader "live" notion would allow
+ * duplicate `(listId, position)` rows with no P2002 to stop them. Reuse it
+ * everywhere cards are positioned or read for reordering.
  */
 export const LIVE_CARD_SCOPE = { archivedAt: null, deletedAt: null } as const;
 
 /**
- * Thrown by {@link resolveCardPositionIntent} when the neighbouring live cards
- * are too close together to bisect a fresh position between them
- * (gap < MIN_POSITION_GAP). Callers renumber the scope IN THE SAME transaction
- * (the ordering lock is still held) and re-resolve — no separate-transaction
- * retry.
+ * Thrown by {@link resolveCardPositionIntent} when neighbouring live cards are
+ * too close to bisect (gap < MIN_POSITION_GAP). Callers renumber the scope IN
+ * THE SAME transaction (lock still held) and re-resolve — never retry in a
+ * separate transaction.
  */
 export class PositionSpaceExhaustedError extends Error {
   constructor() {
@@ -54,8 +48,7 @@ export class PositionSpaceExhaustedError extends Error {
  *   missing/archived under the lock; the write cannot proceed in that scope.
  *
  * Actions map this to a typed `ORDER_CONFLICT` result; clients roll back the
- * optimistic commit and resync canonical state. The transaction aborts (Prisma
- * rolls back) when this is thrown inside `$transaction`.
+ * optimistic commit and resync. Throwing inside `$transaction` aborts it.
  */
 export class OrderConflictError extends Error {
   readonly reason: OrderConflictReason;
@@ -75,17 +68,14 @@ export class OrderConflictError extends Error {
 export type OrderConflictReason = "MOVE_REVISION" | "ANCHORS_STALE" | "SCOPE_STALE";
 
 /**
- * Explicit client placement intent (decision 0032). The DnD translate layer
- * derives it from the exact drop index: at the start, at the end, or between
- * two named anchors.
+ * Explicit client placement intent (decision 0032), derived from the exact drop
+ * index: at the start, at the end, or between two named anchors.
  *
- * - `start` / `end` are ABSOLUTE: they place relative to the current live ends
- *   of the scope, so a stale anchor hint never blocks them ("if intent is
- *   explicit start/end allow that").
- * - `between` is RELATIVE to `prevCardId`/`nextCardId`: preserve the prev anchor
- *   when it remains before next, rebase on the single surviving anchor when
- *   exactly one is stale, and return ORDER_CONFLICT when both are stale or
- *   contradictory.
+ * - `start` / `end` are ABSOLUTE (relative to the current live ends), so a stale
+ *   anchor hint never blocks them.
+ * - `between` is RELATIVE to `prevCardId`/`nextCardId`: rebase on the single
+ *   surviving anchor when exactly one is stale; ORDER_CONFLICT when both are
+ *   stale or contradictory.
  */
 export type PlacementIntent = "start" | "end" | "between";
 
@@ -106,13 +96,13 @@ export type LockedCardRow = {
 };
 
 /**
- * The ordering protocol starts with a workspace row lock. This serializes the
- * complete ordering scope for a workspace, including recursive automation
- * cascades that can target another board without a cascade-wide lock plan.
- * Within that serialization gate, callers acquire board → lists (ascending id)
- * → card. The helpers sort ids themselves so callers cannot introduce a lock
- * inversion. Archived/missing lists are skipped; callers compare the returned
- * length against the input to detect a scope that vanished under the lock.
+ * The ordering protocol starts with a workspace row lock: this serializes the
+ * complete ordering scope, including recursive automation cascades that can
+ * target another board without a cascade-wide lock plan. Within that gate,
+ * callers acquire board → lists (ascending id) → card; helpers sort ids so
+ * callers cannot introduce a lock inversion. Archived/missing lists are skipped;
+ * callers compare returned vs. input length to detect a scope that vanished
+ * under the lock.
  */
 export async function lockWorkspaceRowForUpdate(
   tx: Prisma.TransactionClient,
@@ -162,10 +152,9 @@ export async function lockListRowsForUpdate(
 }
 
 /**
- * Lock a live card row (`FOR UPDATE`) — the moved item itself. The OCC anchor:
- * reading `moveRevision` and `listId` under the lock is what makes the
- * `expectedMoveRevision` compare-and-set race-free. Returns null when the card
- * is missing/archived/soft-deleted (caller treats as not-found).
+ * Lock a live card row (`FOR UPDATE`) — the moved item. Reading `moveRevision`
+ * and `listId` under the lock makes the `expectedMoveRevision` compare-and-set
+ * race-free. Returns null when the card is missing/archived/soft-deleted.
  */
 export async function lockCardRowForUpdate(
   tx: Prisma.TransactionClient,
@@ -192,31 +181,26 @@ export async function lockBoardRowForUpdate(
 }
 
 /**
- * Compute the position for a card placed in `targetListId` according to an
- * EXPLICIT {@link PlacementIntent}, reading only CURRENT live occupants of the
- * target list (decision 0032). Runs on the caller's transaction client, which
- * MUST already hold the target list's `FOR UPDATE` row lock (via
- * {@link lockListRowsForUpdate}) so the read-decide-write is serialized — no
- * retry loop is needed.
+ * Compute the position for a card placed in `targetListId` per an EXPLICIT
+ * {@link PlacementIntent}, reading only CURRENT live occupants (decision 0032).
+ * The caller's transaction client MUST already hold the target list's `FOR
+ * UPDATE` row lock ({@link lockListRowsForUpdate}) so read-decide-write is
+ * serialized — no retry loop needed.
  *
- * - `start` → before the current first live card (or `GAP` when the list is
- *   empty). Absolute; never conflicts.
- * - `end` → after the current last live card (or `GAP`). Absolute; never
- *   conflicts.
+ * - `start` / `end` → before/after the current first/last live card (or `GAP`
+ *   when empty). Absolute; never conflict.
  * - `between` → validate BOTH anchors against current live occupants; bisect
  *   between the surviving anchor and the card CURRENTLY occupying the adjacent
- *   slot (the anchored-bisection that fixes the concurrent end-drop: once a
- *   rival lands right after `prev`, we bisect into a distinct slot instead of
- *   recomputing `prev + GAP`). Rebase on the single surviving anchor when
- *   exactly one is stale; throw {@link OrderConflictError}("ANCHORS_STALE")
- *   when both are stale or their live positions are reversed — the explicit
- *   between-intent is impossible.
+ *   slot (anchored-bisection fixing the concurrent end-drop: once a rival lands
+ *   right after `prev`, we bisect into a distinct slot instead of recomputing
+ *   `prev + GAP`). Rebase on the single surviving anchor when exactly one is
+ *   stale; throw {@link OrderConflictError}("ANCHORS_STALE") when both are
+ *   stale or reversed.
  *
  * `excludeCardId` omits the mover from the adjacency search so a within-list
  * reorder never bisects against its own stale slot. Throws
- * {@link PositionSpaceExhaustedError} when there is no room to bisect — the
- * caller renumbers the scope IN THE SAME transaction (lock still held) and
- * re-resolves.
+ * {@link PositionSpaceExhaustedError} when there is no room — the caller
+ * renumbers the scope IN THE SAME transaction (lock still held) and re-resolves.
  */
 export async function resolveCardPositionIntent(
   client: Prisma.TransactionClient,
@@ -251,7 +235,7 @@ export async function resolveCardPositionIntent(
     return last ? last.position + CARD_POSITION_GAP : CARD_POSITION_GAP;
   }
 
-  // between: validate each anchor against CURRENT live occupants of the target.
+  // between: validate anchors against current live occupants.
   let prev: { position: number } | null = null;
   let next: { position: number } | null = null;
   if (prevCardId) {
@@ -274,15 +258,13 @@ export async function resolveCardPositionIntent(
   }
 
   if (!prev && !next) {
-    // Both anchors stale for an explicit between intent → typed conflict, never
-    // a silent append.
+    // Both anchors stale for an explicit between intent → typed conflict, never a silent append.
     throw new OrderConflictError("ANCHORS_STALE");
   }
 
   if (prev && next && prev.position >= next.position) {
-    // Both anchors still exist, but the client's prev-before-next relation is
-    // no longer true in the live order. Treat that contradictory snapshot as
-    // stale instead of inserting into a reversed interval.
+    // Both anchors exist but the client's prev-before-next relation no longer
+    // holds in the live order — treat the contradictory snapshot as stale.
     throw new OrderConflictError("ANCHORS_STALE");
   }
 
@@ -334,11 +316,9 @@ function bisect(a: number, b: number): number {
 
 /**
  * Renumber a list's live cards onto a fresh evenly-spaced sequence, collision
- * safe under the `card_listId_position_live_key` partial unique index. Runs on
- * the caller's transaction client so it can share the reorder's transaction.
- * Normalization is internal maintenance: it preserves sibling relative order,
- * changes only sibling positions, and deliberately does not bump or emit any
- * sibling `moveRevision`.
+ * safe under `card_listId_position_live_key`. Runs on the caller's transaction
+ * client to share the reorder's transaction. Internal maintenance: preserves
+ * sibling relative order and deliberately does not bump sibling `moveRevision`.
  */
 export async function normalizeCardPositions(
   tx: Prisma.TransactionClient,
@@ -356,22 +336,20 @@ export async function normalizeCardPositions(
 }
 
 /**
- * Renumber ordered rows onto a fresh, evenly-spaced positive sequence
- * (`gap`, `2*gap`, …) WITHOUT ever transiently violating a `(scope, position)`
- * unique index.
+ * Renumber rows onto a fresh evenly-spaced positive sequence (`gap`, `2*gap`, …)
+ * without EVER transiently violating a `(scope, position)` unique index.
  *
  * A naive in-place renumber assigns row A a value row B still holds; under a
  * non-deferrable unique index that aborts mid-transaction even when the final
- * state is unique and even when the writes are ordered (reproduced on PG17).
- * We therefore renumber in two passes: first move every row into a disjoint
- * negative staging band (strictly below every current position and below zero,
- * so it collides with neither the current values nor the positive finals), then
- * compact to the final sequence. No intermediate state ever holds a duplicate.
+ * state is unique and the writes are ordered (reproduced on PG17). So: pass 1
+ * moves every row into a disjoint negative staging band (below all current
+ * positions and below zero — collides with neither current values nor the
+ * positive finals), then pass 2 compacts to the final sequence. No intermediate
+ * state ever holds a duplicate.
  *
- * Must run inside the caller's transaction — the staging values are only safe
- * until commit. `rows` MUST already be in the desired final order, and
- * `updatePosition` MUST be issued sequentially against the same transaction
- * client (this function awaits each write in turn; do not parallelize them).
+ * Must run inside the caller's transaction (staging values are only safe until
+ * commit). `rows` MUST already be in final order, and `updatePosition` MUST be
+ * issued sequentially against the same transaction client — do not parallelize.
  */
 export async function renumberPositions(
   rows: readonly { id: string; position: number }[],
@@ -382,14 +360,14 @@ export async function renumberPositions(
     return;
   }
 
-  // Fold with reduce rather than `Math.min(...rows.map(...))`: spreading a very
-  // large array as call arguments overflows the JS argument limit and throws
-  // RangeError, and this is the integrity-recovery path that must complete over
-  // ANY input size. Seed with 0 so the staging base is always below zero too.
+  // Fold with reduce, not `Math.min(...rows.map(...))`: spreading a very large
+  // array overflows the JS argument limit (RangeError), and this recovery path
+  // must complete over ANY input size. Seed with 0 so the staging base is
+  // always below zero too.
   const minPosition = rows.reduce((min, row) => Math.min(min, row.position), 0);
-  // Staging values sit strictly below every current position AND below zero,
-  // so pass 1 never collides with a current value and pass 2's positive finals
-  // never collide with a still-staged (negative) row.
+  // Staging values sit strictly below every current position AND below zero, so
+  // pass 1 never collides with a current value and pass 2's finals never
+  // collide with a still-staged (negative) row.
   const stagingBase = minPosition - gap;
 
   for (let i = 0; i < rows.length; i += 1) {

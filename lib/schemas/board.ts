@@ -1,11 +1,9 @@
-// lib/schemas/board.ts
 import { z } from "zod";
 import { BOARD_COLORS, DEFAULT_BOARD_COLOR, MAX_BOARD_TITLE_LENGTH, MIN_BOARD_TITLE_LENGTH } from "@/lib/constants";
 
 // Helper: validate board colors exist
 const boardColorSet = new Set<string>(BOARD_COLORS.map((color) => color.value));
 
-// Schema for creating a workspace
 export const createWorkspaceSchema = z.object({
   workspaceName: z
     .string({ message: "Workspace name is required" })
@@ -16,7 +14,6 @@ export const createWorkspaceSchema = z.object({
 
 export type CreateWorkspaceInput = z.infer<typeof createWorkspaceSchema>;
 
-// Schema for creating a board
 export const createBoardSchema = z.object({
   // Better Auth generates 32-char alphanumeric IDs (nanoid-style), not UUIDs
   workspaceId: z
@@ -39,7 +36,6 @@ export const createBoardSchema = z.object({
 
 export type CreateBoardInput = z.infer<typeof createBoardSchema>;
 
-// Schema for updating a board
 export const updateBoardSchema = z.object({
   boardId: z.string({ message: "Board not found" }).uuid(),
   title: z
@@ -62,7 +58,6 @@ export const updateBoardSchema = z.object({
 
 export type UpdateBoardInput = z.infer<typeof updateBoardSchema>;
 
-// Schema for deleting a board (only needs ID)
 export const deleteBoardSchema = z.object({
   boardId: z.string({ message: "Board not found" }).uuid(),
 });

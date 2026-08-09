@@ -339,13 +339,13 @@ export function emitBoardDeleted(boardId: string) {
 }
 
 // Revocation (F2): force-disconnect every socket of a user whose workspace
-// membership was just removed or whose role was just demoted. The server-side
-// disconnect drops them from every board room and presence entry (via the
-// reverse-index cleanup in server.ts), so no further board broadcasts reach a
-// user who lost access and no stale role badge survives. The socket.io client
-// does not auto-reconnect on a server-initiated disconnect; on the next page
-// load (or manual reconnect) the room-join gates re-run — denied for removed
-// users, re-joined under the new role for demoted ones. Silent no-op without IO.
+// membership was just removed or whose role was just demoted. The disconnect
+// drops them from every board room + presence entry (reverse-index cleanup in
+// server.ts), so no further board broadcasts reach a user who lost access and
+// no stale role badge survives. socket.io does not auto-reconnect on a
+// server-initiated disconnect; on next load the room-join gates re-run — denied
+// for removed users, re-joined under the new role for demoted ones. No-op
+// without IO.
 export function kickUserSockets(userId: string) {
   const io = getIO();
   if (!io) {
