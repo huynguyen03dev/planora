@@ -1,9 +1,8 @@
 import { defineConfig } from "vitest/config";
 import path from "path";
 
-// Shared config (resolve aliases, the server-only mock) inherited by both
-// workspace projects. Project-specific test settings live in
-// `vitest.workspace.ts` (node logic suite + happy-dom component suite).
+// Shared config (aliases, server-only mock) inherited by both workspace
+// projects; project-specific settings live in `vitest.workspace.ts`.
 export default defineConfig({
   test: {
     globals: true,
