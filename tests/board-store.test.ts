@@ -12,6 +12,7 @@ function makeLists(): ListWithCards[] {
       title: "To Do",
       boardId: "board-1",
       position: 16384,
+      moveRevision: 0,
       cards: [],
     },
     {
@@ -19,6 +20,7 @@ function makeLists(): ListWithCards[] {
       title: "Doing",
       boardId: "board-1",
       position: 32768,
+      moveRevision: 0,
       cards: [],
     },
     {
@@ -26,9 +28,37 @@ function makeLists(): ListWithCards[] {
       title: "Done",
       boardId: "board-1",
       position: 49152,
+      moveRevision: 0,
       cards: [],
     },
   ];
+}
+
+function card(
+  id: string,
+  listId: string,
+  position: number,
+  moveRevision = 0,
+  title?: string,
+): ListWithCards["cards"][number] {
+  return {
+    id,
+    listId,
+    title: title ?? id,
+    position,
+    moveRevision,
+    coverImage: null,
+    priority: null,
+    dueDate: null,
+    completedAt: null,
+    updatedAt: new Date(0),
+    labels: [],
+    members: [],
+    memberCount: 0,
+    checklistDone: 0,
+    checklistTotal: 0,
+    commentCount: 0,
+  };
 }
 
 function listOrder(): string[] {
@@ -87,6 +117,7 @@ describe("applyRemoteListMoved", () => {
       boardId: "board-1",
       listId: "list-1",
       position: 65536,
+      moveRevision: 1,
     });
 
     expect(listOrder()).toEqual(["list-2", "list-3", "list-1"]);
@@ -103,6 +134,7 @@ describe("applyRemoteListMoved", () => {
       boardId: "board-2",
       listId: "list-1",
       position: 65536,
+      moveRevision: 1,
     });
 
     expect(listOrder()).toEqual(["list-1", "list-2", "list-3"]);
@@ -118,6 +150,7 @@ describe("applyRemoteListMoved", () => {
       boardId: "board-1",
       listId: "list-missing",
       position: 1,
+      moveRevision: 1,
     });
 
     expect(listOrder()).toEqual(["list-1", "list-2", "list-3"]);
@@ -130,6 +163,7 @@ describe("applyRemoteListMoved", () => {
       boardId: "board-1",
       listId: "list-3",
       position: 8192,
+      moveRevision: 1,
     } as const;
 
     useBoardStore.getState().applyRemoteListMoved(move);
@@ -154,6 +188,7 @@ describe("applyRemoteListMoved", () => {
       boardId: "board-1",
       listId: "list-1",
       position: 16384,
+      moveRevision: 0,
     });
 
     expect(useBoardStore.getState().lists).toBe(before);
@@ -176,6 +211,7 @@ describe("applyRemoteListCreated", () => {
         title: "Review",
         boardId: "board-1",
         position: 24576,
+        moveRevision: 0,
       },
     });
 
@@ -196,6 +232,7 @@ describe("applyRemoteListCreated", () => {
         title: "Review",
         boardId: "board-1",
         position: 24576,
+        moveRevision: 0,
       },
     } as const;
 
@@ -220,6 +257,7 @@ describe("applyRemoteListCreated", () => {
         title: "Review",
         boardId: "board-2",
         position: 24576,
+        moveRevision: 0,
       },
     });
 
@@ -236,6 +274,7 @@ describe("applyRemoteListCreated", () => {
         title: "Restored List",
         boardId: "board-1",
         position: 24576,
+        moveRevision: 0,
       },
     });
 
@@ -308,9 +347,7 @@ describe("applyRemoteListDeleted", () => {
 
   it("removes the list and its cards", () => {
     const lists = makeLists();
-    lists[0].cards = [
-      { id: "card-1", listId: "list-1", title: "A", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
-    ];
+    lists[0].cards = [card("card-1", "list-1", 16384)];
     useBoardStore.setState({ boardId: "board-1", lists });
 
     useBoardStore.getState().applyRemoteListDeleted({
@@ -349,13 +386,8 @@ describe("applyRemoteListDeleted", () => {
 
 function makeListsWithCards(): ListWithCards[] {
   const lists = makeLists();
-  lists[0].cards = [
-    { id: "card-a", listId: "list-1", title: "Alpha", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
-    { id: "card-c", listId: "list-1", title: "Charlie", position: 49152, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
-  ];
-  lists[1].cards = [
-    { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
-  ];
+  lists[0].cards = [card("card-a", "list-1", 16384, 0, "Alpha"), card("card-c", "list-1", 49152, 0, "Charlie")];
+  lists[1].cards = [card("card-b", "list-2", 16384, 0, "Bravo")];
   return lists;
 }
 
@@ -401,6 +433,7 @@ describe("applyRemoteCardMoved", () => {
       cardId: "card-a",
       listId: "list-2",
       position: 24576,
+      moveRevision: 1,
     });
 
     expect(cardsIn("list-1").map((c) => c.id)).toEqual(["card-c"]);
@@ -421,6 +454,7 @@ describe("applyRemoteCardMoved", () => {
       cardId: "card-b",
       listId: "list-2",
       position: 16384,
+      moveRevision: 0,
     });
 
     expect(useBoardStore.getState().lists).toBe(before);
@@ -432,11 +466,8 @@ describe("applyRemoteCardMoved", () => {
     // canonical float-gap position and MUST apply to correct it — otherwise a
     // later remote re-sort would misorder the board.
     const lists = makeListsWithCards();
-    lists[0].cards = [{ id: "card-c", listId: "list-1", title: "Charlie", position: 49152, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 }];
-    lists[1].cards = [
-      { id: "card-b", listId: "list-2", title: "Bravo", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
-      { id: "card-a", listId: "list-2", title: "Alpha", position: 99999, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
-    ];
+    lists[0].cards = [card("card-c", "list-1", 49152)];
+    lists[1].cards = [card("card-b", "list-2", 16384), card("card-a", "list-2", 99999)];
     useBoardStore.setState({ boardId: "board-1", lists });
 
     useBoardStore.getState().applyRemoteCardMoved({
@@ -444,6 +475,7 @@ describe("applyRemoteCardMoved", () => {
       cardId: "card-a",
       listId: "list-2",
       position: 8192,
+      moveRevision: 1,
     });
 
     // Position corrected to 8192 → card-a now sorts ahead of card-b.
@@ -460,6 +492,7 @@ describe("applyRemoteCardMoved", () => {
       cardId: "card-a",
       listId: "list-2",
       position: 24576,
+      moveRevision: 1,
     });
 
     expect(useBoardStore.getState().lists).toBe(before);
@@ -1158,5 +1191,248 @@ describe("applyRemoteCardCompletionUpdated (US-045)", () => {
     });
 
     expect(cardsIn("list-1").find((c) => c.id === "card-a")!.completedAt).toBeNull();
+  });
+});
+
+describe("decision 0032 — moveRevision echo semantics", () => {
+  beforeEach(() => {
+    useBoardStore.getState().reset();
+  });
+
+  it("normalizes omitted legacy list/card revisions when seeding the store", () => {
+    const current = makeListsWithCards();
+    const legacy = current.map((list) => ({
+      ...list,
+      moveRevision: undefined,
+      cards: list.cards.map((card) => ({ ...card, moveRevision: undefined })),
+    })) as never;
+
+    useBoardStore.getState().setLists(legacy);
+
+    expect(useBoardStore.getState().lists.every((list) => list.moveRevision === 0)).toBe(true);
+    expect(
+      useBoardStore.getState().lists.every((list) =>
+        list.cards.every((card) => card.moveRevision === 0),
+      ),
+    ).toBe(true);
+  });
+
+  describe("applyRemoteCardMoved revision gates", () => {
+    function seedMovedCard(moveRevision: number) {
+      const lists = makeListsWithCards();
+      // The base fixture already has card-a in list-1; drop it so the card
+      // lives ONLY in list-2 at the seeded revision (no duplicate id).
+      lists[0].cards = lists[0].cards.filter((c) => c.id !== "card-a");
+      lists[1].cards = [card("card-b", "list-2", 16384), card("card-a", "list-2", 8192, moveRevision)];
+      useBoardStore.setState({ boardId: "board-1", lists });
+      return lists;
+    }
+
+    it("rejects a STALE echo (lower revision) — a newer move already applied", () => {
+      seedMovedCard(3); // store already knows revision 3
+      const before = useBoardStore.getState().lists;
+
+      // A delayed echo from an older move (revision 2) must not clobber it.
+      useBoardStore.getState().applyRemoteCardMoved({
+        boardId: "board-1",
+        cardId: "card-a",
+        listId: "list-1",
+        position: 999,
+        moveRevision: 2,
+      });
+
+      expect(useBoardStore.getState().lists).toBe(before);
+    });
+
+    it("dedupes the actor's own echo (equal revision, same list + position) without re-render", () => {
+      seedMovedCard(1);
+      const before = useBoardStore.getState().lists;
+
+      useBoardStore.getState().applyRemoteCardMoved({
+        boardId: "board-1",
+        cardId: "card-a",
+        listId: "list-2",
+        position: 8192,
+        moveRevision: 1,
+      });
+
+      expect(useBoardStore.getState().lists).toBe(before);
+    });
+
+    it("applies an equal-revision echo with a DIFFERENT position (canonical correction of an optimistic slot)", () => {
+      // The actor optimistically placed card-a at 8192; the server computed the
+      // canonical float-gap slot 24576 at the same revision. It MUST apply.
+      seedMovedCard(1);
+
+      useBoardStore.getState().applyRemoteCardMoved({
+        boardId: "board-1",
+        cardId: "card-a",
+        listId: "list-2",
+        position: 24576,
+        moveRevision: 1,
+      });
+
+      const moved = cardsIn("list-2").find((c) => c.id === "card-a")!;
+      expect(moved.position).toBe(24576);
+      expect(moved.moveRevision).toBe(1);
+    });
+
+    it("normalizes an omitted legacy revision to zero at event ingress", () => {
+      const lists = makeListsWithCards();
+      useBoardStore.setState({ boardId: "board-1", lists });
+
+      useBoardStore.getState().applyRemoteCardMoved({
+        boardId: "board-1",
+        cardId: "card-a",
+        listId: "list-2",
+        position: 24576,
+      });
+
+      const moved = cardsIn("list-2").find((card) => card.id === "card-a")!;
+      expect(moved.moveRevision).toBe(0);
+      expect(moved.position).toBe(24576);
+    });
+
+    it("applies a HIGHER-revision echo (a genuine cross-user move)", () => {
+      seedMovedCard(1);
+
+      useBoardStore.getState().applyRemoteCardMoved({
+        boardId: "board-1",
+        cardId: "card-a",
+        listId: "list-1",
+        position: 99999,
+        moveRevision: 2,
+      });
+
+      const moved = cardsIn("list-1").find((c) => c.id === "card-a")!;
+      expect(moved.listId).toBe("list-1");
+      expect(moved.position).toBe(99999);
+      expect(moved.moveRevision).toBe(2);
+    });
+
+  it("removes the source card when a cross-board destination is absent from the store", () => {
+      seedMovedCard(0);
+      useBoardStore.setState({
+        selectedCardId: "card-a",
+        selectedCard: selectedCardFor("card-a", "Alpha"),
+      });
+
+      useBoardStore.getState().applyRemoteCardMoved({
+        boardId: "board-1",
+        cardId: "card-a",
+        listId: "list-missing",
+        position: 1,
+        moveRevision: 1,
+      });
+
+      expect(cardsIn("list-2").map((card) => card.id)).toEqual(["card-b"]);
+      expect(useBoardStore.getState().selectedCardId).toBeNull();
+      expect(useBoardStore.getState().selectedCard).toBeNull();
+    });
+
+    it("inserts a canonical cross-board snapshot when the destination has no local source card", () => {
+      useBoardStore.setState({ boardId: "board-2", lists: makeListsWithCards() });
+
+      useBoardStore.getState().applyRemoteCardMoved({
+        boardId: "board-2",
+        cardId: "card-new",
+        listId: "list-2",
+        position: 24576,
+        moveRevision: 2,
+        card: {
+          id: "card-new",
+          listId: "list-2",
+          title: "Moved from another board",
+          position: 24576,
+          moveRevision: 2,
+          dueDate: null,
+          priority: null,
+        },
+      });
+
+      expect(cardsIn("list-2").map((card) => card.id)).toEqual(["card-b", "card-new"]);
+      expect(cardsIn("list-2").find((card) => card.id === "card-new")?.title).toBe(
+        "Moved from another board",
+      );
+    });
+  });
+
+  describe("applyRemoteListMoved revision gates", () => {
+    it("rejects a stale echo (lower revision)", () => {
+      const lists = makeLists();
+      lists[0].moveRevision = 3;
+      useBoardStore.setState({ boardId: "board-1", lists });
+      const before = useBoardStore.getState().lists;
+
+      useBoardStore.getState().applyRemoteListMoved({
+        boardId: "board-1",
+        listId: "list-1",
+        position: 1,
+        moveRevision: 2,
+      });
+
+      expect(useBoardStore.getState().lists).toBe(before);
+    });
+
+    it("dedupes the actor's own echo (equal revision, same position)", () => {
+      useBoardStore.setState({ boardId: "board-1", lists: makeLists() });
+      const before = useBoardStore.getState().lists;
+
+      useBoardStore.getState().applyRemoteListMoved({
+        boardId: "board-1",
+        listId: "list-2",
+        position: 32768,
+        moveRevision: 0,
+      });
+
+      expect(useBoardStore.getState().lists).toBe(before);
+    });
+
+    it("normalizes an omitted legacy revision to zero at event ingress", () => {
+      useBoardStore.setState({ boardId: "board-1", lists: makeLists() });
+
+      useBoardStore.getState().applyRemoteListMoved({
+        boardId: "board-1",
+        listId: "list-1",
+        position: 1,
+      });
+
+      const list = useBoardStore.getState().lists.find((item) => item.id === "list-1")!;
+      expect(list.moveRevision).toBe(0);
+      expect(list.position).toBe(1);
+    });
+
+    it("applies an equal-revision echo with a DIFFERENT position (canonical correction)", () => {
+      const lists = makeLists();
+      // Optimistic slot: list-1 already at 16384, server canonicalizes to 8192.
+      lists[0].position = 16384;
+      lists[0].moveRevision = 1;
+      useBoardStore.setState({ boardId: "board-1", lists });
+
+      useBoardStore.getState().applyRemoteListMoved({
+        boardId: "board-1",
+        listId: "list-1",
+        position: 8192,
+        moveRevision: 1,
+      });
+
+      expect(listOrder()).toEqual(["list-1", "list-2", "list-3"]);
+      expect(useBoardStore.getState().lists.find((l) => l.id === "list-1")!.position).toBe(8192);
+      expect(useBoardStore.getState().lists.find((l) => l.id === "list-1")!.moveRevision).toBe(1);
+    });
+
+    it("applies a HIGHER-revision echo (cross-user move) and re-sorts", () => {
+      useBoardStore.setState({ boardId: "board-1", lists: makeLists() });
+
+      useBoardStore.getState().applyRemoteListMoved({
+        boardId: "board-1",
+        listId: "list-1",
+        position: 65536,
+        moveRevision: 1,
+      });
+
+      expect(listOrder()).toEqual(["list-2", "list-3", "list-1"]);
+      expect(useBoardStore.getState().lists.find((l) => l.id === "list-1")!.moveRevision).toBe(1);
+    });
   });
 });

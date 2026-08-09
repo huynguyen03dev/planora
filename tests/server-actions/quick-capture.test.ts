@@ -106,7 +106,18 @@ import { revalidatePath } from "next/cache";
  */
 function makeTx() {
   return {
-    $queryRaw: vi.fn(async () => [{ id: LIST_A1, archivedAt: null }]),
+    // decision 0032: route the workspace/board/list FOR UPDATE locks by SQL
+    // text. Restore's archived-card lock is still routed separately below.
+    $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+      const sql = strings[0] ?? "";
+      if (sql.includes('FROM "board"')) {
+        return [{ id: BOARD_A }];
+      }
+      if (sql.includes('FROM "card"')) {
+        return [{ id: CARD_ID, listId: LIST_A1, archivedAt: new Date("2026-07-01T00:00:00Z") }];
+      }
+      return [{ id: LIST_A1, archivedAt: null }];
+    }),
     card: {
       findFirst: vi.fn(async (): Promise<{ position: number } | null> => null),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
@@ -120,12 +131,20 @@ function makeTx() {
         archivedAt: null,
         deletedAt: null,
       })),
-      // restoreCardAction's tx.update — returns what buildCardRestoredEvent
-      // reads (id/estimateHours/dueDate/members).
+      // restoreCardAction's tx.update — returns what buildCardRestoredEvent +
+      // the card:created emit read (id/listId/title/position/moveRevision/
+      // dueDate/priority/members), per decision 0032.
       update: vi.fn(async () => ({
         id: CARD_ID,
+        listId: LIST_A1,
+        title: "Restored card",
+        position: 8192,
+        moveRevision: 1,
+        priority: "HIGH",
+        dueDate: new Date("2026-08-15T00:00:00.000Z"),
         estimateHours: null,
-        dueDate: null,
+        archivedAt: null,
+        deletedAt: null,
         members: [],
       })),
     },

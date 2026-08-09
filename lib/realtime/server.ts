@@ -31,6 +31,8 @@ export function emitCardMoved(boardId: string, payload: {
   cardId: string;
   listId: string;
   position: number;
+  moveRevision?: number;
+  card?: CardSnapshot;
 }) {
   const io = getIO();
   if (!io) {
@@ -51,6 +53,7 @@ export function emitCardMoved(boardId: string, payload: {
 export function emitListMoved(boardId: string, payload: {
   listId: string;
   position: number;
+  moveRevision?: number;
 }) {
   const io = getIO();
   if (!io) {

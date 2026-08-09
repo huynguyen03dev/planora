@@ -8,11 +8,19 @@ export interface CardMovedPayload extends BoardEventPayload {
   cardId: string;
   listId: string;
   position: number;
+  /** Canonical ordering revision after the move. Legacy emitters may omit it;
+   * the board store normalizes absence to revision 0 at ingress. */
+  moveRevision?: number;
+  /** Full canonical snapshot is present for a cross-board destination room. */
+  card?: CardSnapshot;
 }
 
 export interface ListMovedPayload extends BoardEventPayload {
   listId: string;
   position: number;
+  /** Canonical ordering revision after the move. Legacy emitters may omit it;
+   * the board store normalizes absence to revision 0 at ingress. */
+  moveRevision?: number;
 }
 
 export interface ListSnapshot {
@@ -20,6 +28,8 @@ export interface ListSnapshot {
   title: string;
   boardId: string;
   position: number;
+  /** Optional for pre-0032 list-created/restored emitters. */
+  moveRevision?: number;
 }
 
 export interface ListCreatedPayload extends BoardEventPayload {
@@ -46,6 +56,10 @@ export interface CardSnapshot {
   listId: string;
   title: string;
   position: number;
+  /** Canonical ordering revision (decision 0032); always sent by new emitters.
+   *  Optional so pre-0032 emitters/payloads stay valid — receivers fall back to
+   *  the default revision 0 when absent. */
+  moveRevision?: number;
   // US-083 W7: quick-captured cards carry due date + priority fidelity to
   // observer clients. Optional so pre-W7 emitters/payloads stay valid — the
   // receiver falls back to null when absent.

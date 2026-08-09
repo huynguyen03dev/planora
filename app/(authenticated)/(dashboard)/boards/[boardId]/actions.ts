@@ -7,17 +7,19 @@ import db from "@/lib/prisma";
 import {
   CARD_POSITION_GAP,
   LIVE_CARD_SCOPE,
-  PositionSpaceExhaustedError,
-  StaleNeighborError,
-  normalizeCardPositions,
-  resolveCardPosition,
+  OrderConflictError,
+  lockBoardRowForUpdate,
+  lockListRowsForUpdate,
+  lockWorkspaceRowForUpdate,
 } from "@/lib/ordering";
 import { getBoardById } from "@/lib/board";
 import {
   updateCardDetails,
   getCardWithListAndBoard,
   getArchivedCardWithListAndBoard,
+  lockCardOrderingScopeForUpdate,
   reorderCardWithinListByNeighbors,
+  moveCardInTransaction,
   getCardWithListAndMembers,
   setCardCompletion,
   type CardDetailRecord,
@@ -139,8 +141,6 @@ import {
 } from "@/lib/card-history";
 import { validateFileForUpload, uploadToCloudinary } from "@/lib/cloudinary";
 
-const MAX_REORDER_CARD_RETRIES = 3;
-
 function toIsoOrNull(date: Date | null | undefined): string | null {
   return date?.toISOString() ?? null;
 }
@@ -214,15 +214,15 @@ type RestoreCardErrorCode = "PARENT_LIST_ARCHIVED";
 
 type ReorderListResult =
   | { success: true }
-  | { success: false; error: string };
+  | { success: false; error: string; code?: "ORDER_CONFLICT" };
 
 type ReorderCardResult =
   | { success: true }
-  | { success: false; error: string };
+  | { success: false; error: string; code?: "ORDER_CONFLICT" };
 
 type MoveCardResult =
   | { success: true }
-  | { success: false; error: string };
+  | { success: false; error: string; code?: "ORDER_CONFLICT" };
 
 type ToggleCardCompletionResult =
   | { success: true; card: CardDetailRecord }
@@ -269,7 +269,7 @@ export async function createListAction(
   }
 
   try {
-    const list = await createList({ boardId, title });
+    const list = await createList({ boardId, title, workspaceId: board.workspaceId });
     revalidatePath(`/boards/${boardId}`);
     emitListCreated(list.boardId, {
       list: {
@@ -277,6 +277,9 @@ export async function createListAction(
         title: list.title,
         boardId: list.boardId,
         position: list.position,
+        // decision 0032: a fresh list starts at revision 0; the store seeds
+        // the canonical revision from this payload so later drags CAS on it.
+        moveRevision: list.moveRevision,
       },
     });
     return { success: true, listId: list.id };
@@ -398,7 +401,7 @@ export async function restoreListAction(
   }
 
   try {
-    const restoredList = await restoreList(listId);
+    const restoredList = await restoreList(listId, result.board.workspaceId);
     revalidatePath(`/boards/${restoredList.boardId}`);
     emitListRestored(restoredList.boardId, {
       list: {
@@ -406,6 +409,10 @@ export async function restoreListAction(
         title: restoredList.title,
         boardId: restoredList.boardId,
         position: restoredList.position,
+        // decision 0032: restore is an ordering write; carry the bumped
+        // revision so observers seed the canonical value (never the stale
+        // pre-archive one).
+        moveRevision: restoredList.moveRevision,
       },
     });
     emitAnalyticsRefresh(result.board.workspaceId);
@@ -603,6 +610,17 @@ export async function createCardAction(
 
   try {
     const card = await db.$transaction(async (tx) => {
+      // Global ordering gate, then parent-to-child board → list locks. This is
+      // the same protocol used by human moves and recursive automation.
+      await lockWorkspaceRowForUpdate(tx, result.board.workspaceId);
+      const board = await lockBoardRowForUpdate(tx, result.board.id);
+      if (!board) {
+        throw new Error("BOARD_NOT_FOUND");
+      }
+      const locked = await lockListRowsForUpdate(tx, [listId]);
+      if (locked.length === 0) {
+        throw new Error("LIST_NOT_FOUND");
+      }
       const lastCard = await tx.card.findFirst({
         where: {
           listId,
@@ -634,6 +652,7 @@ export async function createCardAction(
           listId: true,
           title: true,
           position: true,
+          moveRevision: true,
           estimateHours: true,
           dueDate: true,
           priority: true,
@@ -679,6 +698,9 @@ export async function createCardAction(
         listId: card.card.listId,
         title: card.card.title,
         position: card.card.position,
+        // decision 0032: a fresh card starts at revision 0; the store seeds the
+        // canonical revision from this payload so later drags CAS on it.
+        moveRevision: card.card.moveRevision,
         // US-083 W7 fidelity: observer clients receive due date + priority
         // for quick-captured cards (the reducer applies them; description is
         // not part of the board-card snapshot).
@@ -816,13 +838,19 @@ export async function restoreCardAction(
   }
 
   try {
-    await db.$transaction(async (tx) => {
+    const restoredCard = await db.$transaction(async (tx) => {
       // US-083 W8 race guard: the sequential pre-read above can pass while the
       // parent list is archived by a concurrent action before this transaction
       // runs. Lock the parent list row and revalidate archivedAt under the lock
       // (same pattern as permanentlyDeleteListAction / uploadAttachmentAction)
       // so a restore can never commit a live card into an archived (invisible)
       // list.
+      // Global ordering gate, then parent-to-child board → list → card locks.
+      await lockWorkspaceRowForUpdate(tx, result.board.workspaceId);
+      const board = await lockBoardRowForUpdate(tx, result.board.id);
+      if (!board) {
+        throw new Error("RESTORE_TARGET_GONE");
+      }
       const locked = await tx.$queryRaw<
         Array<{ id: string; archivedAt: Date | null }>
       >`SELECT id, "archivedAt" FROM "list" WHERE id = ${result.list.id} FOR UPDATE`;
@@ -836,16 +864,56 @@ export async function restoreCardAction(
         throw new Error("PARENT_LIST_ARCHIVED");
       }
 
+      // Parent-to-child (decision 0032): with the parent list locked, lock the
+      // (archived) card row itself. The archived card is invisible to the live
+      // lock helper, so lock it directly and re-verify it still exists and is
+      // still archived under the lock (a concurrent restore CASes on the same
+      // where-clause below).
+      const cardLocked = await tx.$queryRaw<
+        Array<{ id: string; listId: string; archivedAt: Date | null }>
+      >`SELECT id, "listId", "archivedAt" FROM "card" WHERE id = ${cardId} AND "deletedAt" IS NULL FOR UPDATE`;
+
+      if (cardLocked.length === 0 || cardLocked[0].archivedAt === null) {
+        // Card gone, or a concurrent restore already committed it — no write.
+        throw new Error("RESTORE_TARGET_GONE");
+      }
+
+      // Place the restored card at the END of the live scope under the lock:
+      // its pre-archive slot may have been taken by a live card, and the
+      // partial unique index would otherwise reject the restore with a P2002.
+      const lastCard = await tx.card.findFirst({
+        where: { listId: result.list.id, ...LIVE_CARD_SCOPE },
+        orderBy: [{ position: "desc" }, { createdAt: "desc" }],
+        select: { position: true },
+      });
+      const position = lastCard
+        ? lastCard.position + CARD_POSITION_GAP
+        : CARD_POSITION_GAP;
+
       const card = await tx.card.update({
         where: {
           id: cardId,
           archivedAt: { not: null },
         },
-        data: { archivedAt: null },
+        data: {
+          archivedAt: null,
+          position,
+          // decision 0032: restore is an ordering write — bump the revision so
+          // any client that saw the archived card's old revision can never CAS
+          // a stale reorder onto the restored incarnation.
+          moveRevision: { increment: 1 },
+        },
         select: {
           id: true,
+          listId: true,
+          title: true,
+          position: true,
+          moveRevision: true,
           estimateHours: true,
           dueDate: true,
+          priority: true,
+          archivedAt: true,
+          deletedAt: true,
           members: {
             select: { userId: true },
             orderBy: { assignedAt: "asc" },
@@ -865,19 +933,23 @@ export async function restoreCardAction(
           userId,
         ),
       ]);
+      return card;
     });
     revalidatePath(`/boards/${result.list.boardId}`);
     // Reappear on other viewers' boards — reuses the tested card:created
     // reducer. US-083 W7 fidelity: like createCardAction, the payload carries
     // the card's due date + priority so restored cards keep their meta.
+    // decision 0032: the payload carries the canonical end-of-list position +
+    // bumped revision (not the stale pre-archive values).
     emitCardCreated(result.list.boardId, {
       card: {
-        id: result.card.id,
-        listId: result.card.listId,
-        title: result.card.title,
-        position: result.card.position,
-        dueDate: toIsoOrNull(result.card.dueDate),
-        priority: result.card.priority,
+        id: restoredCard.id,
+        listId: restoredCard.listId,
+        title: restoredCard.title,
+        position: restoredCard.position,
+        moveRevision: restoredCard.moveRevision,
+        dueDate: toIsoOrNull(restoredCard.dueDate),
+        priority: restoredCard.priority,
       },
     });
     emitAnalyticsRefresh(result.board.workspaceId);
@@ -906,7 +978,7 @@ export async function reorderListAction(
 
   await verifySession();
 
-  const { listId, prevListId, nextListId } = parsed.data;
+  const { listId, prevListId, nextListId, intent, expectedMoveRevision } = parsed.data;
 
   const result = await getListWithBoard(listId);
   if (!result || result.board.archivedAt) {
@@ -924,8 +996,11 @@ export async function reorderListAction(
   try {
     const updatedList = await reorderListByNeighbors({
       listId,
+      workspaceId: result.board.workspaceId,
+      intent,
       prevListId: prevListId ?? null,
       nextListId: nextListId ?? null,
+      expectedMoveRevision,
     });
     // No revalidatePath for pure reorder (decision 0008): the actor already
     // committed the move optimistically, and the list:moved emit below carries
@@ -934,9 +1009,17 @@ export async function reorderListAction(
     emitListMoved(result.list.boardId, {
       listId: updatedList.id,
       position: updatedList.position,
+      moveRevision: updatedList.moveRevision,
     });
     return { success: true };
-  } catch {
+  } catch (error) {
+    if (error instanceof OrderConflictError) {
+      return {
+        success: false,
+        code: "ORDER_CONFLICT",
+        error: "List was reordered by someone else. Refreshing…",
+      };
+    }
     return { success: false, error: "Failed to reorder list. Please try again." };
   }
 }
@@ -953,7 +1036,7 @@ export async function reorderCardAction(
 
   await verifySession();
 
-  const { cardId, prevCardId, nextCardId } = parsed.data;
+  const { cardId, prevCardId, nextCardId, intent, expectedMoveRevision } = parsed.data;
 
   const result = await getCardWithListAndBoard(cardId);
   if (!result || result.board.archivedAt) {
@@ -971,8 +1054,11 @@ export async function reorderCardAction(
   try {
     const reorderedCard = await reorderCardWithinListByNeighbors({
       cardId,
+      workspaceId: result.board.workspaceId,
+      intent,
       prevCardId: prevCardId ?? null,
       nextCardId: nextCardId ?? null,
+      expectedMoveRevision,
     });
 
     // No revalidatePath for pure reorder (decision 0008): the actor committed
@@ -982,10 +1068,18 @@ export async function reorderCardAction(
       cardId: reorderedCard.id,
       listId: reorderedCard.listId,
       position: reorderedCard.position,
+      moveRevision: reorderedCard.moveRevision,
     });
 
     return { success: true };
-  } catch {
+  } catch (error) {
+    if (error instanceof OrderConflictError) {
+      return {
+        success: false,
+        code: "ORDER_CONFLICT",
+        error: "Card was moved by someone else. Refreshing…",
+      };
+    }
     return { success: false, error: "Failed to reorder card. Please try again." };
   }
 }
@@ -1131,6 +1225,11 @@ export async function toggleCardCompletionAction(
   let ruleEffects: DeferredEffect[] = [];
   try {
     const card = await db.$transaction(async (tx) => {
+      // Completion can trigger recursive move automation. Acquire the same
+      // workspace → board → list → card scope as moveCardInTransaction before
+      // setCardCompletion's card CAS, preventing card → workspace inversion.
+      await lockCardOrderingScopeForUpdate(tx, snapshot.board.workspaceId, cardId);
+
       const { card: updated, transitioned } = await setCardCompletion(
         tx,
         cardId,
@@ -1613,7 +1712,7 @@ export async function moveCardAction(
 
   const { userId } = await verifySession();
 
-  const { cardId, targetListId, prevCardId, nextCardId } = parsed.data;
+  const { cardId, targetListId, prevCardId, nextCardId, intent, expectedMoveRevision } = parsed.data;
 
   const cardResult = await getCardWithListAndBoard(cardId);
   if (!cardResult || cardResult.board.archivedAt) {
@@ -1647,110 +1746,57 @@ export async function moveCardAction(
   // and its `requireEstimateBeforeDone` gate live solely in the completion toggle.
   try {
     let movedCard:
-      | { id: string; listId: string; position: number; ruleEffects: DeferredEffect[] }
+      | { id: string; listId: string; position: number; moveRevision: number; ruleEffects: DeferredEffect[] }
       | null = null;
 
-    // Hints are mutable across retries: a StaleNeighborError drops the offending
-    // side so the next attempt re-anchors on the surviving neighbour / appends
-    // (US-062 mn2).
-    let prevHint = prevCardId ?? null;
-    let nextHint = nextCardId ?? null;
+    movedCard = await db.$transaction(async (tx) => {
+      const moved = await moveCardInTransaction(tx, {
+        workspaceId: cardResult.board.workspaceId,
+        cardId,
+        targetListId,
+        intent,
+        prevCardId: prevCardId ?? null,
+        nextCardId: nextCardId ?? null,
+        expectedMoveRevision,
+      });
+      const memberIds = await getMemberIdsForCard(tx, cardId);
+      const events = buildCardMoveLifecycleEvents({
+        workspaceId: cardResult.board.workspaceId,
+        boardId: cardResult.board.id,
+        cardId,
+        actorId: userId,
+        fromListId: moved.fromListId,
+        toListId: targetListResult.list.id,
+        estimateHours: moved.card.estimateHours,
+        memberIds,
+      });
 
-    for (let attempt = 0; attempt < MAX_REORDER_CARD_RETRIES; attempt += 1) {
-      try {
-        movedCard = await db.$transaction(async (tx) => {
-          const nextPosition = await resolveCardPosition(tx, {
-            targetListId,
-            prevCardId: prevHint,
-            nextCardId: nextHint,
-            // The card is arriving from another list, but exclude it defensively
-            // so a same-list re-drop never bisects against its own stale slot.
-            excludeCardId: cardId,
-          });
-          const updatedCard = await tx.card.update({
-            where: {
-              id: cardId,
-              ...LIVE_CARD_SCOPE,
-            },
-            data: {
-              listId: targetListId,
-              position: nextPosition,
-            },
-            select: {
-              id: true,
-              listId: true,
-              position: true,
-              estimateHours: true,
-              dueDate: true,
-              completedAt: true,
-            },
-            });
-            const memberIds = await getMemberIdsForCard(tx, cardId);
-            const events = buildCardMoveLifecycleEvents({
-              workspaceId: cardResult.board.workspaceId,
-              boardId: cardResult.board.id,
-              cardId,
-              actorId: userId,
-              fromListId: snapshot.list.id,
-              toListId: targetListResult.list.id,
-              estimateHours: updatedCard.estimateHours,
-              memberIds,
-            });
+      await recordCardHistoryEvents(tx, events);
 
-            await recordCardHistoryEvents(tx, events);
-
-            // Automation (US-066): fire the move trigger only on an actual list
-            // change (a same-list reorder is not a "moved to list" event). Runs
-            // inside this attempt's tx; on a StaleNeighbor/P2002 retry the effects
-            // are rebuilt fresh and only the committing attempt's survive.
-            let ruleEffects: DeferredEffect[] = [];
-            if (snapshot.list.id !== targetListId) {
-              const res = await evaluateRules({
-                client: tx,
-                workspaceId: cardResult.board.workspaceId,
-                triggerType: "card-moved-to-list",
-                event: {
-                  cardId,
-                  boardId: cardResult.board.id,
-                  listIdFrom: snapshot.list.id,
-                  listIdTo: targetListId,
-                  listId: targetListId,
-                },
-              });
-              ruleEffects = res.effects;
-            }
-            return { ...updatedCard, ruleEffects };
+      // Automation (US-066): fire the move trigger only on an actual list
+      // change (a same-list reorder is not a "moved to list" event). Runs
+      // inside this tx; on a conflict the whole tx rolls back.
+      let ruleEffects: DeferredEffect[] = [];
+      if (snapshot.list.id !== targetListId) {
+        const res = await evaluateRules({
+          client: tx,
+          workspaceId: cardResult.board.workspaceId,
+          triggerType: "card-moved-to-list",
+          event: {
+            cardId,
+            boardId: cardResult.board.id,
+            listIdFrom: snapshot.list.id,
+            listIdTo: targetListId,
+            listId: targetListId,
+          },
         });
-        break;
-      } catch (error) {
-        // A stale neighbour hint recovers without a renumber: drop that side and
-        // retry so the move re-anchors on the surviving neighbour / appends.
-        if (error instanceof StaleNeighborError && attempt < MAX_REORDER_CARD_RETRIES - 1) {
-          if (error.side === "prev") {
-            prevHint = null;
-          } else {
-            nextHint = null;
-          }
-          continue;
-        }
-
-        // P2002 (rival grabbed the slot) or PositionSpaceExhaustedError (no gap
-        // to bisect) both recover the same way: renumber the target list, retry.
-        if (
-          (!isUniqueConstraintError(error) && !(error instanceof PositionSpaceExhaustedError)) ||
-          attempt === MAX_REORDER_CARD_RETRIES - 1
-        ) {
-          throw error;
-        }
-
-        await db.$transaction(async (tx) => {
-          await normalizeCardPositions(tx, targetListId);
-        });
+        ruleEffects = res.effects;
       }
-    }
+      return { ...moved.card, ruleEffects };
+    });
 
     if (!movedCard) {
-      throw new Error("Failed to move card after retries");
+      throw new Error("Failed to move card");
     }
 
     // No revalidatePath for cross-list move (decision 0008): the actor committed
@@ -1761,12 +1807,23 @@ export async function moveCardAction(
       cardId: movedCard.id,
       listId: movedCard.listId,
       position: movedCard.position,
+      moveRevision: movedCard.moveRevision,
     });
 
     emitAnalyticsRefresh(cardResult.board.workspaceId);
     await fireDeferredEffects(movedCard.ruleEffects);
     return { success: true };
   } catch (error) {
+    if (error instanceof OrderConflictError) {
+      // decision 0032: stale OCC anchor or vanished placement scope. No write
+      // happened; the client rolls back its optimistic commit and resyncs
+      // canonical state via router.refresh().
+      return {
+        success: false,
+        code: "ORDER_CONFLICT",
+        error: "Card was moved by someone else. Refreshing…",
+      };
+    }
     if (error instanceof RuleExecutionError) {
       // Decision 0030: only UNEXPECTED errors reach here (stale-target failures
       // are isolated in-tx and the action succeeds).

@@ -9,9 +9,9 @@
  * per-step structured codes + target ids in metadata.
  *
  * The lib write seams stay REAL (updateCardPriority, setCardCompletion,
- * addCardLabel, resolveCardPosition, recordCardHistoryEvents) so the assertion
- * "the succeeded rule steps committed inside the user's tx" is not theater:
- * they write through the same fake transaction the action body runs.
+ * addCardLabel, resolveCardPositionIntent, recordCardHistoryEvents) so the
+ * assertion "the succeeded rule steps committed inside the user's tx" is not
+ * theater: they write through the same fake transaction the action body runs.
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -157,16 +157,49 @@ function signInAs(userId: string, ws: string, role: Role) {
  */
 function makeTx() {
   return {
+    $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      // decision 0032 lock helpers: route raw FOR UPDATE queries by SQL text.
+      const sql = strings[0] ?? "";
+      const id = String(values[0] ?? "");
+      if (sql.includes('FROM "list"')) {
+        if (id === LIST_ID || id === TARGET_LIST) {
+          return [{ id, boardId: BOARD_A, position: 16384, moveRevision: 0 }];
+        }
+        return [];
+      }
+      if (sql.includes('FROM "board"')) {
+        return [{ id }];
+      }
+      if (sql.includes('FROM "card"')) {
+        return [{ id, listId: LIST_ID, position: 16384, moveRevision: 0 }];
+      }
+      return [];
+    }),
     card: {
       findMany: vi.fn(async () => [] as unknown[]),
       findFirst: vi.fn(async () => null),
-      findUnique: vi.fn(async () => null),
+      findUnique: vi.fn(async ({ where }: { where: { id?: string } }) =>
+        (where.id === CARD_ID || where.id === "new-card")
+          ? {
+              id: where.id,
+              listId: LIST_ID,
+              moveRevision: 0,
+              list: {
+                id: LIST_ID,
+                boardId: BOARD_A,
+                archivedAt: null,
+                board: { id: BOARD_A, workspaceId: WS_A, archivedAt: null },
+              },
+            }
+          : null,
+      ),
       findUniqueOrThrow: vi.fn(async () => ({
         id: CARD_ID,
         listId: LIST_ID,
         title: "Card",
         description: null,
         position: 1,
+        moveRevision: 1,
         priority: null,
         dueDate: null,
         estimateHours: null,
@@ -183,6 +216,7 @@ function makeTx() {
         listId: data.listId,
         title: data.title,
         position: data.position,
+        moveRevision: 0,
         estimateHours: null,
         dueDate: null,
         completedAt: null,
@@ -206,7 +240,18 @@ function makeTx() {
       create: vi.fn(async () => ({})),
       deleteMany: vi.fn(async () => ({ count: 1 })),
     },
-    list: { findUnique: vi.fn(async () => null) },
+    list: {
+      findUnique: vi.fn(async ({ where }: { where: { id?: string } }) =>
+        where.id === TARGET_LIST
+          ? {
+              id: TARGET_LIST,
+              boardId: BOARD_A,
+              archivedAt: null,
+              board: { id: BOARD_A, workspaceId: WS_A, archivedAt: null },
+            }
+          : null,
+      ),
+    },
     label: { findUnique: vi.fn(async () => ({ board: { workspaceId: WS_A } })) },
     rule: { findMany: vi.fn(async () => [] as unknown[]) },
     ruleExecutionLog: {
@@ -224,7 +269,7 @@ function sameBoardSetup() {
     listWithBoardFixture(WS_A, { boardId: BOARD_A, listId: TARGET_LIST }),
   );
   h.getCardWithListAndMembers.mockResolvedValue(
-    cardWithListAndMembersFixture(WS_A, { boardId: BOARD_A, cardId: CARD_ID }),
+    cardWithListAndMembersFixture(WS_A, { boardId: BOARD_A, cardId: CARD_ID, listId: LIST_ID }),
   );
   h.getBoardById.mockResolvedValue({ id: BOARD_A, workspaceId: WS_A, archivedAt: null });
 }
@@ -442,23 +487,35 @@ describe("moveCardAction + stale rule target (decision 0030 isolation)", () => {
         actions: [{ type: "move-card-to-list", targetListId: ARCHIVED_LIST }],
       },
     ]);
-    (tx.list.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
-      archivedAt: new Date("2026-07-01T00:00:00Z"),
-      board: { workspaceId: WS_A },
-    });
+    (tx.list.findUnique as ReturnType<typeof vi.fn>).mockImplementation(
+      async ({ where }: { where: { id?: string } }) =>
+        where.id === ARCHIVED_LIST
+          ? {
+              id: ARCHIVED_LIST,
+              boardId: BOARD_A,
+              archivedAt: new Date("2026-07-01T00:00:00Z"),
+              board: { id: BOARD_A, workspaceId: WS_A, archivedAt: null },
+            }
+          : {
+              id: TARGET_LIST,
+              boardId: BOARD_A,
+              archivedAt: null,
+              board: { id: BOARD_A, workspaceId: WS_A, archivedAt: null },
+            },
+    );
     h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
 
     const result = await moveCardAction(
-      formData({ cardId: CARD_ID, targetListId: TARGET_LIST }),
+      formData({ cardId: CARD_ID, targetListId: TARGET_LIST, intent: "end" }),
     );
 
     // The user's cross-list move succeeded — archived rule targets never roll
     // back the primary mutation (the F4 collateral-damage bug is dead).
     expect(result).toEqual({ success: true });
-    expect(tx.card.update).toHaveBeenCalledWith(
+    expect(tx.card.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ id: CARD_ID }),
-        data: expect.objectContaining({ listId: TARGET_LIST, position: 16384 }),
+        where: expect.objectContaining({ id: CARD_ID, moveRevision: 0 }),
+        data: expect.objectContaining({ listId: TARGET_LIST, position: 16384, moveRevision: 1 }),
       }),
     );
     // The rule's move to the archived list never wrote.

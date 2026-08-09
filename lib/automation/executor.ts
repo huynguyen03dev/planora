@@ -28,14 +28,11 @@ import type { Prisma } from "@/app/generated/prisma/client";
 import type { ActionStep } from "@/lib/schemas/automation";
 import type { TriggerType } from "@/lib/schemas/automation";
 import {
-  RuleExecutionError,
-  STALE_TARGET_CODES,
-  type ActionType,
-  type StaleTargetCode,
-  type RuleEventPayload,
-} from "./types";
-import { updateCardPriority } from "@/lib/card";
-import { setCardCompletion } from "@/lib/card";
+  moveCardInTransaction,
+  setCardCompletion,
+  updateCardPriority,
+} from "@/lib/card";
+import { lockWorkspaceRowForUpdate } from "@/lib/ordering";
 import { addCardLabel, removeCardLabel } from "@/lib/label";
 import { assignMemberToCard, removeMemberFromCard } from "@/lib/card-member";
 import {
@@ -47,14 +44,26 @@ import {
   recordCardHistoryEvents,
   type BuildCardHistoryEventInput,
 } from "@/lib/card-history";
-import { CARD_POSITION_GAP, LIVE_CARD_SCOPE } from "@/lib/ordering";
-
+import {
+  RuleExecutionError,
+  STALE_TARGET_CODES,
+  type ActionType,
+  type StaleTargetCode,
+  type RuleEventPayload,
+} from "./types";
 import { resolveRecipient, resolveRemoveScope, CrossWorkspaceTargetError } from "./resolver";
 
 // ─── Public types ────────────────────────────────────────────────────
 
 export type DeferredEmit =
-  | { kind: "card-moved"; boardId: string; cardId: string; listId: string; position: number }
+  | {
+      kind: "card-moved";
+      boardId: string;
+      cardId: string;
+      listId: string;
+      position: number;
+      moveRevision: number;
+    }
   | { kind: "card-updated"; boardId: string; cardId: string }
   | { kind: "labels-updated"; boardId: string; cardId: string }
   | { kind: "members-updated"; boardId: string; cardId: string }
@@ -221,6 +230,13 @@ export async function executeRuleActions(
   const boardId = event.boardId;
   const workspaceId = rule.workspaceId;
 
+  // This is the central automation lock-order invariant: acquire the workspace
+  // serialization gate before the first ordered step can mutate or lock the
+  // card. Recursive evaluators re-acquire the same row in this transaction;
+  // PostgreSQL row locks are re-entrant for that transaction. The move helper
+  // still acquires sorted parent board/list rows before the card.
+  await lockWorkspaceRowForUpdate(client, workspaceId);
+
   const effects: DeferredEffect[] = [];
   const producedEvents: ProducedEvent[] = [];
   const stepOutcomes: StepOutcome[] = [];
@@ -234,14 +250,8 @@ export async function executeRuleActions(
         break;
       }
 
-      case "move-card-to-list": {
-        const card = await client.card.findUniqueOrThrow({
-          where: { id: cardId },
-          select: { listId: true, estimateHours: true },
-        });
-        const fromListId = card.listId;
-
-        // US-074 Slice B2 + decision 0030: validate target list exists, is not
+        case "move-card-to-list": {
+          // US-074 Slice B2 + decision 0030: validate target list exists, is not
         // archived, and belongs to the rule's workspace before mutating. A
         // stale/missing/foreign target throws a structured RuleExecutionError
         // with a code — the executor's per-step isolation audits it and
@@ -305,45 +315,71 @@ export async function executeRuleActions(
           );
         }
 
-        const members = await client.cardMember.findMany({
-          where: { cardId },
-          select: { userId: true },
-        });
-        const memberIds = members.map((m: { userId: string }) => m.userId);
+          // Automation and human DnD share the same transaction-safe ordering
+          // protocol. The helper locks the workspace, sorted boards/lists, and
+          // card, resolves the current end position, normalizes if needed, and
+          // bumps moveRevision with a CAS. Recursive evaluator calls reuse the
+          // already-held workspace lock in this transaction.
+          const moved = await moveCardInTransaction(client, {
+            workspaceId,
+            cardId,
+            targetListId: step.targetListId,
+            intent: "end",
+          });
 
-        // Append to end of target list
-        const lastCard = await client.card.findFirst({
-          where: { listId: step.targetListId, ...LIVE_CARD_SCOPE },
-          orderBy: { position: "desc" },
-          select: { position: true },
-        });
-        const position = lastCard
-          ? lastCard.position + CARD_POSITION_GAP
-          : CARD_POSITION_GAP;
+          const members = await client.cardMember.findMany({
+            where: { cardId },
+            select: { userId: true },
+          });
+          const memberIds = members.map((m: { userId: string }) => m.userId);
 
-        await client.card.update({
-          where: { id: cardId },
-          data: { listId: step.targetListId, position },
-        });
+          // History
+          const moveEvents = buildCardMoveLifecycleEvents({
+            workspaceId,
+            // The card's canonical board is the destination board. A
+            // workspace-wide rule may legally target a list on another board;
+            // recursive matching and history must follow the committed state.
+            boardId: moved.targetBoardId,
+            cardId,
+            actorId,
+            fromListId: moved.fromListId,
+            toListId: step.targetListId,
+            estimateHours: moved.card.estimateHours,
+            memberIds,
+          }).map((e: BuildCardHistoryEventInput) => ({ ...e, ruleId: rule.id }));
+          await recordCardHistoryEvents(client, moveEvents);
 
-        // History
-        const moveEvents = buildCardMoveLifecycleEvents({
-          workspaceId,
-          boardId,
-          cardId,
-          actorId,
-          fromListId,
-          toListId: step.targetListId,
-          estimateHours: card.estimateHours,
-          memberIds,
-        }).map((e: BuildCardHistoryEventInput) => ({ ...e, ruleId: rule.id }));
-        await recordCardHistoryEvents(client, moveEvents);
-
-        effects.push({ kind: "card-moved", boardId, cardId, listId: step.targetListId, position });
-        producedEvents.push({
-          triggerType: "card-moved-to-list",
-          payload: { cardId, boardId, listIdFrom: fromListId, listIdTo: step.targetListId },
-        });
+          effects.push({
+            kind: "card-moved",
+            boardId: moved.targetBoardId,
+            cardId,
+            listId: moved.card.listId,
+            position: moved.card.position,
+            moveRevision: moved.card.moveRevision,
+          });
+          if (moved.fromBoardId !== moved.targetBoardId) {
+            // The destination event inserts the canonical card for target-board
+            // viewers; the source-board echo removes the card from its old
+            // board. Both are deferred until commit and re-read the same
+            // canonical card state, so no stale position/revision is emitted.
+            effects.push({
+              kind: "card-moved",
+              boardId: moved.fromBoardId,
+              cardId,
+              listId: moved.card.listId,
+              position: moved.card.position,
+              moveRevision: moved.card.moveRevision,
+            });
+          }
+          producedEvents.push({
+            triggerType: "card-moved-to-list",
+            payload: {
+              cardId,
+              boardId: moved.targetBoardId,
+              listIdFrom: moved.fromListId,
+              listIdTo: moved.card.listId,
+            },
+          });
         break;
       }
 
@@ -431,8 +467,8 @@ export async function executeRuleActions(
         break;
       }
 
-      case "set-completion": {
-        const card = await client.card.findUniqueOrThrow({
+        case "set-completion": {
+          const card = await client.card.findUniqueOrThrow({
           where: { id: cardId },
           select: {
             completedAt: true,

@@ -51,11 +51,17 @@ The design must resolve several locked choices before implementation:
    the rollback (outside the failed transaction). The user receives a distinct
    error: "automation rule <name> failed; no changes were applied."
 
-   **Retry loops**: trigger actions that retry their transaction (e.g.
-   `moveCardAction` on `StaleNeighborError`) evaluate rules inside each attempt;
-   chain state and the deferred-effect accumulator are rebuilt per attempt and
-   discarded on abort, so exactly one application persists and effects fire once
-   after the final successful commit.
+   **Ordering note**: decision 0032 supersedes the earlier retry-loop wording
+   for card and list moves. Ordering now uses one workspace-gated transaction
+   protocol shared by human and automation moves; stale revisions or
+   contradictory anchors return `ORDER_CONFLICT` for resynchronization rather
+   than retrying with a changed hint. `evaluateRules()` and the central
+   `executeRuleActions()` boundary acquire the workspace serialization gate
+   before ordered action steps can mutate or lock a card; recursive calls
+   safely re-acquire the same row in the shared transaction. The workspace gate
+   is the deadlock-prevention boundary, and the move helper preserves sorted
+   board/list-before-card locking inside it. Rule evaluation remains inside the
+   same transaction, and committed effects fire once after commit.
 
 3. **Loop prevention**: four-layer mechanism:
    - **Chain correlation id** (`chainId`) — a UUID generated at the root

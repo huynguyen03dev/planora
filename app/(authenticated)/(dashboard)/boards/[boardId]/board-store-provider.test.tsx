@@ -83,6 +83,7 @@ describe("BoardStoreProvider — list:restored realtime event handling", () => {
             title: "List 1",
             boardId: "b-1",
             position: 10000,
+            moveRevision: 0,
             cards: [],
           },
         ]}
@@ -129,6 +130,7 @@ describe("BoardStoreProvider — list:restored realtime event handling", () => {
             title: "List 1",
             boardId: "b-1",
             position: 10000,
+            moveRevision: 0,
             cards: [],
           },
         ]}

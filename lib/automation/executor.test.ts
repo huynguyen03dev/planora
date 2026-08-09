@@ -16,6 +16,7 @@ vi.mock("@/lib/card", () => ({
     card: { id: "card-1", listId: "list-1" },
     transitioned: true,
   }),
+  moveCardInTransaction: vi.fn(),
 }));
 
 vi.mock("@/lib/label", () => ({
@@ -89,7 +90,11 @@ vi.mock("@/lib/automation/resolver", () => ({
 // ─── Imports (after mocks) ───────────────────────────────────────────
 
 import { executeRuleActions } from "./executor";
-import { updateCardPriority, setCardCompletion } from "@/lib/card";
+import {
+  updateCardPriority,
+  setCardCompletion,
+  moveCardInTransaction,
+} from "@/lib/card";
 import { addCardLabel, removeCardLabel } from "@/lib/label";
 import { assignMemberToCard, removeMemberFromCard } from "@/lib/card-member";
 import {
@@ -149,6 +154,7 @@ function makeClient(targetListOverrides?: {
       // Decision 0030 label guard: default = a label inside the rule workspace.
       findUnique: vi.fn().mockResolvedValue({ board: { workspaceId: "ws-1" } }),
     },
+    $queryRaw: vi.fn().mockResolvedValue([]),
   } as unknown as Prisma.TransactionClient;
 }
 
@@ -238,6 +244,75 @@ describe("executeRuleActions", () => {
     expect(callOrder).toEqual(["updateCardPriority", "addCardLabel"]);
   });
 
+  it("holds the workspace gate before set-priority can race into a move step", async () => {
+    const client = makeClient();
+    const callOrder: string[] = [];
+    let releaseGate: () => void = () => {};
+    let signalGateEntered: () => void = () => {};
+    const gateEntered = new Promise<void>((resolve) => {
+      signalGateEntered = resolve;
+    });
+    const gateRelease = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    const queryRaw = client.$queryRaw as unknown as ReturnType<typeof vi.fn>;
+
+    queryRaw.mockImplementation(async () => {
+      callOrder.push("workspace-gate");
+      signalGateEntered();
+      await gateRelease;
+      return [];
+    });
+    vi.mocked(updateCardPriority).mockImplementation(async () => {
+      callOrder.push("set-priority");
+      return {} as never;
+    });
+    vi.mocked(moveCardInTransaction).mockImplementation(async () => {
+      callOrder.push("move-card-to-list");
+      return {
+        card: {
+          listId: "list-2",
+          position: CARD_POSITION_GAP,
+          moveRevision: 1,
+          estimateHours: null,
+        } as never,
+        fromListId: "list-1",
+        fromBoardId: "board-1",
+        targetBoardId: "board-1",
+      };
+    });
+
+    const running = executeRuleActions({
+      client,
+      rule: {
+        ...baseRule,
+        actions: [
+          { type: "set-priority", priority: "HIGH" },
+          { type: "move-card-to-list", targetListId: "list-2" },
+        ],
+      },
+      event: baseEvent,
+      actorId: ACTOR,
+      triggerType: "card-moved-to-list",
+      chainId: "chain-1",
+      chainDepth: 0,
+    });
+
+    await gateEntered;
+    expect(updateCardPriority).not.toHaveBeenCalled();
+    expect(moveCardInTransaction).not.toHaveBeenCalled();
+
+    releaseGate();
+    await running;
+    expect(callOrder).toEqual(["workspace-gate", "set-priority", "move-card-to-list"]);
+    expect(moveCardInTransaction).toHaveBeenCalledWith(client, {
+      workspaceId: "ws-1",
+      cardId: "card-1",
+      targetListId: "list-2",
+      intent: "end",
+    });
+  });
+
   // ── First-failing-step aborts ──────────────────────────────────────
 
   it("aborts on first failing step and does not run later steps", async () => {
@@ -293,17 +368,20 @@ describe("executeRuleActions", () => {
   describe("move-card-to-list", () => {
     it("appends to end of target list (last card exists)", async () => {
       const client = makeClient();
-      const cardFindUniqueOrThrow = client.card.findUniqueOrThrow as ReturnType<typeof vi.fn>;
-      const cardFindFirst = client.card.findFirst as ReturnType<typeof vi.fn>;
-      const cardUpdate = client.card.update as ReturnType<typeof vi.fn>;
       const cardMemberFindMany = client.cardMember.findMany as ReturnType<typeof vi.fn>;
 
-      cardFindUniqueOrThrow.mockResolvedValue({
-        listId: "list-1",
-        estimateHours: 5,
-      });
       cardMemberFindMany.mockResolvedValue([{ userId: "user-a" }]);
-      cardFindFirst.mockResolvedValue({ position: 32768 });
+      vi.mocked(moveCardInTransaction).mockResolvedValue({
+        card: {
+          listId: "list-2",
+          position: 32768 + CARD_POSITION_GAP,
+          moveRevision: 1,
+          estimateHours: 5,
+        } as never,
+        fromListId: "list-1",
+        fromBoardId: "board-1",
+        targetBoardId: "board-1",
+      });
 
       const actions: ActionStep[] = [{ type: "move-card-to-list", targetListId: "list-2" }];
 
@@ -317,14 +395,11 @@ describe("executeRuleActions", () => {
         chainDepth: 0,
       });
 
-      expect(cardFindFirst).toHaveBeenCalledWith({
-        where: { listId: "list-2", archivedAt: null, deletedAt: null },
-        orderBy: { position: "desc" },
-        select: { position: true },
-      });
-      expect(cardUpdate).toHaveBeenCalledWith({
-        where: { id: "card-1" },
-        data: { listId: "list-2", position: 32768 + CARD_POSITION_GAP },
+      expect(moveCardInTransaction).toHaveBeenCalledWith(client, {
+        workspaceId: "ws-1",
+        cardId: "card-1",
+        targetListId: "list-2",
+        intent: "end",
       });
       expect(result.effects).toContainEqual({
         kind: "card-moved",
@@ -332,6 +407,7 @@ describe("executeRuleActions", () => {
         cardId: "card-1",
         listId: "list-2",
         position: 32768 + CARD_POSITION_GAP,
+        moveRevision: 1,
       });
       expect(result.producedEvents).toContainEqual({
         triggerType: "card-moved-to-list",
@@ -341,17 +417,20 @@ describe("executeRuleActions", () => {
 
     it("appends with CARD_POSITION_GAP when target list is empty", async () => {
       const client = makeClient();
-      const cardFindUniqueOrThrow = client.card.findUniqueOrThrow as ReturnType<typeof vi.fn>;
-      const cardFindFirst = client.card.findFirst as ReturnType<typeof vi.fn>;
-      const cardUpdate = client.card.update as ReturnType<typeof vi.fn>;
       const cardMemberFindMany = client.cardMember.findMany as ReturnType<typeof vi.fn>;
 
-      cardFindUniqueOrThrow.mockResolvedValue({
-        listId: "list-1",
-        estimateHours: null,
-      });
       cardMemberFindMany.mockResolvedValue([]);
-      cardFindFirst.mockResolvedValue(null);
+      vi.mocked(moveCardInTransaction).mockResolvedValue({
+        card: {
+          listId: "list-empty",
+          position: CARD_POSITION_GAP,
+          moveRevision: 1,
+          estimateHours: null,
+        } as never,
+        fromListId: "list-1",
+        fromBoardId: "board-1",
+        targetBoardId: "board-1",
+      });
 
       const actions: ActionStep[] = [{ type: "move-card-to-list", targetListId: "list-empty" }];
 
@@ -365,27 +444,33 @@ describe("executeRuleActions", () => {
         chainDepth: 0,
       });
 
-      expect(cardUpdate).toHaveBeenCalledWith({
-        where: { id: "card-1" },
-        data: { listId: "list-empty", position: CARD_POSITION_GAP },
+      expect(moveCardInTransaction).toHaveBeenCalledWith(client, {
+        workspaceId: "ws-1",
+        cardId: "card-1",
+        targetListId: "list-empty",
+        intent: "end",
       });
       expect(result.effects).toContainEqual(
-        expect.objectContaining({ position: CARD_POSITION_GAP }),
+        expect.objectContaining({ position: CARD_POSITION_GAP, moveRevision: 1 }),
       );
     });
 
     it("records move history event with ruleId", async () => {
       const client = makeClient();
-      const cardFindUniqueOrThrow = client.card.findUniqueOrThrow as ReturnType<typeof vi.fn>;
-      const cardFindFirst = client.card.findFirst as ReturnType<typeof vi.fn>;
       const cardMemberFindMany = client.cardMember.findMany as ReturnType<typeof vi.fn>;
 
-      cardFindUniqueOrThrow.mockResolvedValue({
-        listId: "list-1",
-        estimateHours: 3,
-      });
       cardMemberFindMany.mockResolvedValue([{ userId: "user-a" }]);
-      cardFindFirst.mockResolvedValue(null);
+      vi.mocked(moveCardInTransaction).mockResolvedValue({
+        card: {
+          listId: "list-2",
+          position: CARD_POSITION_GAP,
+          moveRevision: 1,
+          estimateHours: 3,
+        } as never,
+        fromListId: "list-1",
+        fromBoardId: "board-1",
+        targetBoardId: "board-1",
+      });
 
       const actions: ActionStep[] = [{ type: "move-card-to-list", targetListId: "list-2" }];
 
@@ -412,6 +497,67 @@ describe("executeRuleActions", () => {
       expect(recordCardHistoryEvents).toHaveBeenCalledWith(
         client,
         expect.arrayContaining([expect.objectContaining({ ruleId: "rule-1" })]),
+      );
+    });
+
+    it("emits both board rooms and recurses from the canonical destination board", async () => {
+      const client = makeClient();
+      vi.mocked(moveCardInTransaction).mockResolvedValue({
+        card: {
+          listId: "list-on-board-2",
+          position: CARD_POSITION_GAP,
+          moveRevision: 4,
+          estimateHours: null,
+        } as never,
+        fromListId: "list-1",
+        fromBoardId: "board-1",
+        targetBoardId: "board-2",
+      });
+
+      const result = await executeRuleActions({
+        client,
+        rule: {
+          ...baseRule,
+          actions: [{ type: "move-card-to-list", targetListId: "list-on-board-2" }],
+        },
+        event: baseEvent,
+        actorId: ACTOR,
+        triggerType: "card-moved-to-list",
+        chainId: "",
+        chainDepth: 0,
+      });
+
+      expect(result.effects).toEqual([
+        {
+          kind: "card-moved",
+          boardId: "board-2",
+          cardId: "card-1",
+          listId: "list-on-board-2",
+          position: CARD_POSITION_GAP,
+          moveRevision: 4,
+        },
+        {
+          kind: "card-moved",
+          boardId: "board-1",
+          cardId: "card-1",
+          listId: "list-on-board-2",
+          position: CARD_POSITION_GAP,
+          moveRevision: 4,
+        },
+      ]);
+      expect(result.producedEvents).toEqual([
+        {
+          triggerType: "card-moved-to-list",
+          payload: {
+            cardId: "card-1",
+            boardId: "board-2",
+            listIdFrom: "list-1",
+            listIdTo: "list-on-board-2",
+          },
+        },
+      ]);
+      expect(buildCardMoveLifecycleEvents).toHaveBeenCalledWith(
+        expect.objectContaining({ boardId: "board-2" }),
       );
     });
 
