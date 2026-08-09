@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { ArchiveIcon, ArrowTurnBackwardIcon, Delete02Icon } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react"
@@ -62,6 +62,10 @@ type ArchivedCardsDialogProps = {
   canPermanentDelete?: boolean
 }
 
+// Tab order for the Archived items tablist (APG tabs pattern).
+const TAB_IDS = ["cards", "lists"] as const
+type TabId = (typeof TAB_IDS)[number]
+
 // Board-header control: lists the board's archived cards and restores them.
 // Data is loaded server-side in page.tsx and refreshed via router.refresh()
 // after each restore (no store coupling — the row leaves the list on success).
@@ -90,6 +94,39 @@ export function ArchivedCardsDialog({
   const [confirmText, setConfirmText] = useState("")
   const [forceDelete, setForceDelete] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+
+  // Roving tabindex: only the selected tab is in the tab order. Selection
+  // follows activation (click or arrow), so arrow keys move focus AND select
+  // (APG "automatic activation") — matching what a click does.
+  const tabRefs = useRef<Record<TabId, HTMLButtonElement | null>>({
+    cards: null,
+    lists: null,
+  })
+
+  function handleTabKeyDown(
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    tabId: TabId,
+  ) {
+    const currentIndex = TAB_IDS.indexOf(tabId)
+    let nextIndex: number | null = null
+
+    if (event.key === "ArrowLeft") {
+      nextIndex = (currentIndex - 1 + TAB_IDS.length) % TAB_IDS.length
+    } else if (event.key === "ArrowRight") {
+      nextIndex = (currentIndex + 1) % TAB_IDS.length
+    } else if (event.key === "Home") {
+      nextIndex = 0
+    } else if (event.key === "End") {
+      nextIndex = TAB_IDS.length - 1
+    } else {
+      return
+    }
+
+    event.preventDefault()
+    const nextTabId = TAB_IDS[nextIndex]
+    setActiveTab(nextTabId)
+    tabRefs.current[nextTabId]?.focus()
+  }
 
   if (!canRestore) {
     return null
@@ -227,6 +264,11 @@ export function ArchivedCardsDialog({
               role="tab"
               aria-selected={activeTab === "cards"}
               aria-controls="archived-cards-panel"
+              tabIndex={activeTab === "cards" ? 0 : -1}
+              ref={(el) => {
+                tabRefs.current.cards = el
+              }}
+              onKeyDown={(event) => handleTabKeyDown(event, "cards")}
               className={cn(
                 "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
                 activeTab === "cards"
@@ -243,6 +285,11 @@ export function ArchivedCardsDialog({
               role="tab"
               aria-selected={activeTab === "lists"}
               aria-controls="archived-lists-panel"
+              tabIndex={activeTab === "lists" ? 0 : -1}
+              ref={(el) => {
+                tabRefs.current.lists = el
+              }}
+              onKeyDown={(event) => handleTabKeyDown(event, "lists")}
               className={cn(
                 "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
                 activeTab === "lists"

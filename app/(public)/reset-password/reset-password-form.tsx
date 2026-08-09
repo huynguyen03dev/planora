@@ -13,7 +13,6 @@ import {
   CardDescription,
   CardFooter,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 
 function ResetPasswordFormInner() {
@@ -60,7 +59,8 @@ function ResetPasswordFormInner() {
       <div className="flex flex-1 items-center justify-center px-4">
         <Card className="w-full max-w-sm">
           <CardHeader>
-            <CardTitle className="text-2xl">Invalid or expired link</CardTitle>
+            {/* Real page-level heading (CardTitle is a div). */}
+            <h1 className="text-2xl leading-normal font-medium">Invalid or expired link</h1>
             <CardDescription>
               This password reset link is missing or has already been used.
               Please request a new one.
@@ -82,7 +82,8 @@ function ResetPasswordFormInner() {
     <div className="flex flex-1 items-center justify-center px-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-2xl">Set new password</CardTitle>
+          {/* Real page-level heading (CardTitle is a div). */}
+          <h1 className="text-2xl leading-normal font-medium">Set new password</h1>
           <CardDescription>
             Enter your new password below.
           </CardDescription>

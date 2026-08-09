@@ -11,7 +11,6 @@ import {
   CardDescription,
   CardFooter,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 
 function VerifyEmailInner() {
@@ -75,7 +74,8 @@ function VerifyEmailInner() {
       <div className="flex flex-1 items-center justify-center px-4">
         <Card className="w-full max-w-sm">
           <CardHeader>
-            <CardTitle className="text-2xl">Verifying your email</CardTitle>
+            {/* Real page-level heading (CardTitle is a div). */}
+            <h1 className="text-2xl leading-normal font-medium">Verifying your email</h1>
             <CardDescription>
               Please wait while we verify your email address.
             </CardDescription>
@@ -93,7 +93,8 @@ function VerifyEmailInner() {
       <div className="flex flex-1 items-center justify-center px-4">
         <Card className="w-full max-w-sm">
           <CardHeader>
-            <CardTitle className="text-2xl">Email verified!</CardTitle>
+            {/* Real page-level heading (CardTitle is a div). */}
+            <h1 className="text-2xl leading-normal font-medium">Email verified!</h1>
             <CardDescription>
               Your email has been verified. Taking you to your boards...
             </CardDescription>
@@ -108,7 +109,8 @@ function VerifyEmailInner() {
     <div className="flex flex-1 items-center justify-center px-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-2xl">Verification failed</CardTitle>
+          {/* Real page-level heading (CardTitle is a div). */}
+          <h1 className="text-2xl leading-normal font-medium">Verification failed</h1>
           {/* U7: the specific failure message lives only in the role="alert"
               below — never duplicated in the description. */}
           <CardDescription>

@@ -71,7 +71,15 @@ export function UserButton({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="rounded-full outline-none ring-offset-background transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+      {/* Stable accessible name: the trigger is an avatar whose name would
+          otherwise fall back to the initials (or nothing while the session
+          loads). The label always names the control and the account. */}
+      <DropdownMenuTrigger
+        aria-label={
+          user ? `Open account menu for ${user.name}` : "Open account menu"
+        }
+        className="rounded-full outline-none ring-offset-background transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
         <Avatar className="size-8">
           {user?.image ? (
             <AvatarImage src={user.image} alt={user.name ?? "User"} />

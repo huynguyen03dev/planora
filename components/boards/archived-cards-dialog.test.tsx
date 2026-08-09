@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ArchivedCardsDialog } from "./archived-cards-dialog";
@@ -575,5 +575,100 @@ describe("ArchivedCardsDialog (US-074 Slice B UI)", () => {
     expect(mockPermanentDeleteListAction).toHaveBeenCalledTimes(1);
 
     resolveDelete({ success: true });
+  });
+});
+
+describe("ArchivedCardsDialog — tabs keyboard semantics (roving tabindex)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  async function openDialog() {
+    render(
+      <ArchivedCardsDialog
+        archivedCards={[{ id: "c1", title: "Card 1", listTitle: "List A" }]}
+        archivedLists={[{ id: "l1", title: "List 1", cardCount: 2 }]}
+        canRestore={true}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "View archived items" }));
+  }
+
+  it("keeps only the selected tab in the tab order (roving tabindex)", async () => {
+    await openDialog();
+
+    const cardsTab = screen.getByRole("tab", { name: "Cards (1)" });
+    const listsTab = screen.getByRole("tab", { name: "Lists (1)" });
+
+    // Cards is selected on open: it is the only stop in the tab order.
+    expect(cardsTab).toHaveAttribute("tabindex", "0");
+    expect(listsTab).toHaveAttribute("tabindex", "-1");
+
+    await user.click(listsTab);
+    expect(listsTab).toHaveAttribute("tabindex", "0");
+    expect(cardsTab).toHaveAttribute("tabindex", "-1");
+  });
+
+  it("ArrowRight selects and focuses the next tab; ArrowLeft wraps to the previous", async () => {
+    await openDialog();
+
+    const cardsTab = screen.getByRole("tab", { name: "Cards (1)" });
+    const listsTab = screen.getByRole("tab", { name: "Lists (1)" });
+
+    // Selection follows activation (automatic activation, APG): arrows move
+    // focus AND select, matching what a click does.
+    cardsTab.focus();
+    await user.keyboard("{ArrowRight}");
+
+    expect(listsTab).toHaveAttribute("aria-selected", "true");
+    expect(cardsTab).toHaveAttribute("aria-selected", "false");
+    expect(listsTab).toHaveFocus();
+    // The lists panel is now the active tabpanel.
+    expect(screen.getByRole("tabpanel")).toHaveAttribute(
+      "id",
+      "archived-lists-panel",
+    );
+
+    // ArrowLeft wraps back to the first tab.
+    await user.keyboard("{ArrowLeft}");
+    expect(cardsTab).toHaveAttribute("aria-selected", "true");
+    expect(cardsTab).toHaveFocus();
+    expect(screen.getByRole("tabpanel")).toHaveAttribute(
+      "id",
+      "archived-cards-panel",
+    );
+  });
+
+  it("Home and End jump to the first and last tab", async () => {
+    await openDialog();
+
+    const cardsTab = screen.getByRole("tab", { name: "Cards (1)" });
+    const listsTab = screen.getByRole("tab", { name: "Lists (1)" });
+
+    cardsTab.focus();
+    await user.keyboard("{End}");
+    expect(listsTab).toHaveAttribute("aria-selected", "true");
+    expect(listsTab).toHaveFocus();
+
+    await user.keyboard("{Home}");
+    expect(cardsTab).toHaveAttribute("aria-selected", "true");
+    expect(cardsTab).toHaveFocus();
+  });
+
+  it("unhandled keys pass through (no preventDefault) and selection is untouched", async () => {
+    await openDialog();
+
+    const cardsTab = screen.getByRole("tab", { name: "Cards (1)" });
+    const listsTab = screen.getByRole("tab", { name: "Lists (1)" });
+
+    // fireEvent.keyDown returns false only when the handler preventDefaults.
+    // Tab (and any other unhandled key) must not be swallowed by the tablist.
+    expect(fireEvent.keyDown(cardsTab, { key: "Tab" })).toBe(true);
+    expect(cardsTab).toHaveAttribute("aria-selected", "true");
+    expect(listsTab).toHaveAttribute("aria-selected", "false");
+
+    // Handled navigation keys DO prevent the default (no page scroll etc.).
+    expect(fireEvent.keyDown(cardsTab, { key: "ArrowRight" })).toBe(false);
+    expect(fireEvent.keyDown(cardsTab, { key: "Home" })).toBe(false);
   });
 });

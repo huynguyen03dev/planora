@@ -880,6 +880,8 @@ function CardDetailDialogBody({
             <input
               id="card-detail-title"
               aria-label="Card title"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "card-detail-title-status" : undefined}
               value={draftTitle}
               onChange={(e) => {
                 setDraftTitle(e.target.value);
@@ -934,6 +936,7 @@ function CardDetailDialogBody({
                 it takes no vertical room — it used to be an empty min-h spacer at
                 the top of the column that pushed the Description down (US-043). */}
             <span
+              id="card-detail-title-status"
               aria-live="polite"
               title={
                 error ||

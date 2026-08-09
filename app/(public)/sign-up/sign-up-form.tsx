@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { signUp, sendVerificationEmail } from "@/lib/auth-client";
@@ -13,7 +13,6 @@ import {
   CardDescription,
   CardFooter,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 
 export function SignUpForm() {
@@ -85,12 +84,30 @@ export function SignUpForm() {
 
   // Verify-pending state: shown after successful sign-up instead of
   // redirecting to /boards, because requireEmailVerification is enabled.
+  // The whole form is replaced by a success card, so focus moves to the
+  // success heading (a one-time, view-swap focus move — not a steal: the
+  // user just submitted and the content they were looking at is gone). A
+  // tabIndex=-1 heading is the WAI-ARIA pattern for a changed view: AT
+  // announce the new heading when it receives focus.
+  const verifyPendingHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  useEffect(() => {
+    if (verifyPending) {
+      verifyPendingHeadingRef.current?.focus();
+    }
+  }, [verifyPending]);
+
   if (verifyPending) {
     return (
       <div className="flex flex-1 items-center justify-center px-4">
         <Card className="w-full max-w-sm">
           <CardHeader>
-            <CardTitle className="text-2xl">Check your email</CardTitle>
+            <h1
+              ref={verifyPendingHeadingRef}
+              tabIndex={-1}
+              className="text-2xl leading-normal font-medium outline-none"
+            >
+              Check your email
+            </h1>
             <CardDescription>
               We&apos;ve sent a verification link to <strong>{email}</strong>.
               Click the link to activate your account.
@@ -113,6 +130,14 @@ export function SignUpForm() {
               </button>
               .
             </p>
+            {/* Persistent polite live region: the visible "Sent!" flips on the
+                button itself, which AT never announce (the button keeps focus).
+                This always-mounted region announces the resend result once,
+                each time it changes (it clears while the request is in flight
+                so a repeat click re-announces). */}
+            <p role="status" className="sr-only">
+              {resendSent ? "Sent!" : ""}
+            </p>
           </CardContent>
           <CardFooter className="flex flex-col gap-4 pt-0">
             <Button variant="secondary" className="w-full" asChild>
@@ -128,7 +153,8 @@ export function SignUpForm() {
     <div className="flex flex-1 items-center justify-center px-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-2xl">Create an account</CardTitle>
+          {/* Real page-level heading (CardTitle is a div). */}
+          <h1 className="text-2xl leading-normal font-medium">Create an account</h1>
           <CardDescription>
             Enter your details to get started with Planora.
           </CardDescription>

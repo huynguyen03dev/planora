@@ -144,3 +144,74 @@ describe("CreateBoardModal — synchronous single-flight submit", () => {
     expect(input).toHaveValue("");
   });
 });
+
+describe("CreateBoardModal — scoped error announcement", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("announces a failed create via role=alert wired to the title field", async () => {
+    actions.createBoardAction.mockResolvedValueOnce({
+      success: false,
+      error: "Failed to create board. Please try again.",
+    });
+    renderModal();
+
+    const input = screen.getByLabelText("Board title");
+    await user.type(input, "Q2 Planning");
+    submitForm();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Failed to create board. Please try again.",
+    );
+    expect(alert).toHaveAttribute("id", "create-board-error");
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAttribute("aria-describedby", "create-board-error");
+  });
+});
+
+describe("CreateBoardModal — dialog description (warning-free structure)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("describes the dialog with a DialogDescription wired via aria-describedby", () => {
+    renderModal();
+
+    const dialog = screen.getByRole("dialog", { name: "Create board" });
+    const describedBy = dialog.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(dialog).toHaveAccessibleDescription(
+      "Create a board to start organizing cards and lists.",
+    );
+
+    // The referenced element is the primitive's description node.
+    const description = document.getElementById(describedBy!);
+    expect(description).toBeInTheDocument();
+    expect(description).toHaveTextContent(
+      "Create a board to start organizing cards and lists.",
+    );
+  });
+
+  it("opens without the Radix missing-description warning", () => {
+    // DialogContent always sets aria-describedby to a generated id; Radix
+    // console.warns when no DialogDescription element exists with that id.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      renderModal();
+
+      const radixWarnings = warnSpy.mock.calls.filter((args) =>
+        args.some(
+          (arg) =>
+            typeof arg === "string" &&
+            /description|aria-describedby/i.test(arg),
+        ),
+      );
+      expect(radixWarnings).toHaveLength(0);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+});

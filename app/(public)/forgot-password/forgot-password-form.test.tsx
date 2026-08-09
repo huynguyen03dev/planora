@@ -104,4 +104,43 @@ describe("ForgotPasswordForm", () => {
     const input = screen.getByLabelText("Email");
     expect(input).toBeRequired();
   });
+
+  it("renders a real h1 page heading in both the form and success states", async () => {
+    render(<ForgotPasswordForm />);
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Forgot password?" }),
+    ).toBeInTheDocument();
+
+    mockRequestPasswordReset.mockResolvedValue({ error: null });
+    await user.type(screen.getByLabelText("Email"), "known@example.com");
+    await user.click(screen.getByRole("button", { name: "Send reset link" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { level: 1, name: "Check your email" }),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByRole("heading", { level: 1, name: "Forgot password?" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("moves focus to the success heading after the request succeeds (view-swap focus)", async () => {
+    mockRequestPasswordReset.mockResolvedValue({ error: null });
+
+    render(<ForgotPasswordForm />);
+
+    await user.type(screen.getByLabelText("Email"), "known@example.com");
+    await user.click(screen.getByRole("button", { name: "Send reset link" }));
+
+    const successHeading = await screen.findByRole("heading", {
+      level: 1,
+      name: "Check your email",
+    });
+    await waitFor(() => {
+      expect(successHeading).toHaveFocus();
+    });
+    expect(successHeading).toHaveAttribute("tabindex", "-1");
+  });
 });
