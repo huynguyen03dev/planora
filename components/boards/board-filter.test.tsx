@@ -45,12 +45,14 @@ describe("BoardFilter", () => {
         boardId: "b1",
         title: "To Do",
         position: 1,
+        moveRevision: 0,
         cards: [
           {
             id: "c1",
             listId: "l1",
             title: "Do the thing",
             position: 1,
+            moveRevision: 0,
             coverImage: null,
             priority: null,
             dueDate: null,
