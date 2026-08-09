@@ -198,16 +198,11 @@ type RestoreCardResult =
   | { success: false; error: string; code?: RestoreCardErrorCode };
 
 /**
- * US-083 W8: the dedicated parent-list-archived outcome. Surfaced ONLY when
- * the card exists, remains archived, its parent list is archived, the board
- * is active, and the caller is authorized — missing/foreign/already-restored/
- * permanently-removed/archived-board cases keep the generic not-found/failure
- * contract (no existence leak).
- *
- * NOTE: deliberately NOT exported — this file is a "use server" module, which
- * only allows async function exports. The constant is module-private; the
- * public contract is the result shape (error string + code value) that
- * callers receive at runtime.
+ * The dedicated parent-list-archived outcome, surfaced only when the card is
+ * archived under an archived parent list and the caller is authorized; every
+ * other case keeps the generic not-found contract (no existence leak). Not
+ * exported: "use server" modules only allow async function exports, so the
+ * public contract is the runtime result shape.
  */
 const PARENT_LIST_ARCHIVED_MESSAGE = "Restore the list first.";
 type RestoreCardErrorCode = "PARENT_LIST_ARCHIVED";
@@ -464,7 +459,6 @@ export async function permanentlyDeleteListAction(
     return { success: false, error: "List not found" };
   }
 
-  // Exact case-sensitive title confirmation
   if (confirmationText !== result.list.title) {
     return { success: false, error: LIST_TITLE_MISMATCH };
   }
@@ -543,9 +537,8 @@ export async function permanentlyDeleteListAction(
 
       await recordCardHistoryEvents(tx, events);
 
-      // Conditionally delete the list — still must be archived.
-      // READ COMMITTED + conditional deleteMany on the list row
-      // is the selected race mechanism.
+      // Conditional deleteMany under READ COMMITTED is the race guard: the
+      // list must still be archived.
       const deleteResult = await tx.list.deleteMany({
         where: {
           id: listId,
@@ -713,9 +706,8 @@ export async function createCardAction(
     return { success: true, cardId: card.card.id };
   } catch (error) {
     if (error instanceof RuleExecutionError) {
-      // Decision 0030: only UNEXPECTED errors reach here (stale-target failures
-      // are isolated in-tx and the action succeeds). This message is accurate
-      // solely for the unexpected-abort class.
+      // Decision 0030: only unexpected-abort errors reach here (stale-target
+      // failures are isolated in-tx), so the message is accurate for that class.
       await logRuleExecutionError(error);
       return {
         success: false,
@@ -808,9 +800,8 @@ export async function restoreCardAction(
 
   const { cardId } = parsed.data;
 
-  // Archived-aware resolver: getCardWithListAndBoard filters archivedAt:null and
-  // could never find a card to restore. W8: the resolver now flags (rather than
-  // nulls) the parent-list-archived case so the action can gate it below.
+  // Archived-aware resolver (the normal one filters archivedAt:null) flags
+  // rather than nulls the parent-list-archived case so the action can gate it.
   const result = await getArchivedCardWithListAndBoard(cardId);
   if (!result || result.board.archivedAt) {
     return { success: false, error: "Card not found" };
@@ -824,11 +815,9 @@ export async function restoreCardAction(
     return { success: false, error: "Card not found" };
   }
 
-  // US-083 W8: the parent-list-archived case is distinguished ONLY after the
-  // card exists, remains archived, the board is active, and the caller is
-  // authorized — every other case keeps the generic not-found above. The
-  // in-transaction FOR UPDATE revalidation below re-checks the same condition
-  // against the true race (list archived between this read and the commit).
+  // US-083 W8: this outcome is reached only after existence/archive/authorization
+  // checks pass (no existence leak); the in-tx FOR UPDATE revalidation below
+  // re-checks the same condition against the race (list archived in between).
   if (result.parentListArchived) {
     return {
       success: false,
@@ -839,10 +828,8 @@ export async function restoreCardAction(
 
   try {
     const restoredCard = await db.$transaction(async (tx) => {
-      // US-083 W8 race guard: the sequential pre-read above can pass while the
-      // parent list is archived by a concurrent action before this transaction
-      // runs. Lock the parent list row and revalidate archivedAt under the lock
-      // (same pattern as permanentlyDeleteListAction / uploadAttachmentAction)
+      // US-083 W8 race guard: the parent list may be archived between the
+      // pre-read and this tx — lock it and revalidate archivedAt under the lock
       // so a restore can never commit a live card into an archived (invisible)
       // list.
       // Global ordering gate, then parent-to-child board → list → card locks.
@@ -864,11 +851,9 @@ export async function restoreCardAction(
         throw new Error("PARENT_LIST_ARCHIVED");
       }
 
-      // Parent-to-child (decision 0032): with the parent list locked, lock the
-      // (archived) card row itself. The archived card is invisible to the live
-      // lock helper, so lock it directly and re-verify it still exists and is
-      // still archived under the lock (a concurrent restore CASes on the same
-      // where-clause below).
+      // Parent-to-child (decision 0032): the archived card is invisible to the
+      // live lock helper, so lock it directly and re-verify it is still archived
+      // under the lock (a concurrent restore CASes on the same where-clause).
       const cardLocked = await tx.$queryRaw<
         Array<{ id: string; listId: string; archivedAt: Date | null }>
       >`SELECT id, "listId", "archivedAt" FROM "card" WHERE id = ${cardId} AND "deletedAt" IS NULL FOR UPDATE`;
@@ -936,11 +921,9 @@ export async function restoreCardAction(
       return card;
     });
     revalidatePath(`/boards/${result.list.boardId}`);
-    // Reappear on other viewers' boards — reuses the tested card:created
-    // reducer. US-083 W7 fidelity: like createCardAction, the payload carries
-    // the card's due date + priority so restored cards keep their meta.
-    // decision 0032: the payload carries the canonical end-of-list position +
-    // bumped revision (not the stale pre-archive values).
+    // Reappears via the tested card:created reducer; the payload carries the
+    // canonical position + bumped revision (decision 0032) and due date/priority
+    // (US-083 W7) so restored cards keep their meta.
     emitCardCreated(result.list.boardId, {
       card: {
         id: restoredCard.id,
@@ -1002,10 +985,9 @@ export async function reorderListAction(
       nextListId: nextListId ?? null,
       expectedMoveRevision,
     });
-    // No revalidatePath for pure reorder (decision 0008): the actor already
-    // committed the move optimistically, and the list:moved emit below carries
-    // the canonical position to every client (the actor included). Revalidating
-    // here only forced a redundant full-board reseed on the actor.
+    // No revalidatePath for pure reorder (decision 0008): the actor committed
+    // optimistically and the list:moved emit carries the canonical position;
+    // revalidating would only force a redundant full-board reseed.
     emitListMoved(result.list.boardId, {
       listId: updatedList.id,
       position: updatedList.position,
@@ -1062,8 +1044,8 @@ export async function reorderCardAction(
     });
 
     // No revalidatePath for pure reorder (decision 0008): the actor committed
-    // optimistically and the card:moved emit carries the canonical position to
-    // all clients. Revalidating only forced a redundant full-board reseed.
+    // optimistically and the card:moved emit carries the canonical position;
+    // revalidating would only force a redundant full-board reseed.
     emitCardMoved(result.list.boardId, {
       cardId: reorderedCard.id,
       listId: reorderedCard.listId,
@@ -1112,9 +1094,8 @@ export async function updateCardEstimateAction(
   }
 
   // No estimate lock (decision 0020): the estimate stays editable through
-  // complete/reopen cycles. Analytics is event-sourced, so estimate-at-completion
-  // is recoverable from the ESTIMATE_SET/ESTIMATE_CHANGED event log — the live
-  // field freeze guarded nothing analytics trusted.
+  // complete/reopen cycles; analytics is event-sourced, so the live field freeze
+  // guarded nothing analytics trusted.
 
   try {
     if (estimateHours !== snapshot.card.estimateHours) {
@@ -1225,9 +1206,9 @@ export async function toggleCardCompletionAction(
   let ruleEffects: DeferredEffect[] = [];
   try {
     const card = await db.$transaction(async (tx) => {
-      // Completion can trigger recursive move automation. Acquire the same
-      // workspace → board → list → card scope as moveCardInTransaction before
-      // setCardCompletion's card CAS, preventing card → workspace inversion.
+      // Acquire the same workspace → board → list → card lock scope as
+      // moveCardInTransaction before the card CAS (completion can trigger
+      // recursive move automation; prevents card → workspace inversion).
       await lockCardOrderingScopeForUpdate(tx, snapshot.board.workspaceId, cardId);
 
       const { card: updated, transitioned } = await setCardCompletion(
@@ -1237,10 +1218,9 @@ export async function toggleCardCompletionAction(
         previousCompletedAt,
       );
 
-      // Record a lifecycle event only on an actual transition. `transitioned` is
-      // the authoritative in-transaction compare-and-set result (not the
-      // pre-transaction `isTransition`), so a concurrent double-toggle records at
-      // most one event per streak.
+      // Record an event only on an actual transition: `transitioned` is the
+      // authoritative in-tx CAS result, so a concurrent double-toggle records at
+      // most one event.
       if (transitioned) {
         const event = complete
           ? buildCardCompletedEvent(
@@ -1253,8 +1233,7 @@ export async function toggleCardCompletionAction(
                 dueDate: toIsoOrNull(updated.dueDate),
                 memberIds: snapshot.memberIds,
                 // Streak-start marker; vestigial under the current-streak anchor
-                // (US-064 / decision 0021). True whenever completing from a
-                // non-completed state.
+                // (US-064 / decision 0021).
                 firstCompletion: previousCompletedAt === null,
               },
               userId,
@@ -1292,10 +1271,9 @@ export async function toggleCardCompletionAction(
     });
 
     revalidatePath(`/boards/${snapshot.list.boardId}`);
-    // Dedicated in-place completion event — card:updated is title-only and can't
-    // carry a completion flip. Carry completedAt (not a bare boolean) so the
-    // receiver recomputes due-status. Safe mid-drag: a flag flip never reorders
-    // the list array (mirrors labels/members).
+    // Dedicated in-place completion event: card:updated is title-only, and
+    // completedAt (not a bare boolean) lets the receiver recompute due-status.
+    // Safe mid-drag: a flag flip never reorders the list (mirrors labels/members).
     emitCardCompletionUpdated(snapshot.list.boardId, {
       cardId,
       completedAt: toIsoOrNull(card.completedAt),
@@ -1368,8 +1346,8 @@ export async function updateCardDueDateAction(
 
     if (previousIso !== nextIso) {
       await db.$transaction(async (tx) => {
-        // HIGH-1: Invalidate any existing reminders so the new date gets a
-        // fresh DUE_SOON and cleared dates cancel unsent reminders.
+        // HIGH-1: invalidate existing reminders so the new date gets a fresh
+        // DUE_SOON and cleared dates cancel unsent reminders.
         await tx.cardReminder.deleteMany({ where: { cardId } });
 
         await tx.card.update({
@@ -1425,9 +1403,8 @@ export async function updateCardDueDateAction(
     }
 
     revalidatePath(`/boards/${snapshot.board.id}`);
-    // F3: the due date is display metadata — push it live so other clients'
-    // card faces and due-status recomputes (card:completion-updated) stay in
-    // sync. ISO string on the wire (JSON-safe); the store rehydrates.
+    // F3: due date is display metadata — push it live so other clients' card
+    // faces and due-status recomputes stay in sync (ISO string; store rehydrates).
     emitCardMetaUpdated(snapshot.board.id, {
       cardId,
       fields: { dueDate: nextIso },
@@ -1473,7 +1450,7 @@ export async function updateCardPriorityAction(
     const card = await updateCardPriority(cardId, priority);
     revalidatePath(`/boards/${result.list.boardId}`);
     // F3: priority is display metadata — push it live so other clients' card
-    // faces stay in sync (previously only the actor refreshed).
+    // faces stay in sync.
     emitCardMetaUpdated(result.list.boardId, {
       cardId,
       fields: { priority },
@@ -1520,10 +1497,9 @@ export async function updateCardCoverAction(
     return { success: false, error: "Card not found" };
   }
 
-  // Security: a cover URL must point to one of this card's own attachments.
-  // External URLs are rejected — they would let an editor plant a tracking
-  // pixel that fires for every board viewer (US-018 contract). Removal (null)
-  // is always allowed.
+  // Security: a cover URL must be one of this card's own attachments — an
+  // external URL would let an editor plant a tracking pixel for every board
+  // viewer (US-018). Removal (null) is always allowed.
   if (parsedCoverImage !== null) {
     const attachments = await getAttachmentsByCardId(cardId);
     const isOwnAttachment = attachments.some(
@@ -1599,11 +1575,10 @@ export async function setCardCoverAction(
   }
 
   try {
-    // Acquire a row lock on the parent List and revalidate it's still active
-    // before inserting the attachment (US-074, in-flight upload race fix).
+    // Lock the parent list row and revalidate it is still active before
+    // inserting the attachment (US-074, in-flight upload race fix).
     const listId = cardResult.list.id;
     const result = await db.$transaction(async (tx) => {
-      // SELECT ... FOR UPDATE on the parent list row
       const list = await tx.$queryRaw<
         Array<{ id: string; archivedAt: Date | null }>
       >`SELECT id, "archivedAt" FROM "list" WHERE id = ${listId} FOR UPDATE`;
@@ -1741,9 +1716,8 @@ export async function moveCardAction(
     return { success: false, error: "Card not found" };
   }
 
-  // A move changes only list membership + position — it never completes or
-  // reopens a card, and never gates on the estimate (decision 0020). Completion
-  // and its `requireEstimateBeforeDone` gate live solely in the completion toggle.
+  // A move changes only list membership + position; it never completes/reopens
+  // a card and never gates on the estimate (decision 0020).
   try {
     let movedCard:
       | { id: string; listId: string; position: number; moveRevision: number; ruleEffects: DeferredEffect[] }
@@ -1773,9 +1747,8 @@ export async function moveCardAction(
 
       await recordCardHistoryEvents(tx, events);
 
-      // Automation (US-066): fire the move trigger only on an actual list
-      // change (a same-list reorder is not a "moved to list" event). Runs
-      // inside this tx; on a conflict the whole tx rolls back.
+      // Fire the move trigger only on an actual list change (a same-list reorder
+      // is not a move); it runs inside this tx and rolls back with it (US-066).
       let ruleEffects: DeferredEffect[] = [];
       if (snapshot.list.id !== targetListId) {
         const res = await evaluateRules({
@@ -1800,9 +1773,8 @@ export async function moveCardAction(
     }
 
     // No revalidatePath for cross-list move (decision 0008): the actor committed
-    // optimistically and the card:moved emit carries the canonical position to
-    // all clients. Revalidating only forced a redundant full-board reseed. The
-    // analytics refresh emit below is unrelated and stays.
+    // optimistically and the card:moved emit carries the canonical position;
+    // the analytics refresh emit below is unrelated and stays.
     emitCardMoved(cardResult.list.boardId, {
       cardId: movedCard.id,
       listId: movedCard.listId,
@@ -2011,8 +1983,6 @@ export async function createCommentAction(
   }
 }
 
-// ─── loadMoreCardDetailAction (any workspace member — read gate) ───────────
-
 /** A comment row returned by loadMoreCardDetailAction (sheet UI shape). */
 export type LoadMoreCommentItem = {
   id: string;
@@ -2055,15 +2025,11 @@ export type LoadMoreCardDetailResult =
   | { success: false; error: string };
 
 /**
- * Cursor-paginated fetch of the next page of comments or activity for a card
- * detail sheet section (page size 50, matching the server-side seed). The
- * cursor is the (createdAt, id) of the last loaded entry; rows are returned
- * with `hasMore` so the sheet can show/keep the "Load more" affordance.
- *
- * Reads are open to any workspace member — viewers already see comments and
- * activity on the board — so membership is the read gate (mirrors the
- * automation read actions); a non-member gets the same not-found posture as
- * a missing card.
+ * Cursor-paginated fetch of the next comments/activity page for a card detail
+ * sheet (page size 50). The cursor is the last loaded entry's (createdAt, id);
+ * `hasMore` drives the "Load more" affordance. Open to any workspace member —
+ * membership is the read gate, and a non-member gets the same not-found
+ * posture as a missing card.
  */
 export async function loadMoreCardDetailAction(
   formData: FormData,
@@ -2146,13 +2112,11 @@ export async function assignCardMemberAction(
 
   const { cardId, userId } = parsed.data;
 
-  // Get card with board and workspace info for permission checking.
   const cardResult = await getCardWithListAndBoard(cardId);
   if (!cardResult || cardResult.board.archivedAt) {
     return { success: false, error: "Card not found" };
   }
 
-  // Check if user has permission to update cards in this workspace.
   const canUpdateCard = await hasWorkspacePermission(cardResult.board.workspaceId, {
     card: ["update"],
   });
@@ -2161,7 +2125,6 @@ export async function assignCardMemberAction(
     return { success: false, error: "Card not found" };
   }
 
-  // Check if target user belongs to the same workspace.
   const workspaceMember = await db.workspaceMember.findFirst({
     where: {
       organizationId: cardResult.board.workspaceId,
@@ -2345,8 +2308,8 @@ export async function assignCardMemberAction(
     revalidatePath(`/boards/${cardResult.board.id}`);
     if (assignment.changed) {
       emitAnalyticsRefresh(cardResult.board.workspaceId);
-      // Live-broadcast the new assignee set so any board viewer with this card's
-      // detail sheet open updates without a reload (US-011). In-place / live.
+      // Live-broadcast the new assignee set so open detail sheets update
+      // without a reload (US-011).
       const members = await getCardMembers(cardId);
       emitCardMembersUpdated(cardResult.board.id, { cardId, members });
     }
@@ -2386,13 +2349,11 @@ export async function removeCardMemberAction(
 
   const { cardId, userId } = parsed.data;
 
-  // Get card with board and workspace info for permission checking.
   const cardResult = await getCardWithListAndBoard(cardId);
   if (!cardResult || cardResult.board.archivedAt) {
     return { success: false, error: "Card not found" };
   }
 
-  // Check if user has permission to update cards in this workspace.
   const canUpdateCard = await hasWorkspacePermission(cardResult.board.workspaceId, {
     card: ["update"],
   });
@@ -2454,8 +2415,8 @@ export async function removeCardMemberAction(
     revalidatePath(`/boards/${cardResult.board.id}`);
     if (removal.changed) {
       emitAnalyticsRefresh(cardResult.board.workspaceId);
-      // Live-broadcast the trimmed assignee set so an open detail sheet on
-      // another client drops the member without a reload (US-011). In-place / live.
+      // Live-broadcast the trimmed assignee set so open detail sheets drop the
+      // member without a reload (US-011).
       const members = await getCardMembers(cardId);
       emitCardMembersUpdated(cardResult.board.id, { cardId, members });
     }
@@ -2491,13 +2452,11 @@ export async function uploadAttachmentAction(
 
   const { cardId: parsedCardId } = parsed.data;
 
-  // Get card with board and workspace info for permission checking.
   const cardResult = await getCardWithListAndBoard(parsedCardId);
   if (!cardResult || cardResult.board.archivedAt) {
     return { success: false, error: "Card not found" };
   }
 
-  // Check if user has permission to update cards in this workspace.
   const canUpdateCard = await hasWorkspacePermission(cardResult.board.workspaceId, {
     card: ["update"],
   });
@@ -2506,7 +2465,6 @@ export async function uploadAttachmentAction(
     return { success: false, error: "Card not found" };
   }
 
-  // Validate file
   const fileValidation = validateFileForUpload(file);
   if (!fileValidation.valid) {
     return { success: false, error: fileValidation.error };
@@ -2521,8 +2479,8 @@ export async function uploadAttachmentAction(
   }
 
   try {
-    // Acquire a row lock on the parent List and revalidate it's still active
-    // before inserting the attachment (US-074, in-flight upload race fix).
+    // Lock the parent list row and revalidate it is still active before
+    // inserting the attachment (US-074, in-flight upload race fix).
     const listId = cardResult.list.id;
     const attachment = await db.$transaction(async (tx) => {
       const list = await tx.$queryRaw<
@@ -2611,12 +2569,9 @@ export async function uploadAttachmentAction(
 
 /* ── Labels ──────────────────────────────────────────────────────────────
  *
- * Board-scoped labels and their card attachments. Label-set CRUD reuses the
- * `board:["update"]` permission (managing a board's configuration);
- * attach/detach reuse `card:["update"]` (editing a card), mirroring
- * assignCardMemberAction. No dedicated `label` access-control statement — see
- * story US-005. Realtime broadcast of label changes lands in slice 2 alongside
- * card-face chips. */
+ * Board-scoped labels: set CRUD reuses `board:["update"]` (board
+ * configuration); attach/detach reuse `card:["update"]` (editing a card).
+ * No dedicated `label` permission statement (US-005). */
 
 type CreateLabelResult =
   | { success: true; label: LabelRecord }
@@ -2643,14 +2598,11 @@ function firstFieldError(error: { flatten: () => { fieldErrors: Record<string, s
 }
 
 /**
- * Broadcast a label-set change to every affected card on a board. A label
- * rename/recolor/delete touches the denormalized label snapshot on each card
- * carrying it, so we re-emit the existing in-place `card:labels-updated` event
- * (the same one attach/detach uses) once per affected card with its current
- * label set. O(N) in the cards carrying the label — fine at board scale, and it
- * reuses the proven live-apply reducer rather than introducing a new event type
- * (US-010). For a delete, pass the card ids captured BEFORE the row cascade and
- * call after the delete commits, so each re-read reflects the removed label.
+ * Re-emit the existing `card:labels-updated` event per affected card after a
+ * label rename/recolor/delete, since each card carries a denormalized label
+ * snapshot. O(N) in the cards carrying the label — fine at board scale, and it
+ * reuses the proven live-apply reducer (US-010). For a delete, pass card ids
+ * captured BEFORE the cascade so the re-read reflects the removed label.
  */
 async function broadcastLabelChange(boardId: string, cardIds: string[]): Promise<void> {
   for (const cardId of cardIds) {
@@ -2889,12 +2841,10 @@ export async function removeCardLabelAction(
 
 /* ─── Checklist actions (card content; reuse card:["update"]) ──────────────
  *
- * Checklists are card content, like labels — they reuse the `card:["update"]`
- * permission (viewer denied; editor/admin allowed), so there is no dedicated
- * `checklist` permission statement. They render only in the card detail sheet,
- * so slice 1 revalidates the board path rather than emitting a realtime event;
- * cross-client live sync is a tracked follow-up. Rename + reorder are deferred
- * (positions are float-gap assigned on create so they slot in later).
+ * Checklists reuse the `card:["update"]` permission (no dedicated statement).
+ * They render only in the card detail sheet, so actions revalidate the board
+ * path rather than emitting a realtime event; rename/reorder are not supported
+ * (float-gap positions slot new items in on create).
  */
 
 type CreateChecklistResult =

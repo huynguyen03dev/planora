@@ -8,8 +8,6 @@ import type { RuleEventPayload } from "./types";
 import { RuleExecutionError } from "./types";
 import { CARD_POSITION_GAP } from "@/lib/ordering";
 
-// ─── Mocks ───────────────────────────────────────────────────────────
-
 vi.mock("@/lib/card", () => ({
   updateCardPriority: vi.fn().mockResolvedValue({}),
   setCardCompletion: vi.fn().mockResolvedValue({
@@ -87,7 +85,7 @@ vi.mock("@/lib/automation/resolver", () => ({
   },
 }));
 
-// ─── Imports (after mocks) ───────────────────────────────────────────
+// Imports for the mocked modules, grouped after the vi.mock block.
 
 import { executeRuleActions } from "./executor";
 import {
@@ -105,8 +103,6 @@ import {
   recordCardHistoryEvents,
 } from "@/lib/card-history";
 import { resolveRecipient, resolveRemoveScope, CrossWorkspaceTargetError } from "./resolver";
-
-// ─── Helpers ─────────────────────────────────────────────────────────
 
 function makeClient(targetListOverrides?: {
   archivedAt?: Date | null;
@@ -172,14 +168,10 @@ const baseEvent: RuleEventPayload = {
 
 const ACTOR = "00000000-0000-4000-8000-000000000a11";
 
-// ─── Tests ───────────────────────────────────────────────────────────
-
 describe("executeRuleActions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
-
-  // ── Validation ─────────────────────────────────────────────────────
 
   it("throws when event.cardId is missing", async () => {
     const client = makeClient();
@@ -210,8 +202,6 @@ describe("executeRuleActions", () => {
       }),
     ).rejects.toThrow("event.boardId is required");
   });
-
-  // ── Ordered execution ──────────────────────────────────────────────
 
   it("executes steps in order (set-priority then add-label)", async () => {
     const client = makeClient();
@@ -313,8 +303,6 @@ describe("executeRuleActions", () => {
     });
   });
 
-  // ── First-failing-step aborts ──────────────────────────────────────
-
   it("aborts on first failing step and does not run later steps", async () => {
     const client = makeClient();
 
@@ -341,8 +329,6 @@ describe("executeRuleActions", () => {
     expect(removeSpy).not.toHaveBeenCalled();
   });
 
-  // ── set-priority ───────────────────────────────────────────────────
-
   it("set-priority: emits card-updated, no producedEvent, no history", async () => {
     const client = makeClient();
     const actions: ActionStep[] = [{ type: "set-priority", priority: "URGENT" }];
@@ -362,8 +348,6 @@ describe("executeRuleActions", () => {
     expect(result.producedEvents).toEqual([]);
     expect(recordCardHistoryEvents).not.toHaveBeenCalled();
   });
-
-  // ── move-card-to-list ──────────────────────────────────────────────
 
   describe("move-card-to-list", () => {
     it("appends to end of target list (last card exists)", async () => {
@@ -561,7 +545,7 @@ describe("executeRuleActions", () => {
       );
     });
 
-    // ── Target-list validation (US-074 Slice B2 + decision 0030) ───
+    // Target-list validation (US-074 Slice B2 + decision 0030)
 
     it("ISOLATES a missing target list: no throw, failed stepOutcome with TARGET_LIST_NOT_FOUND + target id", async () => {
       const client = makeClient({ notFound: true });
@@ -693,7 +677,7 @@ describe("executeRuleActions", () => {
       expect((client.card.update as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     });
 
-    // ── Audit payload proof (decision 0030) ───────────────────────
+    // Audit payload proof (decision 0030)
 
     it("failed stepOutcome carries the descriptive message (not \"null\") for the audit", async () => {
       // The per-step audit must describe what went wrong, not "null" — the
@@ -727,7 +711,7 @@ describe("executeRuleActions", () => {
       expect((client.card.update as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     });
 
-    // ── Decision 0030: best-effort continuation + two-class taxonomy ──
+    // Decision 0030: best-effort continuation + two-class taxonomy
 
     it("best-effort: a stale middle step does not block independent siblings (steps 1+3 apply, step 2 audited)", async () => {
       const client = makeClient({ notFound: true });
@@ -963,8 +947,6 @@ describe("executeRuleActions", () => {
     });
   });
 
-  // ── add-label ──────────────────────────────────────────────────────
-
   it("add-label changed=false → no emit, no producedEvent", async () => {
     const client = makeClient();
     vi.mocked(addCardLabel).mockResolvedValue({ changed: false });
@@ -1008,8 +990,6 @@ describe("executeRuleActions", () => {
     });
   });
 
-  // ── remove-label ───────────────────────────────────────────────────
-
   it("remove-label changed=true → emit labels-updated, no producedEvent", async () => {
     const client = makeClient();
     vi.mocked(removeCardLabel).mockResolvedValue({ changed: true });
@@ -1031,8 +1011,6 @@ describe("executeRuleActions", () => {
     });
     expect(result.producedEvents).toEqual([]);
   });
-
-  // ── assign-member ──────────────────────────────────────────────────
 
   it("assign-member: resolver used, newly-assigned id yields producedEvent + emit", async () => {
     const client = makeClient();
@@ -1102,8 +1080,6 @@ describe("executeRuleActions", () => {
     expect(recordCardHistoryEvents).not.toHaveBeenCalled();
   });
 
-  // ── remove-member ──────────────────────────────────────────────────
-
   it("remove-member: resolveRemoveScope used, removeMemberFromCard called per id", async () => {
     const client = makeClient();
     vi.mocked(resolveRemoveScope).mockResolvedValue(["user-a", "user-b"]);
@@ -1151,8 +1127,6 @@ describe("executeRuleActions", () => {
 
     expect(result.effects).toEqual([]);
   });
-
-  // ── set-completion ─────────────────────────────────────────────────
 
   describe("set-completion", () => {
     it("transitioned=true → emit + producedEvent + history", async () => {
@@ -1284,8 +1258,6 @@ describe("executeRuleActions", () => {
       });
     });
   });
-
-  // ── notify-member ──────────────────────────────────────────────────
 
   it("notify-member: no mutation, pushes DeferredNotification per resolved recipient", async () => {
     const client = makeClient();

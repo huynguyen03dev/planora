@@ -1,15 +1,12 @@
 #!/usr/bin/env tsx
 /**
  * DnD INP-vs-board-size measurement (US-027 need-assessment — local only).
- *
  * Signs up a fresh user against a PROD server, seeds boards at several card
- * counts, and for each one drives the @hello-pangea/dnd keyboard sensor through
- * the US-004 sequence (lift -> 3x move within list -> cross to next list ->
- * drop) while capturing the Event Timing API entries the INP metric is derived
- * from. Reports the worst interaction (== INP) per board, median of N runs.
- *
- * Prereq: a prod server on $BASE (default :3100) whose Better Auth origin
- * matches $BASE. Usage: npx tsx --env-file=.env scripts/perf-measure.ts
+ * counts, and drives the @hello-pangea/dnd keyboard sensor through the US-004
+ * lift -> move -> drop sequence while capturing Event Timing entries;
+ * reports the worst interaction (== INP) per board, median of N runs.
+ * Prereq: a prod server on $BASE (default :3100) with matching Better Auth origin.
+ * Usage: npx tsx --env-file=.env scripts/perf-measure.ts
  */
 import { execSync } from "node:child_process";
 
@@ -54,7 +51,6 @@ async function readInp(page: Page): Promise<{ max: number; entries: Interaction[
   });
 }
 
-/** One full drag session; returns the worst interaction latency + breakdown. */
 async function measureDrag(page: Page): Promise<{ max: number; entries: Interaction[] }> {
   // First CARD drag handle (lists also have handles; scope by aria-label).
   const cardHandle = page.getByRole("button", { name: "Drag card" }).first();

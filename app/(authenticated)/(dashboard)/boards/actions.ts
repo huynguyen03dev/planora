@@ -35,7 +35,6 @@ export async function createWorkspaceAction(
 ): Promise<CreateWorkspaceResult> {
   await verifySession();
 
-  // Parse and validate using Zod schema
   const rawData = Object.fromEntries(formData);
   const parsed = createWorkspaceSchema.safeParse(rawData);
 
@@ -62,7 +61,6 @@ export async function createBoardAction(
 ): Promise<CreateBoardResult> {
   const { userId } = await verifySession();
 
-  // Parse and validate using Zod schema
   const rawData = Object.fromEntries(formData);
   const parsed = createBoardSchema.safeParse(rawData);
 
@@ -108,7 +106,6 @@ export async function updateBoardAction(
 ): Promise<UpdateBoardResult> {
   await verifySession();
 
-  // Parse and validate using Zod schema
   const rawData = Object.fromEntries(formData);
   const parsed = updateBoardSchema.safeParse(rawData);
 
@@ -157,7 +154,6 @@ export async function updateBoardAction(
 export async function deleteBoardAction(boardId: string): Promise<DeleteBoardResult> {
   await verifySession();
 
-  // Validate using Zod schema
   const parsed = deleteBoardSchema.safeParse({ boardId });
 
   if (!parsed.success) {

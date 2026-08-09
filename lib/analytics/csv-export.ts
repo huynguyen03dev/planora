@@ -16,7 +16,6 @@ import { csvCell } from "@/lib/csv";
 export function generateAnalyticsCSV(payload: AnalyticsExportPayload): string {
   const lines: string[] = [];
 
-  // Header
   lines.push("Analytics Export");
   lines.push(`Workspace ID,${payload.metadata.workspaceId}`);
   lines.push(`Timezone,${payload.metadata.workspaceTimezone}`);
@@ -28,7 +27,6 @@ export function generateAnalyticsCSV(payload: AnalyticsExportPayload): string {
   lines.push(`Exported At,${payload.metadata.exportedAt}`);
   lines.push("");
 
-  // Burndown section
   lines.push("Burndown");
   lines.push("Date,Remaining Hours,Ideal Hours");
   for (const point of payload.burndown) {
@@ -38,7 +36,6 @@ export function generateAnalyticsCSV(payload: AnalyticsExportPayload): string {
   }
   lines.push("");
 
-  // KPIs section
   lines.push("KPIs");
   lines.push("Metric,Current,Previous,Change");
   lines.push(
@@ -71,7 +68,6 @@ export function generateAnalyticsCSV(payload: AnalyticsExportPayload): string {
   );
   lines.push("");
 
-  // Lead time detail section
   lines.push("Lead Time Detail");
   lines.push("Card ID,Card Title,Created At,Completed At,Lead Time (hours),Was Late");
   for (const row of payload.leadTimeRows) {

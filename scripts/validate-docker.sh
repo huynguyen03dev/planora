@@ -1,15 +1,8 @@
 #!/usr/bin/env bash
-# Validate the Railway image LOCALLY before touching Railway.
-#
-# Builds the production Docker image, boots a throwaway Postgres 16, then runs
-# the image against it with dummy env vars. The container entrypoint applies
-# the Prisma migrations and starts the server; the script then polls the
+# Validate the Railway image LOCALLY before touching Railway: build the prod
+# image, boot a throwaway Postgres 16, run the image against it, and poll the
 # landing page for HTTP 200. Everything is torn down on exit (trap).
-#
-# Prereqs: docker, curl, openssl. Run from the repo root:
-#   ./scripts/validate-docker.sh
-#
-# Exit codes: 0 = image builds + migrations apply + server answers 200.
+# Prereqs: docker, curl, openssl. Run from the repo root: ./scripts/validate-docker.sh
 
 set -euo pipefail
 

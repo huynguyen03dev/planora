@@ -91,7 +91,6 @@ describe("drag-defer reconciliation", () => {
     useBoardStore.getState().markResyncPending();
     expect(useBoardStore.getState().pendingResync).toBe(true);
     expect(useBoardStore.getState().consumeResync()).toBe(true);
-    // Second consume returns false — the flag was cleared.
     expect(useBoardStore.getState().consumeResync()).toBe(false);
   });
 
@@ -181,9 +180,8 @@ describe("applyRemoteListMoved", () => {
     useBoardStore.setState({ boardId: "board-1", lists: makeLists() });
     const before = useBoardStore.getState().lists;
 
-    // list-1 is already at position 16384 — the actor's own echo after the
-    // position was applied. No-op, and the lists reference is unchanged so no
-    // re-render is triggered.
+    // list-1 is already at 16384 — the actor's own echo; no-op, same
+    // reference, so no re-render is triggered.
     useBoardStore.getState().applyRemoteListMoved({
       boardId: "board-1",
       listId: "list-1",
@@ -447,8 +445,8 @@ describe("applyRemoteCardMoved", () => {
     useBoardStore.setState({ boardId: "board-1", lists: makeListsWithCards() });
     const before = useBoardStore.getState().lists;
 
-    // card-b already sits in list-2 at position 16384 — the actor's own echo.
-    // No-op, and the lists reference is unchanged (no re-render).
+    // card-b already sits in list-2 at 16384 — the actor's own echo: no-op,
+    // same reference (no re-render).
     useBoardStore.getState().applyRemoteCardMoved({
       boardId: "board-1",
       cardId: "card-b",
@@ -478,7 +476,6 @@ describe("applyRemoteCardMoved", () => {
       moveRevision: 1,
     });
 
-    // Position corrected to 8192 → card-a now sorts ahead of card-b.
     expect(cardsIn("list-2").map((c) => c.id)).toEqual(["card-a", "card-b"]);
     expect(cardsIn("list-2").find((c) => c.id === "card-a")!.position).toBe(8192);
   });
@@ -746,7 +743,6 @@ describe("applyRemoteCardLabelsUpdated", () => {
 
     expect(cardsIn("list-1").map((card) => card.id)).toEqual(["card-a", "card-c"]);
     expect(cardsIn("list-1").find((card) => card.id === "card-a")!.labels).toEqual([RED, BLUE]);
-    // Untouched card keeps its (empty) label set.
     expect(cardsIn("list-1").find((card) => card.id === "card-c")!.labels).toEqual([]);
   });
 
@@ -836,7 +832,6 @@ describe("applyRemoteCardLabelsUpdated", () => {
       labels: [RED, BLUE],
     });
 
-    // The card face and the open sheet's label set both update live.
     expect(cardsIn("list-1").find((card) => card.id === "card-a")!.labels).toEqual([RED, BLUE]);
     expect(useBoardStore.getState().selectedCard!.labels).toEqual([RED, BLUE]);
   });
@@ -1220,8 +1215,8 @@ describe("decision 0032 — moveRevision echo semantics", () => {
   describe("applyRemoteCardMoved revision gates", () => {
     function seedMovedCard(moveRevision: number) {
       const lists = makeListsWithCards();
-      // The base fixture already has card-a in list-1; drop it so the card
-      // lives ONLY in list-2 at the seeded revision (no duplicate id).
+      // The base fixture has card-a in list-1; drop it so the card lives
+      // ONLY in list-2 at the seeded revision (no duplicate id).
       lists[0].cards = lists[0].cards.filter((c) => c.id !== "card-a");
       lists[1].cards = [card("card-b", "list-2", 16384), card("card-a", "list-2", 8192, moveRevision)];
       useBoardStore.setState({ boardId: "board-1", lists });

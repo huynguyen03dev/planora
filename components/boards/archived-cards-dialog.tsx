@@ -83,7 +83,6 @@ export function ArchivedCardsDialog({
   const [restoringListId, setRestoringListId] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
-  // Permanent delete state
   const [deleteTarget, setDeleteTarget] = useState<{
     id: string
     title: string

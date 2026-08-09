@@ -177,9 +177,8 @@ type BoardStore = {
   /** Client-only card search: title substring (case-insensitive). Empty = show all. */
   searchQuery: string;
   /** Board-level "expand labels" preference (US-044): false = compact color bars,
-   *  true = full text pills. One decision shared by every card; held here (not in
-   *  per-card local state) so it survives realtime re-renders and never flickers
-   *  during a drag. */
+   *  true = full text pills. Held here, not per-card, so it survives realtime
+   *  re-renders without flicker during a drag. */
   expandLabels: boolean;
 
   setBoardId: (boardId: string) => void;
@@ -253,19 +252,17 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
 
   setSocketConnected: (connected) => set({ socketConnected: connected }),
 
-  // Seed presence with a known baseline (the current viewer) so the header isn't
-  // blank before the first server broadcast. The caller keys this on boardId, so
-  // it runs once per board — resetting to just yourself on a board switch, while
-  // the authoritative `board:presence` broadcast (deduped by user id) fills in
-  // everyone else a moment later.
+  // Seed presence with the current viewer so the header isn't blank before the
+  // first server broadcast; the authoritative `board:presence` broadcast fills
+  // in everyone else.
   seedWatchers: (watchers) => set({ watchers }),
 
   setDragging: (dragging) => set({ isDragging: dragging }),
 
-  // A structural remote board event (reorder/create/delete/archive) arrived
-  // while a local drag was in flight and was skipped to keep the list array
-  // stable under @hello-pangea/dnd. Flag that the board is now behind the
-  // server so BoardContent can reconcile via router.refresh() on drop.
+  // A structural remote board event (reorder/create/delete/archive) was skipped
+  // during a local drag to keep the list array stable under @hello-pangea/dnd;
+  // flag that the board is behind the server so BoardContent reconciles via
+  // router.refresh() on drop.
   markResyncPending: () => set({ pendingResync: true }),
 
   // Read the pending-resync flag and clear it in a single step. Returns whether
@@ -370,13 +367,10 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     const revision = payload.moveRevision ?? 0;
 
     set((state) => {
-      // decision 0032 revision semantics: reject a stale echo whose revision is
-      // LOWER than the store's current revision (a newer move already applied);
-      // dedupe an equal-revision echo that already sits at the canonical
-      // position (the actor's own echo after the optimistic commit, or a
-      // duplicate); everything else (equal revision, different position = a
-      // canonical correction of a stale optimistic slot; higher revision = a
-      // genuine cross-user move) applies.
+      // decision 0032 revision semantics: reject lower revisions; dedupe
+      // equal-revision echoes already at the canonical position (the actor's
+      // own echo after the optimistic commit); apply everything else (equal +
+      // different position = canonical correction; higher = cross-user move).
       const sourceList = state.lists.find((list) =>
         list.cards.some((card) => card.id === cardId),
       );

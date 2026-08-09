@@ -2,21 +2,20 @@
  * Automation rules engine — executor.
  *
  * Runs ONE matched rule's ordered action list inside the trigger's Prisma
- * transaction.  Calls existing transaction-body helpers with the tx client,
+ * transaction: calls existing transaction-body helpers with the tx client,
  * writes CardHistoryEvent rows attributed to the automation system actor +
  * the ruleId, accumulates "deferred effect" descriptors (realtime emits +
  * notify-member) that the Server Action fires POST-COMMIT, and returns the
  * trigger events its actions produced so a later Phase-6 evaluator can recurse.
+ * The executor itself does NOT recurse, touch ChainTracker, or fire socket
+ * emits / notifications directly.
  *
- * The executor itself does NOT recurse, does NOT touch ChainTracker, and does
- * NOT fire socket emits or notifications directly.
- *
- * Failure isolation (decision 0030, US-075): each action step runs inside its
- * own try/catch. A structured stale-target `RuleExecutionError` (code set) is
- * ISOLATED — recorded in the result's per-step outcomes (status/code/target id)
- * for the evaluator to audit into RuleExecutionLog.metadata — and the next
- * independent step still runs (best-effort). Any OTHER error is unexpected and
- * propagates → aborts the shared tx (retained pre-0030 behavior).
+ * Failure isolation (decision 0030, US-075): each action step runs in its own
+ * try/catch. A structured stale-target `RuleExecutionError` (code set) is
+ * ISOLATED — recorded in per-step outcomes for the evaluator to audit into
+ * RuleExecutionLog.metadata — and the next independent step still runs
+ * (best-effort). Any OTHER error is unexpected and propagates → aborts the
+ * shared tx (retained pre-0030 behavior).
  *
  * See: docs/decisions/0022-automation-rules-engine.md
  *      docs/decisions/0030-automation-rule-failure-isolation-semantics.md
@@ -52,8 +51,6 @@ import {
   type RuleEventPayload,
 } from "./types";
 import { resolveRecipient, resolveRemoveScope, CrossWorkspaceTargetError } from "./resolver";
-
-// ─── Public types ────────────────────────────────────────────────────
 
 export type DeferredEmit =
   | {
@@ -127,7 +124,7 @@ export type StepOutcome =
       message: string;
     };
 
-/** The entity id a step targets — the stale-target id an admin must clean up. */
+/** The stale-target id an admin must clean up when a step fails. */
 function stepTargetId(step: ActionStep): string | null {
   switch (step.type) {
     case "move-card-to-list":
@@ -143,7 +140,6 @@ function stepTargetId(step: ActionStep): string | null {
   }
 }
 
-/** Build the RuleExecutionError context shared by every executor throw. */
 function staleTargetContext(
   params: ExecuteRuleParams,
   cause: unknown,
@@ -188,8 +184,8 @@ async function assertLabelTarget(
 /**
  * resolveRecipient with the decision-0030 member-stale-target mapping: a
  * CrossWorkspaceTargetError (uuid literal resolves to a departed / non-member
- * user) becomes a structured RuleExecutionError (MEMBER_NOT_IN_WORKSPACE), so
- * the per-step isolation catches it as expected instead of aborting the tx.
+ * user) becomes a structured RuleExecutionError (MEMBER_NOT_IN_WORKSPACE) so
+ * the per-step isolation catches it instead of aborting the tx.
  */
 async function resolveMemberRecipient(
   client: Prisma.TransactionClient,
@@ -212,8 +208,6 @@ async function resolveMemberRecipient(
   }
 }
 
-// ─── Executor ────────────────────────────────────────────────────────
-
 export async function executeRuleActions(
   params: ExecuteRuleParams,
 ): Promise<ExecuteRuleResult> {
@@ -230,7 +224,7 @@ export async function executeRuleActions(
   const boardId = event.boardId;
   const workspaceId = rule.workspaceId;
 
-  // This is the central automation lock-order invariant: acquire the workspace
+  // Central automation lock-order invariant: acquire the workspace
   // serialization gate before the first ordered step can mutate or lock the
   // card. Recursive evaluators re-acquire the same row in this transaction;
   // PostgreSQL row locks are re-entrant for that transaction. The move helper
@@ -251,11 +245,11 @@ export async function executeRuleActions(
       }
 
         case "move-card-to-list": {
-          // US-074 Slice B2 + decision 0030: validate target list exists, is not
-        // archived, and belongs to the rule's workspace before mutating. A
-        // stale/missing/foreign target throws a structured RuleExecutionError
-        // with a code — the executor's per-step isolation audits it and
-        // continues (best-effort), never aborting the primary card mutation.
+          // US-074 Slice B2 + decision 0030: validate target list exists, is
+          // not archived, and belongs to the rule's workspace before mutating.
+          // A stale/missing/foreign target throws a coded RuleExecutionError —
+          // the executor's per-step isolation audits it and continues
+          // (best-effort), never aborting the primary card mutation.
         const targetList = await client.list.findUnique({
           where: { id: step.targetListId },
           select: {
@@ -316,10 +310,10 @@ export async function executeRuleActions(
         }
 
           // Automation and human DnD share the same transaction-safe ordering
-          // protocol. The helper locks the workspace, sorted boards/lists, and
-          // card, resolves the current end position, normalizes if needed, and
-          // bumps moveRevision with a CAS. Recursive evaluator calls reuse the
-          // already-held workspace lock in this transaction.
+          // protocol: the helper locks workspace, sorted boards/lists, and card,
+          // resolves the current end position, normalizes if needed, and bumps
+          // moveRevision with a CAS. Recursive calls reuse the already-held
+          // workspace lock in this transaction.
           const moved = await moveCardInTransaction(client, {
             workspaceId,
             cardId,
@@ -333,10 +327,9 @@ export async function executeRuleActions(
           });
           const memberIds = members.map((m: { userId: string }) => m.userId);
 
-          // History
           const moveEvents = buildCardMoveLifecycleEvents({
             workspaceId,
-            // The card's canonical board is the destination board. A
+            // The card's canonical board is the destination board: a
             // workspace-wide rule may legally target a list on another board;
             // recursive matching and history must follow the committed state.
             boardId: moved.targetBoardId,
@@ -358,10 +351,10 @@ export async function executeRuleActions(
             moveRevision: moved.card.moveRevision,
           });
           if (moved.fromBoardId !== moved.targetBoardId) {
-            // The destination event inserts the canonical card for target-board
-            // viewers; the source-board echo removes the card from its old
-            // board. Both are deferred until commit and re-read the same
-            // canonical card state, so no stale position/revision is emitted.
+            // Destination event inserts the canonical card for target-board
+            // viewers; the source-board echo removes it from its old board.
+            // Both are deferred until commit and re-read the same canonical
+            // state, so no stale position/revision is emitted.
             effects.push({
               kind: "card-moved",
               boardId: moved.fromBoardId,
@@ -533,8 +526,8 @@ export async function executeRuleActions(
             payload: { cardId, boardId, listId: card.listId, completed: step.completed },
           });
 
-          // Emit only on a genuine transition — a no-op set-completion (card
-          // already in the requested state) must not broadcast a redundant event.
+          // Emit only on a genuine transition — a no-op set-completion must not
+          // broadcast a redundant event.
           effects.push({ kind: "completion-updated", boardId, cardId, completed: step.completed });
         }
         break;
@@ -560,14 +553,12 @@ export async function executeRuleActions(
 
       stepOutcomes.push({ stepIndex, actionType: step.type, status: "success" });
     } catch (error) {
-      // Decision 0030 two-class taxonomy — HARDENED predicate (review finding):
-      // the isolation class is a RuleExecutionError WITH a stale-target code.
-      // A code-less RuleExecutionError is the unexpected class: it re-throws
-      // and aborts the shared tx exactly like any other non-structured error,
-      // so a future guard/step that forgets its code can never silently invert
-      // invariant #4 (isolated when it should abort). All executor throw sites
-      // currently carry codes; this predicate stays correct even when that is
-      // no longer true by construction.
+      // Decision 0030 two-class taxonomy: isolation requires a
+      // RuleExecutionError WITH a stale-target code. A code-less
+      // RuleExecutionError is the unexpected class — it re-throws and aborts
+      // the shared tx like any other non-structured error, so a guard that
+      // forgets its code can never silently invert invariant #4 (isolated when
+      // it should abort). All throw sites currently carry codes.
       if (error instanceof RuleExecutionError && error.code != null) {
         stepOutcomes.push({
           stepIndex,

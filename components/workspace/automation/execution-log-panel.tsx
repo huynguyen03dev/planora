@@ -34,14 +34,14 @@ type ExecutionLogPanelProps = {
   // never inferred from a page-size heuristic.
   initialHasMore: boolean;
   notify: NotifyFn;
-  // Host-driven refresh (board modal, US-067). When provided, the Refresh
-  // button re-fetches through the host (which stays board-scoped) instead of
-  // the built-in workspace-wide fetch; the fresh logs flow back via
-  // `initialLogs`. Returns a promise so the button can show its pending state
-  // for the host round-trip too. Omitted on the workspace page, which
-  // self-refreshes. The modal cannot cursor-page (its host fetch has no
-  // cursor), so the infinite-scroll loop runs on the workspace page only; the
-  // modal's feed is bounded and states honestly when more history exists.
+  // Host-driven refresh (board modal, US-067): when provided, the Refresh button
+  // re-fetches through the host (which stays board-scoped) instead of the
+  // built-in workspace-wide fetch; the fresh logs flow back via `initialLogs`.
+  // Returns a promise so the button can show its pending state. Omitted on the
+  // workspace page, which self-refreshes. The modal cannot cursor-page (its host
+  // fetch has no cursor), so the infinite-scroll loop runs on the workspace page
+  // only; the modal's feed is bounded and states honestly when more history
+  // exists.
   onRefresh?: () => void | Promise<void>;
 };
 
@@ -67,14 +67,13 @@ function triggerLabel(type: string): string {
  * and nothing animates (safe under prefers-reduced-motion).
  *
  *  - loading → polite `role="status"` line while a batch is in flight;
- *  - auto-load failure → `role="alert"` with the action's message + a subtle
- *    ghost retry button (keyboard/SR-accessible retry, never steals focus);
+ *  - auto-load failure → `role="alert"` + subtle ghost retry (keyboard/SR-
+ *    accessible, never steals focus);
  *  - observer-less environment (no IntersectionObserver) → the same subtle
  *    ghost button as the standing manual affordance;
  *  - end of data → polite "All execution logs are shown" completion status;
- *  - board modal (host-driven, cannot page) → if more history exists, a muted
- *    line making the cap explicit instead of silently pretending the list is
- *    complete; otherwise nothing (all history IS present).
+ *  - board modal (host-driven, cannot page) → a muted line making the
+ *    history cap explicit instead of pretending the list is complete.
  */
 function FeedStatus({
   isModal,
@@ -127,9 +126,9 @@ function FeedStatus({
 
   // More history exists.
   if (isModal) {
-    // Board modal: host-driven, no cursor paging — be honest that the shown
-    // rows are the latest only, and point at the workspace Automation page
-    // (the full-history surface) instead of faking completeness.
+    // Board modal: host-driven, no cursor paging — state that these are the
+    // latest rows and point at the workspace Automation page (the full-history
+    // surface) instead of faking completeness.
     return (
       <div className="border-t px-4 py-2.5 text-center">
         <p role="status" className="text-xs text-muted-foreground">
@@ -169,16 +168,16 @@ export function ExecutionLogPanel({
   const [logs, setLogs] = useState<LogEntry[]>(initialLogs);
   const [hasMore, setHasMore] = useState(initialHasMore);
   const [isPending, startTransition] = useTransition();
-  // Batch fetch state (infinite scroll). Deliberately separate from the
+  // Batch fetch state (infinite scroll), deliberately separate from the
   // refresh transition so the inline "Loading more logs…" status and the
   // Refresh button's "Refreshing…" never fight.
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Reflect externally-supplied logs when the host re-fetches (board modal).
-  // On the workspace page `initialLogs` is stable between self-refreshes, so
-  // this never fights the built-in fetch below; it does reset the feed when
-  // the page re-renders with fresh props after a mutation (router.refresh()).
+  // Reflect externally-supplied logs when the host re-fetches (board modal); on
+  // the workspace page `initialLogs` is stable between self-refreshes, so this
+  // never fights the built-in fetch below — it does reset the feed when the page
+  // re-renders with fresh props after a mutation (router.refresh()).
   useEffect(() => {
     setLogs(initialLogs);
     setHasMore(initialHasMore);
@@ -191,7 +190,7 @@ export function ExecutionLogPanel({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   // Synchronous in-flight flag: set before the first await, so two observer
-  // callbacks in the SAME tick (or a double-click on the fallback) collapse
+  // callbacks in the same tick (or a double-click on the fallback) collapse
   // into one request — the state guard alone cannot see the update yet.
   const requestInFlightRef = useRef(false);
   // Bumped on refresh: an in-flight batch that resolves after a refresh is
@@ -241,9 +240,9 @@ export function ExecutionLogPanel({
   }
 
   // Fetches the next batch behind the last loaded log (US-066 cursor
-  // pagination). Appends with an id dedupe so a refresh racing the load can
-  // never double-list a row, and skips the append entirely if a refresh
-  // superseded this batch meanwhile.
+  // pagination), appending with an id dedupe so a refresh racing the load can
+  // never double-list a row, and skipping the append if a refresh superseded
+  // this batch meanwhile.
   const handleLoadMore = useCallback(async () => {
     if (isLoadingMore || requestInFlightRef.current) {
       return;
@@ -349,8 +348,8 @@ export function ExecutionLogPanel({
       </div>
 
       {/* Bounded feed: the panel scrolls internally (max-h-80, the codebase's
-          scrollable-list height) so the workspace page/modal never grows with
-          history. The IO sentinel lives inside, rooted to this container. */}
+          scrollable-list height) so the page/modal never grows with history.
+          The IO sentinel lives inside, rooted to this container. */}
       <div
         ref={scrollRef}
         className="max-h-80 overflow-y-auto rounded-lg border bg-card"

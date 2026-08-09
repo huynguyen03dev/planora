@@ -75,10 +75,10 @@ async function runWithSandbox<T>(
 }
 
 /**
- * Minimal replica of the ordering subset the protocol touches. With
- * `withMoveRevision` the tables already carry the decision-0032 column (the
- * shape tests 2/3 exercise); without it, the shape is the PRE-migration one
- * that test 1 feeds to the real ALTER TABLE migration SQL.
+ * Minimal replica of the ordering subset the protocol touches: with
+ * `withMoveRevision` the tables carry the decision-0032 column (shape tests
+ * 2/3 exercise); without it, the shape is the PRE-migration one that test 1
+ * feeds to the real ALTER TABLE migration SQL.
  */
 async function createOrderingTables(admin: Client, withMoveRevision: boolean): Promise<void> {
   const moveRevisionCol = withMoveRevision
@@ -161,7 +161,7 @@ describe("decision 0032 — DB ordering protocol proof (ephemeral PostgreSQL)", 
     await runWithSandbox(async ({ admin }) => {
       await createOrderingTables(admin, false);
 
-      // Apply the REAL migration SQL (ALTER TABLE ... ADD COLUMN ... DEFAULT 0).
+      // Apply the REAL migration SQL (ALTER TABLE ... ADD COLUMN ... DEFAULT 0)
       const migrationPath = path.join(
         process.cwd(),
         "prisma/migrations/20260809070623_add_move_revision/migration.sql",
@@ -185,7 +185,6 @@ describe("decision 0032 — DB ordering protocol proof (ephemeral PostgreSQL)", 
         `INSERT INTO "list" (id, "boardId", title, position) VALUES ('l-1', 'b-1', 'L', 16384)`,
       );
 
-      // moveRevision defaults to 0 for fresh rows.
       await admin.query(
         `INSERT INTO "card" (id, "listId", title, position, "createdById") VALUES ('c-1', 'l-1', 'A', 16384, 'u-1')`,
       );
@@ -209,7 +208,7 @@ describe("decision 0032 — DB ordering protocol proof (ephemeral PostgreSQL)", 
       }
       expect(dupRejected).toBe(true);
 
-      // A monotonic CAS bump: 0 → 1 → 2, each matching exactly the prior value.
+      // A monotonic CAS bump: 0 → 1 → 2, each matching exactly the prior value
       const step1 = await admin.query(
         `UPDATE "card" SET position = 32768, "moveRevision" = "moveRevision" + 1
          WHERE id = 'c-1' AND "moveRevision" = 0`,
@@ -277,9 +276,9 @@ describe("decision 0032 — DB ordering protocol proof (ephemeral PostgreSQL)", 
           `UPDATE "card" SET "listId" = 'b', position = 49152, "moveRevision" = 1 WHERE id = 'x' AND "moveRevision" = 0`,
         );
 
-        // T2 starts while T1 holds the locks. Because it uses the SAME
-        // workspace-first order, it simply blocks on the workspace gate — it must
-        // NOT have completed (or errored) while T1 still holds the locks.
+        // T2 starts while T1 holds the locks; with the SAME workspace-first
+        // order it simply blocks on the workspace gate — it must NOT have
+        // completed (or errored) while T1 still holds the locks.
         const t2Promise = moveYtoA(t2);
         await sleep(400);
         let t2FinishedEarly = false;
@@ -306,9 +305,7 @@ describe("decision 0032 — DB ordering protocol proof (ephemeral PostgreSQL)", 
 
       // CONTROL: the SAME interleaving with the WRONG (opposite) per-row lock
       // order deadlocks — PostgreSQL's detector aborts one side (40P01, or
-      // 55P03 if lock_timeout wins the race). t3 locks b, t4 locks a, then each
-      // wants the other's row: a genuine lock cycle that the ascending-order
-      // protocol never creates.
+      // 55P03 if lock_timeout wins the race).
       const t3 = await connect();
       const t4 = await connect();
       try {
@@ -468,7 +465,7 @@ describe("decision 0032 — DB ordering protocol proof (ephemeral PostgreSQL)", 
 
       // CONTROL: completion's old card-first ordering and a move's production
       // workspace-first ordering form the exact inversion the application must
-      // never create. PostgreSQL deterministically aborts one waiter.
+      // never create — PostgreSQL deterministically aborts one waiter.
       const cardFirst = await connect();
       const workspaceFirst = await connect();
       try {
@@ -568,7 +565,7 @@ describe("decision 0032 — DB ordering protocol proof (ephemeral PostgreSQL)", 
 
         // CONTROL: the rejected sequence updated/locked the card first, then
         // tried to acquire the workspace while a move held workspace → parents
-        // and waited for that card. PostgreSQL must abort one waiter.
+        // and waited for that card — PostgreSQL must abort one waiter.
         const cardFirst = await connect();
         const workspaceFirst = await connect();
         try {

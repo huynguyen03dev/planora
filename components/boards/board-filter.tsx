@@ -113,9 +113,9 @@ export function BoardFilter() {
   const toggleActivityWindow = useBoardStore((s) => s.toggleActivityWindow)
   const clearFilters = useBoardStore((s) => s.clearFilters)
 
-  // The input reflects keystrokes immediately (feels responsive), but the store
-  // query — which drives the board-wide re-filter — is only updated after the
-  // user pauses, so we don't re-filter every list on every character.
+  // The input reflects keystrokes immediately, but the store query — which
+  // drives the board-wide re-filter — updates only after the user pauses, so we
+  // don't re-filter every list on every character.
   const [draftQuery, setDraftQuery] = useState(searchQuery)
 
   // Sync the draft when the store query changes from elsewhere (e.g. "Clear
@@ -151,10 +151,10 @@ export function BoardFilter() {
   // the badge reflects that single constraint. Otherwise count the dimensions.
   const displayCount = searchActive ? 1 : activeFilterCount(filter)
 
-  // Dimension option sets, derived from the store (no fetch). The current viewer
-  // is dropped from Members — the "Assigned to me" quick option covers them.
+  // Dimension option sets, derived from the store (no fetch); the current
+  // viewer is dropped from Members — the "Assigned to me" quick option covers
+  // them.
   const labels = availableLabels(lists)
-  // Exclude the current viewer — the "Assigned to me" quick option covers them.
   const members = availableMembers(lists, currentUserId)
 
   // A keyword suspends the dimensions, so when one is active we show only whether

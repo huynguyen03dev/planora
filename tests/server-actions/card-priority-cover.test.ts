@@ -347,8 +347,6 @@ describe("setCardCoverAction", () => {
     expect(tx.$queryRaw).toHaveBeenCalled();
   });
 
-  // ── Revalidation failure + compensation ───────────────────────────────
-
   it("revalidation failure: active list gone between Cloudinary upload and tx — compensates and returns Card not found", async () => {
     signInAs("u", WS_A, "editor");
     h.uploadToCloudinary.mockResolvedValue({

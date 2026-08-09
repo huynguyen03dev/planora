@@ -23,7 +23,7 @@ export const revalidate = 0;
 export async function POST(request: Request) {
   const start = performance.now();
 
-  // ── Self-guard: CRON_SECRET check (LOW-3) ─────────────────────────────
+  // Self-guard: CRON_SECRET bearer check (LOW-3)
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret) {
     console.warn("[due-date-scheduler] CRON_SECRET not set — returning 401");
@@ -35,7 +35,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // ── Fetch candidate cards ─────────────────────────────────────────────
   const now = new Date();
 
   const cards = await db.card.findMany({
@@ -61,9 +60,8 @@ export async function POST(request: Request) {
   let skipped = 0;
   let errors = 0;
 
-  // We need boardId for the notification linkUrl. Since we have the list
-  // relation, we can derive it, but we also need the board title. For
-  // efficiency, batch-fetch board titles for all unique board IDs.
+  // Batch-fetch board titles for the notification linkUrl (needs boardId +
+  // title; avoids an N+1 over the candidate cards).
   const boardIds = [...new Set(cards.map((c) => c.list?.boardId).filter(Boolean))] as string[];
   const boards = boardIds.length > 0
     ? await db.board.findMany({
@@ -107,9 +105,9 @@ export async function POST(request: Request) {
 
       for (const milestone of milestones) {
         for (const userId of recipientIds) {
-          // ── Claim-first with rollback (MEDIUM-1) ──────────────────
-          // Try-insert the CardReminder row as a claim. On P2002 unique
-          // violation, another tick already sent this one — skip.
+          // Claim-first with rollback (MEDIUM-1): try-insert the CardReminder
+          // row as a claim; a P2002 violation means another tick already sent
+          // this one — skip.
           try {
             await db.cardReminder.create({
               data: {
@@ -133,7 +131,7 @@ export async function POST(request: Request) {
             throw insertError;
           }
 
-          // ── Send notification ─────────────────────────────────────
+          // Send notification
           try {
             await notifyDueDate({
               userId,
@@ -166,7 +164,7 @@ export async function POST(request: Request) {
     }
   }
 
-  // ── Scheduled pass: evaluate due-date-approaching rules ──────────────
+  // Scheduled pass: evaluate due-date-approaching rules
   let scheduledApplied = 0;
   let scheduledNotified = 0;
   let scheduledSkipped = 0;

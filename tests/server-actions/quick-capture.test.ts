@@ -229,7 +229,7 @@ describe("getQuickCaptureOptionsAction (US-083 W7 options action)", () => {
   it("excludes a viewer-only workspace while keeping an editor workspace (mixed roles)", async () => {
     signInAs("u", WS_A, "editor");
     // The DB role filter only ever returns the editor membership; the query
-    // shape below is the assertion that viewer memberships are out of scope.
+    // shape below asserts viewer memberships are out of scope.
     h.db.workspaceMember.findMany.mockResolvedValue([membership(WS_A, "editor")]);
     h.db.workspace.findMany.mockResolvedValue([workspace(WS_A, "Acme")]);
     h.db.board.findMany.mockResolvedValue([board(BOARD_A, "Roadmap", WS_A)]);

@@ -95,17 +95,14 @@ describe("BoardAutomationDialog", () => {
     renderDialog();
 
     expect(screen.queryByText("Automation")).toBeInTheDocument();
-    // Dialog title not yet visible
     expect(screen.queryByRole("heading", { name: "Automation" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Automation" }));
 
-    // The dialog title appears
     expect(
       screen.getByRole("heading", { name: "Automation" }),
     ).toBeInTheDocument();
 
-    // The lazy fetch was triggered
     expect(getBoardAutomationDataAction).toHaveBeenCalledWith({
       boardId: "board-1",
     });
@@ -121,7 +118,6 @@ describe("BoardAutomationDialog", () => {
 
     // The skeleton is marked aria-busy
     expect(screen.getByLabelText("Loading automation")).toBeInTheDocument();
-    // Content not yet present
     expect(
       screen.queryByTestId("automation-content"),
     ).not.toBeInTheDocument();
@@ -170,11 +166,9 @@ describe("BoardAutomationDialog", () => {
     const retryButton = screen.getByRole("button", { name: "Try again" });
     expect(retryButton).toBeInTheDocument();
 
-    // Prepare for retry
     getBoardAutomationDataAction.mockResolvedValue(SUCCESS_RESPONSE);
     await user.click(retryButton);
 
-    // The action is called again
     expect(getBoardAutomationDataAction).toHaveBeenCalledTimes(2);
 
     await waitFor(() => {

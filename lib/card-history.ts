@@ -6,10 +6,10 @@ import db from "@/lib/prisma";
 
 export type CardHistoryEventType = $Enums.CardHistoryEventType;
 
-// Re-export the enum values for convenience
+// Re-export the enum values for convenience.
 export const CardHistoryEventType = $Enums.CardHistoryEventType;
 
-// Metadata types for each event per PRD contract
+// Metadata types per PRD contract.
 export type CardCreatedMetadata = {
   listId: string;
   estimateHours: number | null;
@@ -93,7 +93,6 @@ export type CardHistoryEventMetadata =
   | CardDeletedMetadata
   | BaselineCapturedMetadata;
 
-// Input type for building a card history event
 export type BuildCardHistoryEventInput = {
   workspaceId: string;
   boardId: string;
@@ -116,7 +115,6 @@ export type BuildCardMoveLifecycleEventsInput = {
   memberIds: string[];
 };
 
-// Input type for listing card history events
 export type ListCardHistoryEventsInput = {
   workspaceId: string;
   boardId?: string;
@@ -129,8 +127,8 @@ export type ListCardHistoryEventsInput = {
 };
 
 /**
- * Build a Prisma create input for a card history event.
- * Callers should use this inside a transaction to append events atomically.
+ * Build a Prisma create input for a card history event; call inside a
+ * transaction so events append atomically.
  */
 export function buildCardHistoryEvent(
   input: BuildCardHistoryEventInput,
@@ -151,8 +149,7 @@ export function buildCardHistoryEvent(
 }
 
 /**
- * Record multiple card history events in a single transaction.
- * Uses createMany for efficiency when appending multiple ordered events.
+ * Record multiple card history events in one transaction via createMany.
  */
 export async function recordCardHistoryEvents(
   tx: Prisma.TransactionClient,
@@ -169,8 +166,8 @@ export async function recordCardHistoryEvents(
 }
 
 /**
- * List card history events for a workspace with optional filters.
- * Results are ordered by sequence (guaranteed ordering) and then occurredAt.
+ * List card history events for a workspace with optional filters, ordered by
+ * sequence (guaranteed ordering) then occurredAt.
  */
 export type CardHistoryEventRecord = {
   id: string;
@@ -227,8 +224,7 @@ export async function listCardHistoryEventsForWorkspace(
 }
 
 /**
- * Get the latest history event for a specific card.
- * Useful for reconstructing current state from history.
+ * Latest history event for a card — useful for reconstructing current state.
  */
 export async function getLatestCardHistoryEvent(
   tx: Prisma.TransactionClient,
@@ -250,7 +246,7 @@ export async function getLatestCardHistoryEvent(
 }
 
 /**
- * Get card history events for a specific card in chronological order.
+ * Card history events for a card in chronological order.
  */
 export async function getCardHistoryEvents(
   tx: Prisma.TransactionClient,
@@ -266,9 +262,6 @@ export async function getCardHistoryEvents(
     metadata: toCardHistoryEventMetadata(event.metadata),
   }));
 }
-
-// Event builder helpers for domain-specific events
-// These provide type-safe builders for each event type per PRD metadata contract
 
 export function buildCardCreatedEvent(
   workspaceId: string,
@@ -305,10 +298,10 @@ export function buildCardMovedEvent(
 }
 
 /**
- * Build the history events for a card move. Since US-045 (decision 0020) a move
- * changes only list membership + position — it never completes or reopens a
- * card — so this produces a single `CARD_MOVED` event. Completion transitions
- * come exclusively from the explicit completion toggle (`CARD_COMPLETED` /
+ * History events for a card move. Since US-045 (decision 0020) a move changes
+ * only list membership + position — it never completes or reopens a card — so
+ * this produces a single `CARD_MOVED` event. Completion transitions come
+ * exclusively from the explicit completion toggle (`CARD_COMPLETED` /
  * `CARD_REOPENED`), never from list membership.
  */
 export function buildCardMoveLifecycleEvents(

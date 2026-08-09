@@ -129,7 +129,6 @@ export default async function BoardPage({
     }
   }
 
-  // Initialize data variables
   let selectedCard = null;
   let comments: CommentRecord[] = [];
   let attachments: AttachmentRecord[] = [];
@@ -143,7 +142,6 @@ export default async function BoardPage({
   let cardLabels: LabelRecord[] = [];
   let checklists: ChecklistWithItems[] = [];
 
-  // If a card ID is provided, load card details and related data
   if (selectedCardId) {
     selectedCard = await getCardDetailForBoard(boardId, selectedCardId);
     

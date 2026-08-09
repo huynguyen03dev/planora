@@ -1,20 +1,18 @@
 /**
  * Pure, client-side board card filtering (US-013 → US-065).
  *
- * The board renders ALL cards and hides the non-matching ones via CSS rather
- * than removing them from the array — removing would desync @hello-pangea/dnd's
- * index space from the store's `cards` array and corrupt drop positions (see
- * lib/dnd/apply-drop.ts).
+ * The board renders ALL cards and hides non-matching ones via CSS rather than
+ * removing them from the array — removing would desync @hello-pangea/dnd's index
+ * space from the store's `cards` array and corrupt drop positions (see
+ * lib/dnd/apply-drop.ts). Intentionally pure (no React, no store, no DOM, no
+ * `Date.now()` — callers pass `now`) so matching rules are unit-tested in
+ * isolation.
  *
- * This module is intentionally pure (no React, no store, no DOM, no `Date.now()`
- * — callers pass `now`) so the matching rules are unit-tested in isolation.
- *
- * US-065 turned the label-only filter into a Trello-style multi-dimension filter:
- * keyword search + members + card status + due date + activity. Within a
- * dimension options combine via OR; across dimensions they combine via AND. An
- * active keyword suspends the dimensions (the call site matches on the query
- * alone) — that composition rule lives in ListColumn, not here, so each matcher
- * stays independently testable.
+ * US-065 made the filter Trello-style multi-dimensional: keyword search +
+ * members + card status + due date + activity. Within a dimension options
+ * combine via OR; across dimensions via AND. An active keyword suspends the
+ * dimensions (the call site matches on the query alone) — that composition rule
+ * lives in ListColumn, not here, so each matcher stays independently testable.
  */
 
 export type LabelOption = { id: string; name: string; color: string };
@@ -156,8 +154,7 @@ export function cardMatchesStatus(card: FilterableCard, statuses: CardStatus[]):
 }
 
 // Local midnight of a date. Due dates are day-granular in Planora (the picker
-// stores local midnight, no time-of-day — see card-detail-sheet), so bucket
-// math compares whole calendar days, not raw timestamps.
+// stores local midnight, no time-of-day), so bucket math compares whole days.
 function startOfDay(date: Date): Date {
   const copy = new Date(date);
   copy.setHours(0, 0, 0, 0);
