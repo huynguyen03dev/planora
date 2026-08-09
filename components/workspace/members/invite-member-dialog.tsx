@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { UserAdd01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -35,6 +35,18 @@ type InviteMemberDialogProps = {
 
 type InvitableRole = "admin" | "editor" | "viewer";
 
+function subscribeToHydration(): () => void {
+  return () => undefined;
+}
+
+function getClientHydrationSnapshot(): boolean {
+  return true;
+}
+
+function getServerHydrationSnapshot(): boolean {
+  return false;
+}
+
 const ROLE_OPTIONS: { value: InvitableRole; label: string; hint: string }[] = [
   { value: "admin", label: "Admin", hint: "Full control, incl. members" },
   { value: "editor", label: "Editor", hint: "Create and edit content" },
@@ -48,6 +60,11 @@ export function InviteMemberDialog({ workspaceId, trigger }: InviteMemberDialogP
   const [role, setRole] = useState<InvitableRole>("editor");
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
+  const hydrated = useSyncExternalStore(
+    subscribeToHydration,
+    getClientHydrationSnapshot,
+    getServerHydrationSnapshot,
+  );
 
   function resetState() {
     setEmail("");
@@ -93,7 +110,11 @@ export function InviteMemberDialog({ workspaceId, trigger }: InviteMemberDialogP
     >
       <DialogTrigger asChild>
         {trigger ?? (
-          <Button size="sm">
+            <Button
+              size="sm"
+              disabled={!hydrated}
+              data-invite-hydrated={hydrated ? "true" : "false"}
+            >
             <HugeiconsIcon icon={UserAdd01Icon} className="size-4" aria-hidden={true} />
             Invite
           </Button>

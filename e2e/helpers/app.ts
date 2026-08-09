@@ -21,10 +21,13 @@ export type Creds = { name: string; email: string; password: string };
  */
 export async function signUp(page: Page, creds: Creds): Promise<void> {
   await page.goto("/sign-up");
+  await expect(page.locator("form[data-auth-hydrated='true']")).toBeVisible();
   await page.locator("#name").fill(creds.name);
   await page.locator("#email").fill(creds.email);
   await page.locator("#password").fill(creds.password);
+  await page.locator("#confirm-password").fill(creds.password);
   await page.getByRole("button", { name: /sign up/i }).click();
+  await page.waitForURL(/\/verify-email\?/, { timeout: 30_000 });
 
   const link = await fetchVerificationLink(creds.email);
   const { pathname, search } = new URL(link);
@@ -417,6 +420,7 @@ export async function removeFirstMemberInOpenCard(page: Page): Promise<void> {
  */
 export async function inviteMember(page: Page, slug: string, email: string): Promise<void> {
   await page.goto(`/workspace/${slug}/members`);
+  await expect(page.locator("button[data-invite-hydrated='true']")).toBeVisible();
   await page.getByRole("button", { name: /^invite$/i }).click();
   await page.locator("#invite-email").fill(email);
   await page.getByRole("button", { name: /^send invite$/i }).click();
