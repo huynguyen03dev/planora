@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import type { CardDetailRecord } from "@/lib/card";
@@ -718,6 +718,300 @@ describe("CardDetailSheet — comment composer", () => {
 
     expect(screen.getByText("Comment cannot be empty")).toBeInTheDocument();
     expect(actions.createCommentAction).not.toHaveBeenCalled();
+  });
+});
+
+describe("CardDetailSheet — comment composer single-flight (same-tick)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useBoardStore.getState().reset();
+  });
+
+  it("posts once when Enter and the submit button fire in the same tick", async () => {
+    let resolvePost: ((v: { success: boolean }) => void) | null = null;
+    actions.createCommentAction.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePost = resolve;
+        }),
+    );
+    renderSheet();
+
+    const textarea = screen.getByPlaceholderText("Write a comment...");
+    const submitButton = screen.getByRole("button", { name: "Post comment" });
+    await user.type(textarea, "Nice work");
+
+    // Enter + submit click land before the pending render flips `isPending`:
+    // the synchronous ref guard must drop the second submit (no double post).
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    fireEvent.click(submitButton);
+
+    expect(actions.createCommentAction).toHaveBeenCalledTimes(1);
+
+    resolvePost!({ success: true });
+    await waitFor(() => expect(textarea).toHaveValue(""));
+  });
+
+  it("allows a retry after a failed post", async () => {
+    actions.createCommentAction
+      .mockResolvedValueOnce({
+        success: false,
+        error: "Could not post comment.",
+      })
+      .mockResolvedValueOnce({ success: true });
+    renderSheet();
+
+    const textarea = screen.getByPlaceholderText("Write a comment...");
+    await user.type(textarea, "Nice work");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() =>
+      expect(screen.getByText("Could not post comment.")).toBeInTheDocument(),
+    );
+    // The guard released on failure — posting again works.
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() =>
+      expect(actions.createCommentAction).toHaveBeenCalledTimes(2),
+    );
+    await waitFor(() => expect(textarea).toHaveValue(""));
+  });
+
+  it("surfaces a generic error on a thrown action and allows a retry", async () => {
+    actions.createCommentAction
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValueOnce({ success: true });
+    renderSheet();
+
+    const textarea = screen.getByPlaceholderText("Write a comment...");
+    await user.type(textarea, "Nice work");
+    await user.keyboard("{Enter}");
+
+    // The rejection is caught (no unhandled rejection): exactly one call and
+    // a visible generic error.
+    await waitFor(() =>
+      expect(
+        screen.getByText("Something went wrong. Please try again."),
+      ).toBeInTheDocument(),
+    );
+    expect(actions.createCommentAction).toHaveBeenCalledTimes(1);
+
+    // The guard released on the rejection — a retry posts successfully.
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() =>
+      expect(actions.createCommentAction).toHaveBeenCalledTimes(2),
+    );
+    await waitFor(() => expect(textarea).toHaveValue(""));
+  });
+});
+
+describe("CardDetailSheet — autosave queue recovery (rejected save)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useBoardStore.getState().reset();
+  });
+
+  it("surfaces a generic error and leaves the Saving state when a queued save rejects", async () => {
+    actions.updateCardDetailsAction.mockRejectedValue(new Error("network down"));
+    renderSheet();
+
+    const title = screen.getByLabelText("Card title");
+    await user.clear(title);
+    await user.type(title, "Renamed card");
+    await user.tab();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Something went wrong. Please try again."),
+      ).toBeInTheDocument(),
+    );
+    // The drain is not stuck: the Saving indicator clears once the queue
+    // settles, so the sheet recovers instead of freezing in-flight.
+    await waitFor(() =>
+      expect(screen.queryByText("Saving…")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("keeps draining saves queued behind a rejected save in the same drain", async () => {
+    let rejectSave1: ((e: Error) => void) | null = null;
+    actions.updateCardDetailsAction
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectSave1 = reject;
+          }),
+      )
+      .mockResolvedValueOnce({ success: true });
+    renderSheet();
+
+    const title = screen.getByLabelText("Card title");
+    await user.clear(title);
+    await user.type(title, "Renamed card");
+    await user.tab(); // save 1 starts and stays pending
+
+    await waitFor(() =>
+      expect(actions.updateCardDetailsAction).toHaveBeenCalledTimes(1),
+    );
+
+    // A description blur lands while save 1 is still in flight → queued behind
+    // it in the same drain.
+    const description = screen.getByPlaceholderText(
+      "Add a more detailed description...",
+    );
+    await user.type(description, "More details");
+    await user.tab();
+
+    // Still only the in-flight save while the queue waits for it.
+    expect(actions.updateCardDetailsAction).toHaveBeenCalledTimes(1);
+
+    // Save 1 rejects — the drain must NOT abort; the queued save behind it runs.
+    rejectSave1!(new Error("network down"));
+    await waitFor(() =>
+      expect(actions.updateCardDetailsAction).toHaveBeenCalledTimes(2),
+    );
+    const formData = actions.updateCardDetailsAction.mock
+      .calls[1][0] as FormData;
+    expect(formData.get("title")).toBe("Renamed card");
+    expect(formData.get("description")).toBe("More details");
+    // The queued save succeeded → transient confirmation.
+    await waitFor(() => expect(screen.getByText("Saved")).toBeInTheDocument());
+  });
+
+  it("resets drain ownership after a rejected save so later queued saves still drain", async () => {
+    actions.updateCardDetailsAction
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValueOnce({ success: true });
+    renderSheet();
+
+    const title = screen.getByLabelText("Card title");
+    await user.clear(title);
+    await user.type(title, "Renamed card");
+    await user.tab();
+
+    // Save 1 rejects; the generic error surfaces and the queue settles.
+    await waitFor(() =>
+      expect(
+        screen.getByText("Something went wrong. Please try again."),
+      ).toBeInTheDocument(),
+    );
+
+    // A later blur queues a NEW save; the drain (ownership was reset) runs it.
+    const description = screen.getByPlaceholderText(
+      "Add a more detailed description...",
+    );
+    await user.type(description, "More details");
+    await user.tab();
+
+    await waitFor(() =>
+      expect(actions.updateCardDetailsAction).toHaveBeenCalledTimes(2),
+    );
+    const formData = actions.updateCardDetailsAction.mock
+      .calls[1][0] as FormData;
+    expect(formData.get("title")).toBe("Renamed card");
+    expect(formData.get("description")).toBe("More details");
+    await waitFor(() => expect(screen.getByText("Saved")).toBeInTheDocument());
+  });
+});
+
+describe("CardDetailSheet — meta draft reconciliation (dueDate/priority/estimate)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useBoardStore.getState().reset();
+  });
+
+  function seedStoreCard(card: CardDetailRecord) {
+    useBoardStore.setState({
+      selectedCardId: card.id,
+      selectedCard: {
+        card,
+        comments: [],
+        activity: [],
+        attachments: [],
+        assignees: [],
+        assignableMembers: [],
+        labels: [],
+      },
+    });
+  }
+
+  it("reflects a remote priority change into the picker when not interacting", async () => {
+    seedStoreCard(makeCard({ priority: null }));
+    renderSheet();
+
+    const combo = screen.getByRole("combobox", { name: "Priority" });
+    expect(combo).toHaveTextContent(/No priority/);
+
+    // Remote card:meta-updated patches the store; the open sheet's draft
+    // follows because the user is not interacting with the picker.
+    act(() => seedStoreCard(makeCard({ priority: "LOW" })));
+    await waitFor(() => expect(combo).toHaveTextContent(/Low/));
+  });
+
+  it("reflects a remote estimate change into the estimate picker when not interacting", async () => {
+    seedStoreCard(makeCard({ estimateHours: 2 }));
+    renderSheet();
+
+    const combo = screen.getByRole("combobox", { name: "Estimate" });
+    expect(combo).toHaveTextContent(/2h/);
+
+    act(() => seedStoreCard(makeCard({ estimateHours: 8 })));
+    await waitFor(() => expect(combo).toHaveTextContent(/8h/));
+  });
+
+  it("reflects a remote due date change into the due-date control when not interacting", async () => {
+    seedStoreCard(makeCard({ dueDate: null }));
+    renderSheet();
+
+    const dueButton = screen.getByRole("button", { name: /Set due date/ });
+    expect(dueButton).toHaveTextContent(/No due date/);
+
+    act(() => seedStoreCard(makeCard({ dueDate: new Date(2026, 0, 15) })));
+    await waitFor(() =>
+      expect(dueButton).not.toHaveTextContent(/No due date/),
+    );
+    expect(dueButton).toHaveTextContent(/Jan/);
+  });
+
+  it("protects an open priority picker from a remote change, then resyncs on close without a pick", async () => {
+    seedStoreCard(makeCard({ priority: null }));
+    renderSheet();
+
+    const combo = screen.getByRole("combobox", { name: "Priority" });
+    await user.click(combo); // open the picker
+
+    // A remote change (priority + a title rename, so we can prove the render
+    // flushed with the new store snapshot) arrives while the picker is open.
+    act(() =>
+      seedStoreCard(makeCard({ priority: "LOW", title: "Remote rename" })),
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("Card title")).toHaveValue("Remote rename"),
+    );
+    // The open picker keeps showing the pre-interaction value — not clobbered.
+    expect(combo).toHaveTextContent(/No priority/);
+
+    // Closing without a pick (click elsewhere) resyncs to the live value.
+    await user.click(screen.getByLabelText("Card title"));
+    await waitFor(() => expect(combo).toHaveTextContent(/Low/));
+  });
+
+  it("commits a pick made while the picker is open (never resynced on close)", async () => {
+    actions.updateCardPriorityAction.mockResolvedValue({ success: true });
+    seedStoreCard(makeCard({ priority: null }));
+    renderSheet();
+
+    const combo = screen.getByRole("combobox", { name: "Priority" });
+    await user.click(combo);
+    await user.click(screen.getByRole("option", { name: /High/ }));
+
+    await waitFor(() =>
+      expect(actions.updateCardPriorityAction).toHaveBeenCalledTimes(1),
+    );
+    const formData = actions.updateCardPriorityAction.mock
+      .calls[0][0] as FormData;
+    expect(formData.get("priority")).toBe("HIGH");
+    // The pick is the user's intent: closing the picker must not resync the
+    // draft back to the (still null) live prop.
+    expect(combo).toHaveTextContent(/High/);
   });
 });
 

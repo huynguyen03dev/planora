@@ -121,7 +121,24 @@ export function BoardHeader({
   const boardTheme = getBoardTheme(board.backgroundColor);
 
   function handleSave() {
-    if (!canEdit || !canSubmit || isPending) {
+    if (!canEdit) {
+      setEditing(false);
+      setDraftTitle(board.title);
+      return;
+    }
+
+    // A blur that lands while a save is in flight (the input is disabled
+    // mid-flight, and disabling a focused input fires a blur) must not wipe
+    // the typed draft: the in-flight transition settles editing/error state
+    // when it completes, and reverting here would discard a rename that may
+    // still land. Stay in edit mode and keep the draft.
+    if (isPending) {
+      return;
+    }
+
+    if (!canSubmit) {
+      // Nothing to save (unchanged or empty draft): close the editor and
+      // restore the last known title.
       setEditing(false);
       setDraftTitle(board.title);
       return;

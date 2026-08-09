@@ -233,12 +233,18 @@ export function CardDetailSheet({
   // Bind the hero title/description to the live store value (not the stale server
   // prop) so a remote rename or description edit isn't clobbered when the field
   // blurs (US-043). Comments/activity/members already merge from the store above.
+  // The meta fields (due date, priority, estimate) merge the same way (F3): the
+  // store patches them on card:meta-updated, so the sheet's drafts reconcile to
+  // the live value instead of a stale server prop.
   const liveCard: CardDetailRecord =
     storeSelectedCard && storeSelectedCard.card.id === currentCard.id
       ? {
           ...currentCard,
           title: storeSelectedCard.card.title,
           description: storeSelectedCard.card.description,
+          dueDate: storeSelectedCard.card.dueDate,
+          priority: storeSelectedCard.card.priority,
+          estimateHours: storeSelectedCard.card.estimateHours,
         }
       : currentCard;
 
@@ -390,6 +396,76 @@ function CardDetailDialogBody({
     if (!descriptionEditing) setDraftDescription(liveDescription);
   }
 
+  // Meta drafts (due date, priority, estimate) reconcile to the live card the
+  // same way title/description do: a remote card:meta-updated (or a refresh
+  // reseed) is reflected into the draft whenever the user is NOT actively
+  // interacting with that control, so the next commit can't clobber a remote
+  // change. "Interacting" means the picker is open; a pick made during that
+  // open session is the user's own intent and is never overwritten, while
+  // closing without a pick resyncs to the live value so a mid-interaction
+  // remote change can't leave the draft stale. Same render-time baseline
+  // pattern (guarded, so it can't loop) as title/description above.
+  const [priorityOpen, setPriorityOpen] = useState(false);
+  const [estimateOpen, setEstimateOpen] = useState(false);
+  const priorityPickedRef = useRef(false);
+  const estimatePickedRef = useRef(false);
+  const dueDatePickedRef = useRef(false);
+
+  const [priorityBaseline, setPriorityBaseline] = useState(card.priority ?? "NONE");
+  if ((card.priority ?? "NONE") !== priorityBaseline) {
+    setPriorityBaseline(card.priority ?? "NONE");
+    if (!priorityOpen) setDraftPriority(card.priority ?? "NONE");
+  }
+
+  const [estimateBaseline, setEstimateBaseline] = useState(
+    card.estimateHours?.toString() ?? "",
+  );
+  if ((card.estimateHours?.toString() ?? "") !== estimateBaseline) {
+    setEstimateBaseline(card.estimateHours?.toString() ?? "");
+    if (!estimateOpen) setDraftEstimateHours(card.estimateHours?.toString() ?? "");
+  }
+
+  const [dueDateBaseline, setDueDateBaseline] = useState(toDateInputValue(card.dueDate));
+  if (toDateInputValue(card.dueDate) !== dueDateBaseline) {
+    setDueDateBaseline(toDateInputValue(card.dueDate));
+    if (!dueDateOpen) setDraftDueDate(toDateInputValue(card.dueDate));
+  }
+
+  // A picker that closes without a pick (outside click / Escape) ends the
+  // interaction without committing intent: resync the draft to the live value
+  // so a remote change that arrived while it was open doesn't stay stale. A
+  // pick made in the session (ref) already committed the draft, so closing
+  // never overwrites the user's own selection.
+  function handlePriorityOpenChange(open: boolean) {
+    setPriorityOpen(open);
+    if (!open) {
+      if (!priorityPickedRef.current) {
+        setDraftPriority(card.priority ?? "NONE");
+      }
+      priorityPickedRef.current = false;
+    }
+  }
+
+  function handleEstimateOpenChange(open: boolean) {
+    setEstimateOpen(open);
+    if (!open) {
+      if (!estimatePickedRef.current) {
+        setDraftEstimateHours(card.estimateHours?.toString() ?? "");
+      }
+      estimatePickedRef.current = false;
+    }
+  }
+
+  function handleDueDateOpenChange(open: boolean) {
+    setDueDateOpen(open);
+    if (!open) {
+      if (!dueDatePickedRef.current) {
+        setDraftDueDate(toDateInputValue(card.dueDate));
+      }
+      dueDatePickedRef.current = false;
+    }
+  }
+
   // Queued autosave (U2): a blur/commit that lands while a save is in flight
   // is queued and drained when the in-flight save finishes (Notion/Trello
   // style) — the old `if (isPending) return` silently discarded it. No control
@@ -424,14 +500,26 @@ function CardDetailDialogBody({
     drainingRef.current = true;
     void (async () => {
       let savedAny = false;
-      while (queueRef.current.length > 0) {
-        const next = queueRef.current.shift()!;
-        const ok = await next();
-        if (ok) {
-          savedAny = true;
+      try {
+        while (queueRef.current.length > 0) {
+          const next = queueRef.current.shift()!;
+          try {
+            const ok = await next();
+            if (ok) {
+              savedAny = true;
+            }
+          } catch {
+            // A rejected/thrown save (network blip, unexpected server failure)
+            // must not kill the drain: surface a generic error and keep
+            // draining the saves queued behind it. Ownership resets in the
+            // outer finally, so later saves recover instead of leaving the
+            // sheet stuck in "Saving…".
+            setError("Something went wrong. Please try again.");
+          }
         }
+      } finally {
+        drainingRef.current = false;
       }
-      drainingRef.current = false;
       if (savedAny) {
         showSaved();
       } else {
@@ -1202,10 +1290,12 @@ function CardDetailDialogBody({
             <Select
               value={draftPriority}
               onValueChange={(value) => {
+                priorityPickedRef.current = true;
                 setDraftPriority(value);
                 setError("");
                 queueSavePriority(value);
               }}
+              onOpenChange={handlePriorityOpenChange}
               disabled={!canEdit}
             >
               <SelectTrigger id="card-priority" className="w-full max-w-60">
@@ -1225,7 +1315,7 @@ function CardDetailDialogBody({
             <span id="card-due-date-label" className="w-20 shrink-0 text-sm text-muted-foreground">
               Due date
             </span>
-            <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
+            <Popover open={dueDateOpen} onOpenChange={handleDueDateOpenChange}>
               <PopoverTrigger asChild>
                 <Button
                   id="card-due-date"
@@ -1262,6 +1352,7 @@ function CardDetailDialogBody({
                     if (!date) {
                       return;
                     }
+                    dueDatePickedRef.current = true;
                     const next = toDueDateValue(date);
                     setDraftDueDate(next);
                     setError("");
@@ -1278,6 +1369,7 @@ function CardDetailDialogBody({
                       className="w-full justify-center"
                       disabled={!canEdit}
                       onClick={() => {
+                        dueDatePickedRef.current = true;
                         setDraftDueDate("");
                         setError("");
                         queueSaveDueDate("");
@@ -1300,11 +1392,13 @@ function CardDetailDialogBody({
               <Select
                 value={draftEstimateHours === "" ? "none" : draftEstimateHours}
                 onValueChange={(value) => {
+                  estimatePickedRef.current = true;
                   const next = value === "none" ? "" : value;
                   setDraftEstimateHours(next);
                   setError("");
                   queueSaveEstimate(next);
                 }}
+                onOpenChange={handleEstimateOpenChange}
                 disabled={!canEdit}
               >
                 <SelectTrigger id="card-estimate-hours" className="w-full max-w-40">
@@ -1440,6 +1534,11 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Synchronous same-tick single-flight: `isPending` only flips on the next
+  // render, so two Enter presses (or Enter + submit click) in the same tick
+  // would double-post. The ref guards immediately and releases on completion
+  // or failure, so a retry after either always works.
+  const submittingRef = useRef(false);
 
   const {
     open: isMentionOpen,
@@ -1467,6 +1566,10 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
       setError("Comment cannot be empty");
       return;
     }
+    if (submittingRef.current) {
+      return;
+    }
+    submittingRef.current = true;
 
     setError("");
 
@@ -1475,11 +1578,20 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
     formData.set("content", content.trim());
 
     startTransition(async () => {
-      const result = await createCommentAction(formData);
-      if (result.success) {
-        setContent("");
-      } else {
-        setError(result.error);
+      try {
+        const result = await createCommentAction(formData);
+        if (result.success) {
+          setContent("");
+        } else {
+          setError(result.error);
+        }
+      } catch {
+        // A thrown/rejected action (network blip, unexpected server failure)
+        // surfaces a generic actionable error instead of an unhandled
+        // rejection; the guard still releases so a retry always works.
+        setError("Something went wrong. Please try again.");
+      } finally {
+        submittingRef.current = false;
       }
     });
   }
