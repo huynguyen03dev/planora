@@ -1,10 +1,14 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { verifyEmail } from "@/lib/auth-client";
+
+import { sendVerificationEmail, verifyEmail } from "@/lib/auth-client";
+import { safeInternalPath } from "@/lib/redirect";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
@@ -13,17 +17,158 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 
+type VerificationStatus = "request" | "verifying" | "success" | "error";
+
+const resendCooldownSeconds = 30;
+const resendFailureMessage =
+  "We couldn't send the verification email. Please try again.";
+
+function VerificationRequestForm({
+  callbackURL,
+  initialEmail,
+  initialDelivery,
+  tokenError,
+}: {
+  callbackURL: string;
+  initialEmail: string;
+  initialDelivery?: "sent" | "failed";
+  tokenError?: string;
+}) {
+  const [email, setEmail] = useState(initialEmail);
+  const [error, setError] = useState(
+    initialDelivery === "failed" ? resendFailureMessage : "",
+  );
+  const [sent, setSent] = useState(initialDelivery === "sent");
+  const [loading, setLoading] = useState(false);
+  const [cooldown, setCooldown] = useState(
+    initialDelivery === "sent" ? resendCooldownSeconds : 0,
+  );
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+
+    const timeout = window.setTimeout(() => {
+      setCooldown((current) => Math.max(0, current - 1));
+    }, 1000);
+
+    return () => window.clearTimeout(timeout);
+  }, [cooldown]);
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (cooldown > 0) return;
+
+    setError("");
+    setSent(false);
+    setLoading(true);
+
+    try {
+      const result = await sendVerificationEmail({ email, callbackURL });
+      if (!result || result.error) {
+        setError(resendFailureMessage);
+        return;
+      }
+
+      setSent(true);
+      setCooldown(resendCooldownSeconds);
+    } catch {
+      setError(resendFailureMessage);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const buttonLabel = loading
+    ? "Sending..."
+    : cooldown > 0
+      ? `Send again in ${cooldown}s`
+      : tokenError
+        ? "Send new verification email"
+        : "Send verification email";
+
+  return (
+    <div className="flex flex-1 items-center justify-center px-4">
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <h1 className="text-2xl leading-normal font-medium">
+            {tokenError ? "Verification failed" : "Verify your email"}
+          </h1>
+          <CardDescription>
+            {tokenError
+              ? "This verification link is invalid or has expired. Request a new one below."
+              : "Enter your email and we'll send a verification link if your account needs one."}
+          </CardDescription>
+        </CardHeader>
+        <form onSubmit={handleSubmit}>
+          <CardContent className="space-y-4">
+            {tokenError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {tokenError}
+              </p>
+            ) : null}
+            {error ? (
+              <p id="verify-send-error" role="alert" className="text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
+            {sent ? (
+              <p role="status" className="text-sm text-muted-foreground">
+                If an account needs verification, we&apos;ve sent a new link. Check
+                your inbox and spam folder.
+              </p>
+            ) : null}
+            <div className="space-y-2">
+              <Label htmlFor="verification-email">Email</Label>
+              <Input
+                id="verification-email"
+                type="email"
+                value={email}
+                onChange={(event) => {
+                  setEmail(event.target.value);
+                  setError("");
+                  setSent(false);
+                }}
+                placeholder="you@example.com"
+                required
+                autoComplete="email"
+                aria-invalid={Boolean(error)}
+                aria-describedby={error ? "verify-send-error" : undefined}
+              />
+            </div>
+          </CardContent>
+          <CardFooter className="flex flex-col gap-3 pt-6">
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={loading || cooldown > 0}
+            >
+              {buttonLabel}
+            </Button>
+            <Button type="button" variant="secondary" className="w-full" asChild>
+              <Link href="/sign-in">Back to sign in</Link>
+            </Button>
+          </CardFooter>
+        </form>
+      </Card>
+    </div>
+  );
+}
+
 function VerifyEmailInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
-
-  const [status, setStatus] = useState<"verifying" | "success" | "error">(
-    token ? "verifying" : "error",
+  const initialEmail = searchParams.get("email") ?? "";
+  const delivery = searchParams.get("delivery");
+  const initialDelivery =
+    delivery === "sent" || delivery === "failed" ? delivery : undefined;
+  const callbackURL = safeInternalPath(
+    searchParams.get("callbackURL") ?? undefined,
   );
-  const [error, setError] = useState(
-    token ? "" : "Missing verification token.",
+  const [status, setStatus] = useState<VerificationStatus>(
+    token ? "verifying" : "request",
   );
+  const [tokenError, setTokenError] = useState("");
 
   useEffect(() => {
     if (!token) return;
@@ -33,104 +178,87 @@ function VerifyEmailInner() {
 
     async function process() {
       try {
-        const res = await verifyEmail({
-          query: { token: safeToken },
-        });
-
+        const result = await verifyEmail({ query: { token: safeToken } });
         if (cancelled) return;
 
-        // Guard against an undefined/thrown result so a transient API
-        // failure surfaces as an accessible error instead of crashing.
-        if (!res || res.error) {
+        if (!result || result.error) {
           setStatus("error");
-          setError(
-            res?.error?.message ?? "Invalid or expired verification link.",
+          setTokenError(
+            result?.error?.message ?? "Invalid or expired verification link.",
           );
           return;
         }
 
         setStatus("success");
-
-        // Redirect to boards after brief delay to show success feedback
-        setTimeout(() => {
-          router.push("/boards");
-        }, 1500);
       } catch {
         if (cancelled) return;
         setStatus("error");
-        setError("Invalid or expired verification link.");
+        setTokenError("Invalid or expired verification link.");
       }
     }
 
-    process();
+    void process();
 
     return () => {
       cancelled = true;
     };
-  }, [token, router]);
+  }, [token]);
+
+  useEffect(() => {
+    if (status !== "success") return;
+
+    const timeout = window.setTimeout(() => {
+      router.push(callbackURL);
+    }, 1500);
+
+    return () => window.clearTimeout(timeout);
+  }, [callbackURL, router, status]);
+
+  if (status === "request" || status === "error") {
+    return (
+      <VerificationRequestForm
+        callbackURL={callbackURL}
+        initialEmail={initialEmail}
+        initialDelivery={initialDelivery}
+        tokenError={status === "error" ? tokenError : undefined}
+      />
+    );
+  }
 
   if (status === "verifying") {
     return (
       <div className="flex flex-1 items-center justify-center px-4">
         <Card className="w-full max-w-sm">
           <CardHeader>
-            {/* Real page-level heading (CardTitle is a div). */}
-            <h1 className="text-2xl leading-normal font-medium">Verifying your email</h1>
+            <h1 className="text-2xl leading-normal font-medium">
+              Verifying your email
+            </h1>
             <CardDescription>
               Please wait while we verify your email address.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">Verifying...</p>
+            <p role="status" className="text-sm text-muted-foreground">
+              Verifying...
+            </p>
           </CardContent>
         </Card>
       </div>
     );
   }
 
-  if (status === "success") {
-    return (
-      <div className="flex flex-1 items-center justify-center px-4">
-        <Card className="w-full max-w-sm">
-          <CardHeader>
-            {/* Real page-level heading (CardTitle is a div). */}
-            <h1 className="text-2xl leading-normal font-medium">Email verified!</h1>
-            <CardDescription>
-              Your email has been verified. Taking you to your boards...
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
-    );
-  }
-
-  // Error state
   return (
     <div className="flex flex-1 items-center justify-center px-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          {/* Real page-level heading (CardTitle is a div). */}
-          <h1 className="text-2xl leading-normal font-medium">Verification failed</h1>
-          {/* U7: the specific failure message lives only in the role="alert"
-              below — never duplicated in the description. */}
+          <h1 className="text-2xl leading-normal font-medium">Email verified!</h1>
           <CardDescription>
-            This verification link is invalid or has expired. Please request a new one.
+            Your email has been verified. Taking you back to Planora...
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          {error && (
-            <p
-              id="verify-error"
-              role="alert"
-              className="text-sm text-destructive"
-            >
-              {error}
-            </p>
-          )}
-        </CardContent>
-        <CardFooter className="flex flex-col gap-4 pt-0">
+        <CardFooter className="pt-0">
           <Button className="w-full" asChild>
-            <Link href="/sign-in">Sign in</Link>
+            <Link href={callbackURL}>Continue</Link>
           </Button>
         </CardFooter>
       </Card>
