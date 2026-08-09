@@ -104,7 +104,6 @@ function VerifyEmailInner() {
     );
   }
 
-  // Error state
   return (
     <div className="flex flex-1 items-center justify-center px-4">
       <Card className="w-full max-w-sm">

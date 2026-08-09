@@ -16,9 +16,6 @@ export type AnalyticsActionResult<T> =
   | { success: true; data: T }
   | { success: false; error: string };
 
-/**
- * Resolve workspace by slug.
- */
 async function getWorkspaceBySlug(slug: string) {
   return db.workspace.findUnique({
     where: { slug },
@@ -145,8 +142,7 @@ export async function loadMoreLeadTimeRowsAction(
 }
 
 /**
- * Export workspace analytics as serializable payload.
- * Reuses the same analytics engine output.
+ * Serializable export of the same engine output the dashboard renders.
  */
 export async function exportWorkspaceAnalyticsAction(
   slug: string,

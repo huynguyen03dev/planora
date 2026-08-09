@@ -35,8 +35,6 @@ const WORKSPACE_NOT_FOUND = "Workspace not found";
 const RULE_NOT_FOUND = "Rule not found";
 const BOARD_NOT_FOUND = "Board not found";
 
-// ─── Result types ──────────────────────────────────────────────────
-
 export type SerializedRule = {
   id: string;
   workspaceId: string;
@@ -103,8 +101,6 @@ type BoardAutomationDataResult =
   | ({ success: true; workspaceId: string; canManage: boolean } & AutomationView)
   | { success: false; error: string };
 
-// ─── Helpers ───────────────────────────────────────────────────────
-
 function firstFieldError(error: {
   flatten(): { fieldErrors: Record<string, string[] | undefined> };
 }): string | undefined {
@@ -117,20 +113,15 @@ function canManageRules(workspaceId: string): Promise<boolean> {
 }
 
 /**
- * Workspace isolation for action-STEP targets. A rule action may reference a
- * `targetListId` (move-card-to-list) or a `labelId` (add/remove-label); the Zod
- * schema only checks these are UUID-shaped. Left unchecked, a workspace admin
- * could author a rule that moves a card into ANOTHER workspace's list or
- * attaches a foreign label — a cross-workspace write at fire time.
- *
- * A list/label's board→workspace binding is immutable in this data model (a
- * board never changes workspace), so validating at SAVE time fully closes the
- * hole — unlike recipient targets, which are workspace-membership-dependent and
- * therefore guarded at RUNTIME in resolver.ts. Returns `null` iff every
- * referenced list/label exists, is not archived, and belongs to `workspaceId`;
- * otherwise a human-readable reason for the rejection (US-074 minor: an
- * archived target list is rejected at save time as a UX guard — the runtime
- * isolation in decision 0030 is the real safety).
+ * Workspace isolation for action-STEP targets. The Zod schema only checks that
+ * `targetListId`/`labelId` are UUID-shaped; without this, an admin could author
+ * a rule that writes into ANOTHER workspace at fire time. A list/label's
+ * board→workspace binding is immutable, so validating at SAVE time fully closes
+ * the hole (unlike runtime-dependent recipient targets, guarded in resolver.ts).
+ * Returns null iff every referenced list/label exists, is unarchived, and
+ * belongs to `workspaceId`; otherwise a human-readable rejection. The
+ * archived-target check is a save-time UX guard — runtime isolation
+ * (decision 0030) is the real safety.
  */
 async function actionTargetsInWorkspace(
   workspaceId: string,
@@ -191,8 +182,6 @@ function serializeRule(rule: {
     updatedAt: rule.updatedAt.toISOString(),
   };
 }
-
-// ─── createRuleAction ──────────────────────────────────────────────
 
 export async function createRuleAction(input: unknown): Promise<CreateRuleResult> {
   const { userId } = await verifySession();
@@ -262,8 +251,6 @@ export async function createRuleAction(input: unknown): Promise<CreateRuleResult
   }
 }
 
-// ─── updateRuleAction ──────────────────────────────────────────────
-
 export async function updateRuleAction(input: unknown): Promise<UpdateRuleResult> {
   await verifySession();
 
@@ -332,8 +319,6 @@ export async function updateRuleAction(input: unknown): Promise<UpdateRuleResult
   }
 }
 
-// ─── deleteRuleAction ──────────────────────────────────────────────
-
 export async function deleteRuleAction(input: unknown): Promise<ActionResult> {
   await verifySession();
 
@@ -364,8 +349,6 @@ export async function deleteRuleAction(input: unknown): Promise<ActionResult> {
     return { success: false, error: "Failed to delete rule. Please try again." };
   }
 }
-
-// ─── toggleRuleEnabledAction ───────────────────────────────────────
 
 export async function toggleRuleEnabledAction(input: unknown): Promise<ToggleResult> {
   await verifySession();
@@ -398,7 +381,7 @@ export async function toggleRuleEnabledAction(input: unknown): Promise<ToggleRes
   }
 }
 
-// ─── listRulesAction (any workspace member) ────────────────────────
+// listRulesAction — read gate: any workspace member
 
 export async function listRulesAction(input: unknown): Promise<ListRulesResult> {
   const { userId } = await verifySession();
@@ -437,7 +420,7 @@ export async function listRulesAction(input: unknown): Promise<ListRulesResult> 
   return { success: true, rules: rules.map(serializeRule) };
 }
 
-// ─── getRuleExecutionLogAction (any workspace member) ──────────────
+// getRuleExecutionLogAction — read gate: any workspace member
 
 // Default page size for the execution-log cursor pagination (US-066). Kept at
 // 100 — the pre-pagination take — so callers that omit `take` get exactly the
@@ -510,7 +493,7 @@ export async function getRuleExecutionLogAction(input: unknown): Promise<RuleLog
   };
 }
 
-// ─── getBoardAutomationDataAction (any workspace member; no mutation) ──
+// getBoardAutomationDataAction — read gate: any workspace member; no mutation
 
 /**
  * Lazily loads the automation surface for one board (US-067). Called when the
@@ -551,7 +534,7 @@ export async function getBoardAutomationDataAction(
   return { success: true, workspaceId: board.workspaceId, canManage, ...view };
 }
 
-// ─── dryRunRulesAction (any workspace member; no mutation) ─────────
+// dryRunRulesAction — read gate: any workspace member; no mutation
 
 export async function dryRunRulesAction(input: unknown): Promise<DryRunResult> {
   const { userId } = await verifySession();
