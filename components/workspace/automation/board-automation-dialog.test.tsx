@@ -75,9 +75,16 @@ describe("BoardAutomationDialog", () => {
 
   it("renders the Automation trigger button", () => {
     renderDialog();
-    expect(
-      screen.getByRole("button", { name: "Automation" }),
-    ).toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: "Automation" });
+    expect(trigger).toBeInTheDocument();
+    // Narrow-screen toolbar: the label span hides below md (single icon row)
+    // while the aria-label keeps the accessible name stable.
+    expect(trigger).toHaveAttribute("aria-label", "Automation");
+    const label = Array.from(trigger.querySelectorAll("span")).find(
+      (span) => span.textContent === "Automation",
+    );
+    expect(label).toBeDefined();
+    expect(label).toHaveClass("hidden", "md:inline");
   });
 
   it("opens the dialog on trigger click and fetches data lazily", async () => {

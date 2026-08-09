@@ -287,8 +287,10 @@ export default async function BoardPage({
           reaches both archive seams (card face/detail sheet, list column). */}
       <UndoHost>
         {/* Pin the board to the viewport minus the 56px (3.5rem) app header so the
-            page itself never scrolls; lists scroll their cards internally instead. */}
-        <div className="flex h-[calc(100vh-3.5rem)] min-h-0 flex-col overflow-hidden p-3 sm:p-6">
+            page itself never scrolls; lists scroll their cards internally instead.
+            dvh tracks the mobile URL bar (svh/dvh), so the board fits the visible
+            area on phones; dvh == vh on desktop, so behavior is unchanged there. */}
+        <div className="flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col overflow-hidden p-3 sm:p-6">
         <BoardHeader
           board={{
             id: board.id,

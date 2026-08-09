@@ -48,6 +48,13 @@ describe("ArchivedCardsDialog (US-074 Slice B UI)", () => {
     const trigger = screen.getByRole("button", { name: "View archived items" });
     expect(trigger).toBeInTheDocument();
     expect(trigger).toHaveTextContent("2");
+    // Narrow-screen toolbar: the label span hides below md (single icon row)
+    // while the aria-label keeps the accessible name stable.
+    const label = Array.from(trigger.querySelectorAll("span")).find(
+      (span) => span.textContent === "Archived",
+    );
+    expect(label).toBeDefined();
+    expect(label).toHaveClass("hidden", "md:inline");
   });
 
   it("opens dialog and maintains accessibility tablist, tab, aria-selected, and panel relationships", async () => {

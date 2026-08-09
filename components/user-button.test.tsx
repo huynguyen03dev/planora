@@ -65,4 +65,19 @@ describe("UserButton — account-menu trigger accessible name", () => {
       screen.getByRole("button", { name: "Open account menu" }),
     ).toBeInTheDocument();
   });
+
+  it("expands the trigger hit area around the avatar to >=36px pointer / >=44px coarse", () => {
+    sessionState.data = {
+      user: { name: "Jane Doe", email: "jane@example.com", image: null },
+    };
+    render(<UserButton />);
+
+    const trigger = screen.getByRole("button", {
+      name: "Open account menu for Jane Doe",
+    });
+    // 32px avatar + p-0.5 (2px each side) = 36px pointer target; p-1.5 on
+    // coarse = 44px. The avatar's own size is unchanged (no desktop bulk).
+    expect(trigger).toHaveClass("p-0.5", "pointer-coarse:p-1.5");
+    expect(trigger.querySelector(".size-8")).toBeInTheDocument();
+  });
 });

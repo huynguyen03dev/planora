@@ -20,7 +20,7 @@ export function TodayNavLink() {
       href="/today"
       aria-current={isCurrent ? "page" : undefined}
       className={cn(
-        "rounded-md px-2 py-1 text-sm font-medium transition-colors",
+        "flex min-h-9 pointer-coarse:min-h-11 items-center rounded-md px-2 text-sm font-medium transition-colors",
         isCurrent
           ? "bg-secondary text-foreground"
           : "text-muted-foreground hover:bg-muted hover:text-foreground",

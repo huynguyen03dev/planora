@@ -20,11 +20,11 @@ function BoardsSidebarContent({ workspaces }: BoardsSidebarProps) {
   const isOverview = !searchParams.get("workspace") && pathname === "/boards";
 
   return (
-    <aside className="flex w-full shrink-0 flex-col border-b bg-sidebar p-4 md:w-64 md:border-b-0 md:border-r">
+    <aside className="themed-scrollbar flex max-h-[40dvh] w-full shrink-0 flex-col overflow-y-auto border-b bg-sidebar p-4 md:max-h-none md:w-64 md:overflow-visible md:border-b-0 md:border-r">
       <nav className="space-y-1">
         <Link
           href="/boards"
-          className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-sidebar-accent ${
+          className={`flex min-h-9 pointer-coarse:min-h-11 items-center gap-2 rounded-md px-2 text-sm transition-colors hover:bg-sidebar-accent ${
             isOverview ? "bg-sidebar-accent font-medium" : ""
           }`}
         >
@@ -50,7 +50,7 @@ export function BoardsSidebar(props: BoardsSidebarProps) {
   return (
     <Suspense
       fallback={
-        <aside className="w-full shrink-0 border-b bg-sidebar md:w-64 md:border-b-0 md:border-r" />
+        <aside className="max-h-[40dvh] w-full shrink-0 overflow-y-auto border-b bg-sidebar md:max-h-none md:w-64 md:overflow-visible md:border-b-0 md:border-r" />
       }
     >
       <BoardsSidebarContent {...props} />
