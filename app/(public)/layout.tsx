@@ -11,15 +11,17 @@ export default async function PublicLayout({
   const session = await auth.api.getSession({ headers: await headers() });
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="flex h-14 items-center justify-between border-b px-6">
-        <Link href="/" className="text-lg font-semibold">
-          Planora
-        </Link>
-        <div className="flex items-center gap-2">
-          <AuthHeaderActions hasSession={!!session} />
-        </div>
-      </header>
+      <div className="flex min-h-screen flex-col">
+        <header className="border-b border-border">
+          <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-6">
+            <Link href="/" className="text-lg font-semibold tracking-tight">
+              Planora
+            </Link>
+            <div className="flex items-center gap-2">
+              <AuthHeaderActions hasSession={!!session} />
+            </div>
+          </div>
+        </header>
       <main className="flex flex-1 flex-col">{children}</main>
     </div>
   );
