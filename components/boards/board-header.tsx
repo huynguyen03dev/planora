@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Crown02Icon, StarIcon } from "@hugeicons/core-free-icons";
+import { Crown02Icon, StarIcon, UserAddIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 import {
@@ -172,10 +172,10 @@ export function BoardHeader({
 
   return (
     <header
-      className="space-y-4 rounded-t-xl border border-white/15 p-4 md:p-5"
+      className="space-y-2 rounded-t-xl border border-white/15 p-3 md:space-y-4 md:p-5"
       style={{ background: boardTheme.header }}
     >
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between md:gap-3">
         <div className="min-w-0 flex-1">
           {canEdit && editing ? (
             <Input
@@ -222,7 +222,7 @@ export function BoardHeader({
           )}
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-1.5 md:gap-2">
           {showReconnecting ? (
             <Badge
               role="status"
@@ -289,9 +289,13 @@ export function BoardHeader({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="rounded-md border-white/40 bg-white/15 text-white hover:bg-white/25"
+                  aria-label="Share"
+                  className="gap-1.5 rounded-md border-white/40 bg-white/15 text-white hover:bg-white/25"
                 >
-                  Share
+                  <HugeiconsIcon icon={UserAddIcon} size={16} aria-hidden="true" />
+                  {/* Label hides below md so the toolbar stays a single icon
+                      row on narrow screens; the aria-label keeps the name. */}
+                  <span className="hidden md:inline">Share</span>
                 </Button>
               }
             />

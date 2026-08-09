@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import {
@@ -29,6 +29,52 @@ describe("BoardFilter", () => {
     expect(trigger).toBeInTheDocument();
     // The count badge only appears once a filter/search is active.
     expect(trigger).toHaveTextContent(/^Filter$/);
+    // Narrow-screen toolbar: the label span hides below md (single icon row)
+    // while the aria-label keeps the accessible name stable.
+    const label = Array.from(trigger.querySelectorAll("span")).find(
+      (span) => span.textContent === "Filter",
+    );
+    expect(label).toBeDefined();
+    expect(label).toHaveClass("hidden", "md:inline");
+  });
+
+  it("includes the active-filter count in the trigger's accessible name", async () => {
+    seed([
+      {
+        id: "l1",
+        boardId: "b1",
+        title: "To Do",
+        position: 1,
+        cards: [
+          {
+            id: "c1",
+            listId: "l1",
+            title: "Do the thing",
+            position: 1,
+            coverImage: null,
+            priority: null,
+            dueDate: null,
+            completedAt: null,
+            updatedAt: new Date(),
+            labels: [],
+            members: [],
+            memberCount: 0,
+            checklistDone: 0,
+            checklistTotal: 0,
+            commentCount: 0,
+          },
+        ],
+      },
+    ]);
+    render(<BoardFilter />);
+    const trigger = screen.getByRole("button", { name: "Filter cards" });
+
+    useBoardStore.getState().setSearchQuery("the");
+
+    // Flush the store-driven re-render before reading the dynamic label.
+    await waitFor(() =>
+      expect(trigger).toHaveAttribute("aria-label", "Filter cards (1 active)"),
+    );
   });
 
   it("opens the popover and shows the filter dimension sections", async () => {
@@ -62,7 +108,7 @@ describe("BoardFilter", () => {
     useBoardStore.getState().toggleStatusFilter("incomplete");
     render(<BoardFilter />);
 
-    const trigger = screen.getByRole("button", { name: "Filter cards" });
+    const trigger = screen.getByRole("button", { name: /Filter cards/ });
     expect(within(trigger).getByText("1")).toBeInTheDocument();
   });
 
@@ -90,7 +136,7 @@ describe("BoardFilter", () => {
     // An applied dimension flips the pressed state.
     useBoardStore.getState().toggleStatusFilter("incomplete");
     const filtered = render(<BoardFilter />);
-    expect(filtered.getByRole("button", { name: "Filter cards" })).toHaveAttribute(
+    expect(filtered.getByRole("button", { name: /Filter cards/ })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -100,7 +146,7 @@ describe("BoardFilter", () => {
     useBoardStore.getState().clearFilters();
     useBoardStore.getState().setSearchQuery("foo");
     const searching = render(<BoardFilter />);
-    expect(searching.getByRole("button", { name: "Filter cards" })).toHaveAttribute(
+    expect(searching.getByRole("button", { name: /Filter cards/ })).toHaveAttribute(
       "aria-pressed",
       "true",
     );

@@ -24,7 +24,7 @@ export function NotificationBell({ count, isOpen, className, ...props }: Notific
       variant="ghost"
       {...props}
       className={cn(
-        "relative flex h-auto items-center gap-1.5 px-2 py-1.5",
+        "relative size-9 pointer-coarse:size-11",
         isOpen ? "bg-accent font-medium text-foreground" : "text-muted-foreground",
         className,
       )}

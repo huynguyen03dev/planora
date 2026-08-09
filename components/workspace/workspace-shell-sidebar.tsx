@@ -81,7 +81,7 @@ export function WorkspaceShellSidebar({
             href={item.href}
             aria-current={item.active ? "page" : undefined}
             className={cn(
-              "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-sidebar-accent",
+              "flex min-h-9 pointer-coarse:min-h-11 items-center gap-2 rounded-md px-2 text-sm transition-colors hover:bg-sidebar-accent",
               item.active
                 ? "bg-sidebar-accent font-medium text-foreground"
                 : "text-muted-foreground",

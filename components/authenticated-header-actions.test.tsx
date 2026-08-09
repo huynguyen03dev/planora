@@ -137,4 +137,18 @@ describe("AuthenticatedHeaderActions — live invitation badge (US-083 W2)", () 
     expect(quickCapture).toBeInTheDocument();
     expect(quickCapture).toHaveAttribute("aria-keyshortcuts", "c Control+K");
   });
+
+  it("gives the chrome icon controls >=36px pointer / >=44px coarse hit targets", () => {
+    render(
+      <AuthenticatedHeaderActions initialUnreadCount={0} initialInvitationCount={0} />,
+    );
+
+    // DESIGN.md touch targets: the bell + quick capture are icon buttons; the
+    // theme toggle + account trigger are covered by their own suites.
+    expect(screen.getByRole("button", { name: "Quick capture" })).toHaveClass(
+      "size-9",
+      "pointer-coarse:size-11",
+    );
+    expect(bell()).toHaveClass("size-9", "pointer-coarse:size-11");
+  });
 });

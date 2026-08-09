@@ -241,7 +241,7 @@ export function QuickCapture() {
         aria-keyshortcuts="c Control+K"
         data-shortcuts-ready={shortcutsReady ? "true" : "false"}
         title="Quick capture (C or Ctrl+K)"
-        className="relative flex h-auto items-center gap-1.5 px-2 py-1.5 text-muted-foreground"
+        className="relative size-9 pointer-coarse:size-11 text-muted-foreground"
       >
         <HugeiconsIcon icon={AddSquareIcon} className="size-4" />
       </Button>

@@ -76,7 +76,7 @@ export function WorkspaceItem({ workspace }: WorkspaceItemProps) {
         type="button"
         onClick={() => setManuallyExpanded((value) => !value)}
         aria-expanded={expanded}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-sidebar-accent"
+        className="flex min-h-9 pointer-coarse:min-h-11 w-full items-center gap-2 rounded-md px-2 text-sm transition-colors hover:bg-sidebar-accent"
       >
         <div
           className={`flex size-6 shrink-0 items-center justify-center rounded ${workspaceBadgeSurface} text-xs font-bold`}
@@ -103,7 +103,7 @@ export function WorkspaceItem({ workspace }: WorkspaceItemProps) {
               href={link.href}
               aria-current={link.active ? "page" : undefined}
               className={cn(
-                "flex items-center gap-1.5 rounded-md px-2 py-1 text-sm transition-colors hover:bg-sidebar-accent",
+                "flex min-h-9 pointer-coarse:min-h-11 items-center gap-1.5 rounded-md px-2 text-sm transition-colors hover:bg-sidebar-accent",
                 link.active
                   ? "bg-sidebar-accent font-medium text-foreground"
                   : "text-muted-foreground",

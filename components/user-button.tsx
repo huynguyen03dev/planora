@@ -78,7 +78,7 @@ export function UserButton({
         aria-label={
           user ? `Open account menu for ${user.name}` : "Open account menu"
         }
-        className="rounded-full outline-none ring-offset-background transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        className="rounded-full p-0.5 pointer-coarse:p-1.5 outline-none ring-offset-background transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
         <Avatar className="size-8">
           {user?.image ? (
