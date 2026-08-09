@@ -23,7 +23,11 @@ export default async function AuthenticatedLayout({
 
   return (
     <SocketLifecycleProvider>
-      <div className="flex min-h-screen flex-col">
+      {/* min-h-dvh (not min-h-screen): on mobile the URL bar makes vh taller
+          than the visible area, so screen-pinned pages over-run the fold;
+          dvh == vh on desktop. The board page additionally pins its own
+          height to dvh (see [boardId]/page.tsx). */}
+      <div className="flex min-h-dvh flex-col">
         <header className="flex h-14 items-center justify-between border-b px-4 sm:px-6">
           <div className="flex items-center gap-1">
             <Link href="/boards" className="text-lg font-semibold">

@@ -240,8 +240,10 @@ export function ArchivedCardsDialog({
             className={cn("gap-1.5", boardHeaderControlClass)}
             aria-label="View archived items"
           >
-            <HugeiconsIcon icon={ArchiveIcon} size={16} />
-            Archived
+            <HugeiconsIcon icon={ArchiveIcon} size={16} aria-hidden="true" />
+            {/* Label hides below md so the toolbar stays a single icon row on
+                narrow screens; aria-label keeps the accessible name. */}
+            <span className="hidden md:inline">Archived</span>
             {totalCount > 0 ? (
               <Badge className="ml-0.5 h-5 min-w-5 rounded-full px-1.5 font-semibold text-xs bg-primary text-primary-foreground hover:bg-primary">
                 {totalCount}

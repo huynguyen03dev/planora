@@ -38,4 +38,16 @@ describe("TodayNavLink — global chrome entry (US-083 W6)", () => {
     const link = screen.getByRole("link", { name: "Today" });
     expect(link).toHaveAttribute("aria-current", "page");
   });
+
+  it("offers a >=36px pointer / >=44px coarse hit target", () => {
+    render(<TodayNavLink />);
+
+    const link = screen.getByRole("link", { name: "Today" });
+    expect(link).toHaveClass(
+      "min-h-9",
+      "pointer-coarse:min-h-11",
+      "flex",
+      "items-center",
+    );
+  });
 });

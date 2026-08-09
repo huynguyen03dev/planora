@@ -157,4 +157,30 @@ describe("BoardHeader → Share button wires into the invite flow (U1)", () => {
 
     expect(screen.queryByRole("button", { name: "Share" })).not.toBeInTheDocument()
   })
+
+  it("compacts the header on narrow screens without hiding controls (polish/mobile-dashboard)", () => {
+    renderBoard({ workspaceId: "ws-1", canInviteMembers: true })
+
+    // Density: reduced padding/gaps below md, desktop values restored at md+.
+    const header = document.querySelector("header")
+    expect(header).toHaveClass("p-3", "md:p-5", "space-y-2", "md:space-y-4")
+
+    // The Share control never hides — its label span does (below md), and the
+    // aria-label keeps the accessible name stable in both states.
+    const share = screen.getByRole("button", { name: "Share" })
+    expect(share).toHaveAttribute("aria-label", "Share")
+    const label = Array.from(share.querySelectorAll("span")).find(
+      (span) => span.textContent === "Share",
+    )
+    expect(label).toBeDefined()
+    expect(label).toHaveClass("hidden", "md:inline")
+    expect(share.querySelector("svg")).not.toBeNull()
+
+    // All role-gated controls remain in the tree.
+    expect(screen.getByRole("button", { name: "Star board" })).toBeInTheDocument()
+    expect(screen.getByTestId("mocked-archived-dialog")).toBeInTheDocument()
+    expect(screen.getByTestId("board-filter")).toBeInTheDocument()
+    expect(screen.getByTestId("board-automation")).toBeInTheDocument()
+    expect(screen.getByTestId("board-menu")).toBeInTheDocument()
+  })
 })

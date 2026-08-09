@@ -175,14 +175,20 @@ export function BoardFilter() {
             boardHeaderControlClass,
             active && boardHeaderControlActiveClass,
           )}
-          aria-label="Filter cards"
+          aria-label={
+            displayCount > 0
+              ? `Filter cards (${displayCount} active)`
+              : "Filter cards"
+          }
           // Pairs with the active fill (boardHeaderControlActiveClass) so the
           // applied state is never conveyed by fill alone (see
           // board-header-controls.ts contract). Radix injects aria-expanded.
           aria-pressed={active}
         >
-          <HugeiconsIcon icon={FilterIcon} size={16} />
-          Filter
+          <HugeiconsIcon icon={FilterIcon} size={16} aria-hidden="true" />
+          {/* Label hides below md so the toolbar stays a single icon row on
+              narrow screens; aria-label keeps the accessible name. */}
+          <span className="hidden md:inline">Filter</span>
           {displayCount > 0 ? (
             <Badge className="ml-0.5 h-5 min-w-5 rounded-full px-1.5 font-semibold text-xs bg-primary text-primary-foreground hover:bg-primary">
               {displayCount}
