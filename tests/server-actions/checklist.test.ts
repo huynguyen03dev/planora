@@ -366,7 +366,6 @@ describe("archived guards (US-074 Slice B2)", () => {
     signInAs("u", WS_A, "editor");
     const fakeScope = checklistScope(WS_A, { listArchived: true });
     expect(fakeScope.listArchived).toBe(true);
-    // Verify mock returns the scope
     h.getChecklistWithCard.mockResolvedValue(fakeScope);
     h.getChecklistItemWithCard.mockResolvedValue(itemScope(WS_A, { listArchived: true }));
 

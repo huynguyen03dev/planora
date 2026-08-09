@@ -95,24 +95,19 @@ test("assigning and removing a card member propagates live to another viewer's o
   await addCardToList(alicePage, todo, "Task");
   await getCardIdByTitle(boardId, "Task"); // ensure the card committed before observers open it
 
-  // Both users open the board, then the card. Bob opens first and sees NO
-  // assignees yet.
   await bobPage.goto(`/boards/${boardId}`);
   await openCardDetail(bobPage, "Task");
   await expect(assignedMemberRemoveButtons(bobPage)).toHaveCount(0);
 
-  // Alice opens the same card and assigns Bob via the "Add members" list.
   await alicePage.goto(`/boards/${boardId}`);
   await openCardDetail(alicePage, "Task");
   await assignMemberInOpenCard(alicePage, "Bob");
 
-  // Assert: Bob's already-open sheet gains the assignee live — no reload.
-  // (Remove-button count = assignee count; it was 0, now 1.)
+  // Bob's already-open sheet gains the assignee live — no reload
+  // (remove-button count = assignee count; it was 0, now 1).
   await expect(assignedMemberRemoveButtons(bobPage)).toHaveCount(1);
 
-  // Alice unassigns Bob (her sheet refreshed to show his Remove control).
   await removeFirstMemberInOpenCard(alicePage);
 
-  // Assert: Bob's sheet drops the assignee live.
   await expect(assignedMemberRemoveButtons(bobPage)).toHaveCount(0);
 });

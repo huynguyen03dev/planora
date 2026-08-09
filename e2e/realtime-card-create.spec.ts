@@ -45,18 +45,18 @@ test("a card created by one user appears live for another on the same board", as
   alicePage = await aliceCtx.newPage();
   bobPage = await bobCtx.newPage();
 
-  // ── Arrange: Alice owns a workspace + board with one list ──────────────
+  // Arrange: Alice owns a workspace + board with one list
   await signUp(alicePage, alice);
   workspaceId = await createWorkspace(alicePage, `WS ${stamp}`);
   const boardId = await createBoard(alicePage, `Board ${stamp}`);
   await addList(alicePage, "To Do");
 
-  // ── Arrange: Bob exists and is a member of Alice's workspace ───────────
+  // Arrange: Bob exists and is a member of Alice's workspace
   await signUp(bobPage, bob);
   const bobId = await getUserIdByEmail(bob.email);
   await addWorkspaceMember(workspaceId, bobId, "editor");
 
-  // ── Bob opens the board and is confirmed present (joined the room) ─────
+  // Bob opens the board and is confirmed present (joined the room)
   // Presence barrier (W1 discipline): BOTH sides must see two avatars — i.e.
   // Bob's socket CONNECTED AND JOINED the board room — before Alice acts. A
   // bare "list title visible" check only proves the page loaded; under load
@@ -81,10 +81,10 @@ test("a card created by one user appears live for another on the same board", as
   // Card does not exist anywhere yet — prove it from Bob's loaded board.
   await expect(bobPage.getByText(cardTitle)).toHaveCount(0);
 
-  // ── Act: Alice creates the card (emits card:created to the board room) ──
+  // Act: Alice creates the card (emits card:created to the board room)
   await addCard(alicePage, cardTitle);
   await expect(alicePage.getByText(cardTitle)).toBeVisible(); // sanity: author sees it
 
-  // ── Assert: it appears on Bob's screen with NO reload — pure realtime ──
+  // Assert: it appears on Bob's screen with NO reload — pure realtime
   await expect(bobPage.getByText(cardTitle)).toBeVisible();
 });

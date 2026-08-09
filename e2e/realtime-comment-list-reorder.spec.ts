@@ -101,18 +101,15 @@ test("a comment posted by one user appears live in another's open card sheet (no
   await addCardToList(alicePage, todo, "Task");
   await getCardIdByTitle(boardId, "Task");
 
-  // Bob opens the card detail sheet — no comments yet.
   await bobPage.goto(`/boards/${boardId}`);
   await openCardDetail(bobPage, "Task");
   await expect(bobPage.getByText("Hello from Alice", { exact: true })).toHaveCount(0);
 
-  // Alice opens the same card and posts a comment.
   await alicePage.goto(`/boards/${boardId}`);
   await openCardDetail(alicePage, "Task");
   await postComment(alicePage, "Hello from Alice");
   await expect(alicePage.getByText("Hello from Alice", { exact: true })).toBeVisible(); // author sanity
 
-  // Assert: it appears live in Bob's already-open sheet — no reload.
   await expect(bobPage.getByText("Hello from Alice", { exact: true })).toBeVisible();
 });
 
@@ -126,20 +123,17 @@ test("a list reordered by one user relocates live for another observer (no reloa
   const todo = lists["To Do"];
   const doing = lists["Doing"];
 
-  // Bob opens the board; lists start "To Do" (left) then "Doing" (right).
   await bobPage.goto(`/boards/${boardId}`);
   await expect(listColumnById(bobPage, todo)).toBeVisible();
   expect(await listColumnX(bobPage, todo)).toBeLessThan(await listColumnX(bobPage, doing));
 
-  // Act: Alice keyboard-drags "Doing" one slot to the left (now leftmost).
   await alicePage.goto(`/boards/${boardId}`);
   await dragListLeft(alicePage, doing);
   await expect // author sanity: order flipped on Alice
     .poll(async () => (await listColumnX(alicePage, doing)) < (await listColumnX(alicePage, todo)))
     .toBe(true);
 
-  // Assert: the reorder applies live on Bob's board (structural list:moved,
-  // applied because Bob is not dragging) — no reload.
+  // Structural list:moved applies on Bob (he is not dragging) — no reload.
   await expect
     .poll(async () => (await listColumnX(bobPage, doing)) < (await listColumnX(bobPage, todo)))
     .toBe(true);

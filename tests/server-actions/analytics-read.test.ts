@@ -61,8 +61,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   h.state.callerId = null;
   h.state.authed = true;
-  // The export allow-case stubs the engine, so its downstream CSV shaping throws
-  // and is caught+logged by the action. That log is expected — keep it quiet.
+  // The export allow-case stubs the engine, so its downstream CSV shaping
+  // throws and is caught+logged by the action — that log is expected; keep it
+  // quiet.
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -85,9 +86,9 @@ describe.each([
   });
 
   it("allow: a member reaches the analytics engine for their workspace", async () => {
-    // Asserts isolation passed: the engine runs, scoped to the member's
-    // workspace. (Export does further post-processing on the result; the read
-    // boundary is what this story owns.)
+    // Isolation passed: the engine runs, scoped to the member's workspace.
+    // (Export does further post-processing; the read boundary is what this
+    // story owns.)
     signIn("member");
     h.db.workspace.findUnique.mockResolvedValue({ id: WS_A_ID, name: "A", timezone: "UTC", analyticsLaunchAt: null });
     h.db.workspaceMember.findFirst.mockResolvedValue({ id: "m" });
@@ -128,7 +129,7 @@ describe.each([
 
 describe("loadMoreLeadTimeRowsAction — read isolation + filter parity", () => {
   // The shared WS_A_ID above is slug-shaped (not a UUID) because the original
-  // actions resolve by slug. This action takes a validated UUID workspace id.
+  // actions resolve by slug; this action takes a validated UUID workspace id.
   const WS_UUID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
   const FROM = "2026-02-01T00:00:00.000Z";
   const TO = "2026-02-28T00:00:00.000Z";
