@@ -245,14 +245,20 @@ model BoardStar {
 }
 
 model List {
-  id         String    @id @default(uuid())
-  boardId    String
-  board      Board     @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  title      String
-  position   Float
-  archivedAt DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id           String    @id @default(uuid())
+  boardId      String
+  board        Board     @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  title        String
+  position     Float
+  // Logical ordering-move revision (decision 0032): bumped when this list is
+  // created, restored, or deliberately reordered. Internal sibling
+  // normalization rewrites positions only and does not bump sibling revisions.
+  // Clients send the revision they saw as `expectedMoveRevision`; the write
+  // CASes on it so a stale-client reorder is rejected with ORDER_CONFLICT.
+  moveRevision Int       @default(0)
+  archivedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   cards Card[]
 
@@ -271,6 +277,12 @@ model Card {
   title         String
   description   String?   @db.Text
   position      Float
+  // Logical ordering-move revision (decision 0032): bumped when this card is
+  // created, restored, or deliberately reordered/moved by a user or rule.
+  // Internal sibling normalization rewrites positions only and does not bump
+  // sibling revisions. Clients send `expectedMoveRevision`; the write CASes on
+  // it so a stale-client reorder is rejected with ORDER_CONFLICT.
+  moveRevision Int       @default(0)
   priority      Priority?
   dueDate       DateTime?
   estimateHours Int?

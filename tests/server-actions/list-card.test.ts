@@ -19,6 +19,8 @@
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { OrderConflictError } from "@/lib/ordering";
+
 import {
   cardWithListAndBoardFixture,
   cardWithListAndMembersFixture,
@@ -73,8 +75,10 @@ const h = vi.hoisted(() => {
     updateListTitle: fn(),
     reorderListByNeighbors: fn(),
     updateCardDetails: fn(),
+    lockCardOrderingScopeForUpdate: fn(),
     setCardCompletion: fn(),
     reorderCardWithinListByNeighbors: fn(),
+    moveCardInTransaction: fn(),
     createComment: fn(),
     createAttachment: fn(),
     createActivityEntry: fn(),
@@ -136,8 +140,10 @@ vi.mock("@/lib/card", () => ({
   getArchivedCardWithListAndBoard: h.getArchivedCardWithListAndBoard,
   getCardWithListAndMembers: h.getCardWithListAndMembers,
   updateCardDetails: h.updateCardDetails,
+  lockCardOrderingScopeForUpdate: h.lockCardOrderingScopeForUpdate,
   setCardCompletion: h.setCardCompletion,
   reorderCardWithinListByNeighbors: h.reorderCardWithinListByNeighbors,
+  moveCardInTransaction: h.moveCardInTransaction,
 }));
 vi.mock("@/lib/label", () => ({
   getLabelWithBoard: h.getLabelWithBoard,
@@ -200,7 +206,9 @@ import {
 // Every mutation/emit seam. A denied path must touch NONE of these.
 const writeSeams = [
   h.createList, h.updateListTitle, h.reorderListByNeighbors,
-  h.updateCardDetails, h.setCardCompletion, h.reorderCardWithinListByNeighbors, h.createComment,
+  h.updateCardDetails, h.setCardCompletion, h.reorderCardWithinListByNeighbors,
+  h.lockCardOrderingScopeForUpdate,
+  h.moveCardInTransaction, h.createComment,
   h.createAttachment, h.createActivityEntry, h.createLabel, h.updateLabel,
   h.deleteLabel, h.addCardLabel, h.removeCardLabel,
   h.db.$transaction, h.db.card.update,
@@ -215,6 +223,26 @@ const writeSeams = [
  */
 function makeTx() {
   return {
+    $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      // decision 0032 lock helpers: route the raw FOR UPDATE queries by SQL
+      // text. Workspace/board/list scope locks return a row for the known ids;
+      // the moved-card lock returns a locked card row at revision 0.
+      const sql = strings[0] ?? "";
+      const id = String(values[0] ?? "");
+      if (sql.includes('FROM "board"')) {
+        return [{ id }];
+      }
+      if (sql.includes('FROM "list"')) {
+        if (id === LIST_ID || id === TARGET_LIST) {
+          return [{ id, boardId: BOARD_A, position: 16384, moveRevision: 0 }];
+        }
+        return [];
+      }
+      if (sql.includes('FROM "card"')) {
+        return [{ id, listId: LIST_ID, position: 16384, moveRevision: 0 }];
+      }
+      return [];
+    }),
     card: {
       findMany: vi.fn(async () => [] as unknown[]),
       findFirst: vi.fn(async () => null),
@@ -224,6 +252,7 @@ function makeTx() {
         listId: data.listId,
         title: data.title,
         position: data.position,
+        moveRevision: 0,
         estimateHours: null,
         dueDate: null,
         completedAt: data.completedAt ?? null,
@@ -237,6 +266,16 @@ function makeTx() {
         estimateHours: data.estimateHours ?? null,
         dueDate: data.dueDate ?? null,
         completedAt: data.completedAt ?? null,
+      })),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+      findUniqueOrThrow: vi.fn(async () => ({
+        id: CARD_ID,
+        listId: TARGET_LIST,
+        position: 16384,
+        moveRevision: 1,
+        estimateHours: null,
+        dueDate: null,
+        completedAt: null,
       })),
     },
     list: {
@@ -404,6 +443,14 @@ describe("toggleCardCompletionAction (card-owned completion — US-045)", () => 
     const r = await toggleCardCompletionAction(form("true"));
 
     expect(r.success).toBe(true);
+    expect(h.lockCardOrderingScopeForUpdate).toHaveBeenCalledWith(
+      tx,
+      WS_A,
+      CARD_ID,
+    );
+    expect(vi.mocked(h.lockCardOrderingScopeForUpdate).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(h.setCardCompletion).mock.invocationCallOrder[0],
+    );
     expect(h.setCardCompletion).toHaveBeenCalledWith(tx, CARD_ID, true, null);
     // A real transition records exactly one history event...
     expect(tx.cardHistoryEvent.createMany).toHaveBeenCalledTimes(1);
@@ -621,7 +668,7 @@ describe("restoreCardAction (card:delete)", () => {
 });
 
 describe("reorderListAction", () => {
-  const form = () => formData({ listId: LIST_ID });
+  const form = () => formData({ listId: LIST_ID, intent: "end" });
   it("A1 auth", async () => {
     signOut();
     await expect(reorderListAction(form())).rejects.toThrow();
@@ -642,14 +689,25 @@ describe("reorderListAction", () => {
   it("allow", async () => {
     signInAs("u", WS_A, "editor");
     h.getListWithBoard.mockResolvedValue(listWithBoardFixture(WS_A));
-    h.reorderListByNeighbors.mockResolvedValue({ id: LIST_ID, position: 1 });
+    h.reorderListByNeighbors.mockResolvedValue({ id: LIST_ID, position: 1, moveRevision: 1 });
     expect(await reorderListAction(form())).toEqual({ success: true });
     expect(h.reorderListByNeighbors).toHaveBeenCalled();
+  });
+
+  it("decision 0032: OrderConflictError from the lib seam maps to a typed ORDER_CONFLICT result", async () => {
+    signInAs("u", WS_A, "editor");
+    h.getListWithBoard.mockResolvedValue(listWithBoardFixture(WS_A));
+    h.reorderListByNeighbors.mockRejectedValue(new OrderConflictError("MOVE_REVISION"));
+    expect(await reorderListAction(form())).toEqual({
+      success: false,
+      code: "ORDER_CONFLICT",
+      error: "List was reordered by someone else. Refreshing…",
+    });
   });
 });
 
 describe("reorderCardAction", () => {
-  const form = () => formData({ cardId: CARD_ID });
+  const form = () => formData({ cardId: CARD_ID, intent: "end" });
   it("A1 auth", async () => {
     signOut();
     await expect(reorderCardAction(form())).rejects.toThrow();
@@ -670,9 +728,25 @@ describe("reorderCardAction", () => {
   it("allow", async () => {
     signInAs("u", WS_A, "editor");
     h.getCardWithListAndBoard.mockResolvedValue(cardWithListAndBoardFixture(WS_A));
-    h.reorderCardWithinListByNeighbors.mockResolvedValue({ id: CARD_ID, listId: LIST_ID, position: 1 });
+    h.reorderCardWithinListByNeighbors.mockResolvedValue({
+      id: CARD_ID,
+      listId: LIST_ID,
+      position: 1,
+      moveRevision: 1,
+    });
     expect(await reorderCardAction(form())).toEqual({ success: true });
     expect(h.reorderCardWithinListByNeighbors).toHaveBeenCalled();
+  });
+
+  it("decision 0032: OrderConflictError from the lib seam maps to a typed ORDER_CONFLICT result", async () => {
+    signInAs("u", WS_A, "editor");
+    h.getCardWithListAndBoard.mockResolvedValue(cardWithListAndBoardFixture(WS_A));
+    h.reorderCardWithinListByNeighbors.mockRejectedValue(new OrderConflictError("MOVE_REVISION"));
+    expect(await reorderCardAction(form())).toEqual({
+      success: false,
+      code: "ORDER_CONFLICT",
+      error: "Card was moved by someone else. Refreshing…",
+    });
   });
 });
 
@@ -874,7 +948,7 @@ describe("updateCardDueDateAction", () => {
 });
 
 describe("moveCardAction (two-workspace — the sharpest case)", () => {
-  const form = () => formData({ cardId: CARD_ID, targetListId: TARGET_LIST });
+  const form = () => formData({ cardId: CARD_ID, targetListId: TARGET_LIST, intent: "end" });
 
   // Source card + target list both on the SAME board (BOARD_A / WS_A).
   function sameBoardSetup() {
@@ -885,7 +959,7 @@ describe("moveCardAction (two-workspace — the sharpest case)", () => {
       listWithBoardFixture(WS_A, { boardId: BOARD_A, listId: TARGET_LIST }),
     );
     h.getCardWithListAndMembers.mockResolvedValue(
-      cardWithListAndMembersFixture(WS_A, { boardId: BOARD_A, cardId: CARD_ID }),
+      cardWithListAndMembersFixture(WS_A, { boardId: BOARD_A, cardId: CARD_ID, listId: LIST_ID }),
     );
     h.db.workspace.findUnique.mockResolvedValue({ requireEstimateBeforeDone: false });
   }
@@ -928,18 +1002,46 @@ describe("moveCardAction (two-workspace — the sharpest case)", () => {
   it("allow: WS-A editor, same board → transaction body relocates the card to the target list", async () => {
     signInAs("u", WS_A, "editor");
     sameBoardSetup();
+    h.moveCardInTransaction.mockResolvedValue({
+      card: {
+        id: CARD_ID,
+        listId: TARGET_LIST,
+        position: 16384,
+        moveRevision: 1,
+        estimateHours: null,
+      },
+      fromListId: LIST_ID,
+      fromBoardId: BOARD_A,
+      targetBoardId: BOARD_A,
+    });
     const tx = makeTx();
     h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
     expect(await moveCardAction(form())).toEqual({ success: true });
-    // The body ran the real position resolver (no neighbours → append) and wrote
-    // the card into the target list at a concrete numeric position.
-    expect(tx.card.update).toHaveBeenCalledWith(
+    // The action routes the transaction through the shared human/automation
+    // move helper and emits the canonical revision returned by that helper.
+    expect(h.moveCardInTransaction).toHaveBeenCalledWith(
+      tx,
       expect.objectContaining({
-        where: expect.objectContaining({ id: CARD_ID }),
-        data: expect.objectContaining({ listId: TARGET_LIST, position: 16384 }),
+        workspaceId: WS_A,
+        cardId: CARD_ID,
+        targetListId: TARGET_LIST,
+        intent: "end",
       }),
     );
     expect(tx.cardHistoryEvent.createMany).toHaveBeenCalled();
+  });
+
+  it("decision 0032: a stale OCC anchor inside the transaction maps to ORDER_CONFLICT (no write, client resyncs)", async () => {
+    signInAs("u", WS_A, "editor");
+    sameBoardSetup();
+    h.db.$transaction.mockRejectedValue(new OrderConflictError("MOVE_REVISION"));
+    expect(await moveCardAction(form())).toEqual({
+      success: false,
+      code: "ORDER_CONFLICT",
+      error: "Card was moved by someone else. Refreshing…",
+    });
+    // Typed conflict is not a generic failure, and nothing was emitted.
+    expect(h.emit.emitCardMoved).not.toHaveBeenCalled();
   });
 });
 
@@ -1450,7 +1552,7 @@ describe("US-074 Slice B2 — archived list rejection", () => {
   describe("moveCardAction — source or target archived", () => {
     const TARGET_LIST_UUID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
     const moveForm = (overrides: Record<string, string> = {}) =>
-      formData({ cardId: CARD_ID, targetListId: TARGET_LIST_UUID, ...overrides });
+      formData({ cardId: CARD_ID, targetListId: TARGET_LIST_UUID, intent: "end", ...overrides });
 
     it("rejects source card when its parent list is archived (getCardWithListAndBoard → null)", async () => {
       h.getCardWithListAndBoard.mockResolvedValue(null);

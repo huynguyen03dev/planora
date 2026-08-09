@@ -193,11 +193,13 @@ export default async function BoardPage({
     title: list.title,
     boardId: list.boardId,
     position: list.position,
+    moveRevision: list.moveRevision,
     cards: list.cards.map((card) => ({
       id: card.id,
       listId: card.listId,
       title: card.title,
       position: card.position,
+      moveRevision: card.moveRevision,
       coverImage: card.coverImage,
       priority: card.priority,
       dueDate: card.dueDate,

@@ -25,11 +25,13 @@ type BoardContentProps = {
     title: string;
     boardId: string;
     position: number;
+    moveRevision: number;
     cards: Array<{
       id: string;
       listId: string;
       title: string;
       position: number;
+      moveRevision: number;
       coverImage: string | null;
       priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
       dueDate: Date | null;
@@ -150,6 +152,8 @@ export function BoardContent({
     switch (translation.action) {
       case "reorderList": {
         formData.set("listId", translation.fields.listId);
+        formData.set("intent", translation.fields.intent);
+        formData.set("expectedMoveRevision", String(translation.fields.expectedMoveRevision));
         if (translation.fields.prevListId) {
           formData.set("prevListId", translation.fields.prevListId);
         }
@@ -160,6 +164,8 @@ export function BoardContent({
       }
       case "reorderCard": {
         formData.set("cardId", translation.fields.cardId);
+        formData.set("intent", translation.fields.intent);
+        formData.set("expectedMoveRevision", String(translation.fields.expectedMoveRevision));
         if (translation.fields.prevCardId) {
           formData.set("prevCardId", translation.fields.prevCardId);
         }
@@ -171,6 +177,8 @@ export function BoardContent({
       case "moveCard": {
         formData.set("cardId", translation.fields.cardId);
         formData.set("targetListId", translation.fields.targetListId);
+        formData.set("intent", translation.fields.intent);
+        formData.set("expectedMoveRevision", String(translation.fields.expectedMoveRevision));
         if (translation.fields.prevCardId) {
           formData.set("prevCardId", translation.fields.prevCardId);
         }
@@ -192,7 +200,16 @@ export function BoardContent({
 
       if (!res.success) {
         setLists(snapshot); // roll back optimistic move
-        setError(res.error);
+        if (res.code === "ORDER_CONFLICT") {
+          // decision 0032: the item was moved (or its placement scope vanished)
+          // by someone else between our read and the server's lock. Rolling back
+          // to the pre-drag snapshot may still be stale (a rival echo may have
+          // landed mid-flight), so pull canonical server state.
+          router.refresh();
+          setError("");
+        } else {
+          setError(res.error);
+        }
       }
       // Cross-user card moves normally sync via the card:moved socket event, so
       // no refresh is needed — unless we deferred remote events during the drag.

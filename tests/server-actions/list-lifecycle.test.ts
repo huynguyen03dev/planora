@@ -344,7 +344,7 @@ describe("US-074 Slice B — restoreListAction", () => {
     const result = await restoreListAction(form());
     expect(result).toEqual({ success: true });
 
-    expect(h.restoreList).toHaveBeenCalledWith(LIST_ID);
+    expect(h.restoreList).toHaveBeenCalledWith(LIST_ID, WS_A);
     expect(h.db.cardHistoryEvent.createMany).not.toHaveBeenCalled();
     expect(h.db.cardHistoryEvent.create).not.toHaveBeenCalled();
 

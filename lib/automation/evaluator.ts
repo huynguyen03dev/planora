@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Prisma } from "@/app/generated/prisma/client";
 
+import { lockWorkspaceRowForUpdate } from "@/lib/ordering";
 import { actionsSchema, triggerConfigSchema, type TriggerType } from "@/lib/schemas/automation";
 
 import { AUTOMATION_ACTOR_USER_ID } from "./index";
@@ -55,6 +56,12 @@ export async function evaluateRules(
   params: EvaluateRulesParams,
 ): Promise<EvaluateRulesResult> {
   const { client, workspaceId, triggerType, event, dedupKey } = params;
+
+  // Every automation sequence starts at the workspace serialization boundary.
+  // Recursive evaluations share this transaction, so re-acquiring the same row
+  // lock is safe and keeps the boundary ahead of every descendant executor.
+  await lockWorkspaceRowForUpdate(client, workspaceId);
+
   const actorId = params.actorId ?? AUTOMATION_ACTOR_USER_ID;
   const chain = params.chain ?? ChainTracker.root();
   const cardId = event.cardId ?? null;

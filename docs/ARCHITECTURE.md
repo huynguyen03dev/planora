@@ -105,13 +105,60 @@ Unknown data must be parsed before it enters domain code. Boundaries here:
 Inner code should pass real product types (`workspaceId`, `boardId`, `Role`,
 `Priority`) rather than re-validating raw strings.
 
-## Ordering (Float Gap Positioning)
+## Ordering (Float Gap Positioning) — decision 0032 lock + OCC protocol
 
-Lists, Cards, Checklists, and ChecklistItems order by `position Float`
-(gap = `16384`). Insert between neighbours with the midpoint; renumber/normalize
-only on overflow. This avoids rewriting every row on a drag. See
-`lib/dnd/apply-drop.ts` (`translateCardDrop`, `translateListDrop`) for the
-neighbour math, which is pure and unit-tested.
+Lists and Cards order by `position Float` (gap = `16384`). Insert between
+neighbours with the midpoint; renumber/normalize only on overflow. The DnD
+translate layer (`lib/dnd/apply-drop.ts`) derives an EXPLICIT placement intent
+(`start` | `end` | `between`) from the exact drop index, plus the moved item's
+pre-bump `expectedMoveRevision`; the position resolvers
+(`resolveCardPositionIntent` / `resolveListPositionIntent` in `lib/ordering.ts`,
+list analogue in `lib/list.ts`) read only CURRENT live occupants of the target
+scope and are pure, unit-tested.
+
+**Lock hierarchy (cascade-safe, one row per statement):** every production
+ordering transaction first locks its workspace row, then locks board rows in
+ascending id, live list rows in ascending id, and finally the moved card. The
+workspace gate is intentionally broader than one board: recursive automation
+can discover another board after the first move, so a board-only plan cannot
+prove cascade-wide deadlock safety. `lockBoardRowsForUpdate` and
+`lockListRowsForUpdate` sort their ids; the shared
+`moveCardInTransaction` helper is used by human moves and automation. The SQL
+fixture proves the lock/CAS behavior directly; application-path coverage is in
+the card/list/action/automation suites.
+
+**Automation sequence gate:** `evaluateRules` and the central
+`executeRuleActions` boundary acquire the workspace gate before a rule action
+can mutate or lock a card. A recursive evaluation re-acquires the same row in
+the shared transaction, which is safe and makes the workspace row the
+deadlock-prevention boundary for the whole cascade. This covers ordered
+sequences such as `set-priority` → `move-card-to-list`; the move helper still
+acquires sorted parent board/list rows before the card. Trigger call-site audit
+shows create, completion, and human move paths are already workspace-first;
+assignment/label trigger writes do not take an explicit card row lock before
+evaluation.
+
+**Optimistic concurrency:** `List.moveRevision` / `Card.moveRevision`
+(decision 0032) represent logical user or automation moves. Create, restore,
+reorder, and a successful automation move bump the moved row; same-transaction
+normalization preserves sibling order and changes positions only, so sibling
+revisions and sibling events do not churn. The client sends the revision it
+saw as `expectedMoveRevision`; the server reads the moved row under the lock,
+rejects with `OrderConflictError("MOVE_REVISION")` on mismatch, and CAS-es the
+write. Actions map the typed error to `code: "ORDER_CONFLICT"`; the client
+rolls back the optimistic commit and refreshes. `start`/`end` intents are
+absolute. `between` preserves the prev-anchored interval when both live
+anchors remain ordered, rebases on one surviving anchor, and returns
+`ANCHORS_STALE` when both are stale or their live positions are contradictory.
+Renumber-on-overflow runs in the same transaction (locks still held), with no
+sibling revision bumps or sibling event storm. See decision 0032.
+
+Completion is not an ordering write, but a genuine completion/reopen transition
+can trigger recursive move automation. The human completion action acquires the
+parent scope before its completion CAS; automation relies on the central
+sequence gate before `set-completion`, and any later move uses the shared
+workspace → sorted parent board → sorted parent list → card helper. This keeps
+`setCardCompletion`'s compare-and-set and completion-business rules unchanged.
 
 ## Soft Deletes & Cascades
 

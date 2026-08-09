@@ -122,6 +122,46 @@ gap of `16384`. New positions are the midpoint between neighbours; the system
 normalizes positions on overflow. The neighbour math is pure and unit-tested in
 `lib/dnd/apply-drop.ts` (`translateCardDrop`, `translateListDrop`).
 
+**Concurrency (decision 0032):** every production ordering transaction takes a
+workspace `FOR UPDATE` gate, then board rows, live list rows (each in ascending
+id order), and finally the moved card. This workspace-scoped serialization is
+required because recursive automation can target another board before the
+cascade completes; human moves and automation use the same
+`moveCardInTransaction` protocol. Each `List`/`Card` carries a logical
+`moveRevision` for user/automation moves. Create, restore, and reorder bump the
+moved row; internal normalization preserves sibling order and rewrites only
+positions, so it does not bump or emit siblings. The drag sends the item's
+pre-bump revision as
+`expectedMoveRevision` plus an explicit placement intent
+(`start` | `end` | `between`); the server rejects a stale reorder with a typed
+`ORDER_CONFLICT` instead of silently overwriting a rival's move, and the client
+rolls back its optimistic commit and refreshes. Start/end intents are absolute
+(never blocked by a stale hint); a between intent preserves the prev anchor when
+both live anchors remain ordered, rebases on one surviving anchor, and conflicts
+when both anchors are stale or contradictory; overflow renumbers in the same
+transaction without sibling revision/event churn.
+
+Automation starts `evaluateRules` and `executeRuleActions` at the workspace
+serialization gate before any ordered step can mutate or lock its card. The
+same workspace row is safely re-acquired by recursive evaluations, so it is the
+deadlock-prevention boundary for the cascade. `moveCardInTransaction` retains
+the narrower parent lock order—sorted boards/lists, then card—inside that gate;
+this makes an ordered sequence such as `set-priority` followed by
+`move-card-to-list` safe without per-step lock patches.
+
+Workspace-wide automation that moves a card across boards emits the committed
+card state to both affected board rooms: the destination room inserts it and
+the source room removes it. The destination payload includes the canonical
+card snapshot so a board that did not previously contain the card can insert
+it. Recursive rules match the canonical destination board event.
+
+Completion/reopen is a non-position mutation, but it can produce a recursive
+move-capable automation event. The human action keeps its workspace → board →
+list → card pre-CAS scope; automation `set-completion` is protected by the
+central sequence gate, and a subsequent move takes the shared parent locks.
+The completion estimate gate, transition CAS, history, and authorization
+behavior remain unchanged.
+
 ## Drag-and-drop
 
 - Implemented with `@hello-pangea/dnd`; both lists and cards are draggable,
@@ -134,8 +174,12 @@ normalizes positions on overflow. The neighbour math is pure and unit-tested in
   while clicking the title still enters inline rename (the movement threshold
   disambiguates). Both handles carry the keyboard drag entry point (focus +
   Space to lift). There are no separate grip-icon buttons.
-- The drop produces an optimistic local update, then a `reorder*`/`moveCard`
-  Server Action persists the new position and emits a socket event.
+- The drop produces an optimistic local update (the moved item's
+  `moveRevision` is bumped locally), then a `reorder*`/`moveCard` Server Action
+  persists the new position and emits a socket event carrying the canonical
+  post-bump revision. If the server detects a stale revision (someone else
+  moved the item first), the action returns `code: "ORDER_CONFLICT"`, the
+  optimistic move is rolled back, and the board refreshes from server state.
 - Remote structural events are **deferred during an active drag** and resynced
   on drop — see `realtime-sync.md`. This is a load-bearing invariant.
 - The board does **not** lock during persistence: `ListColumn` / `ListCardItem`

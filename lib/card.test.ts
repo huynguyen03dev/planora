@@ -20,6 +20,7 @@ import {
   getCardWithListAndBoard,
   getCardWithListAndMembers,
   getArchivedCardWithListAndBoard,
+  lockCardOrderingScopeForUpdate,
   reorderCardWithinListByNeighbors,
   resolveCompletedAt,
   setCardCompletion,
@@ -70,31 +71,67 @@ function makeCardClient(cards: FakeCard[]) {
   };
 }
 
-describe("reorderCardWithinListByNeighbors stale-neighbour recovery (US-062 mn2)", () => {
+describe("reorderCardWithinListByNeighbors (decision 0032 lock + OCC protocol)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("drops a stale prev hint and appends instead of failing the reorder", async () => {
-    // The client's prev hint "gone" no longer names a live card in the list (a
-    // rival moved/deleted it). The first attempt throws StaleNeighborError; the
-    // loop drops the hint and retries, appending after the last live card.
-    const cards: FakeCard[] = [
-      { id: "keep", listId: L, position: GAP },
-      { id: "m", listId: L, position: GAP * 5 },
-    ];
-    const clientFns = makeCardClient(cards);
+  // Fakes `$queryRaw` for the workspace, board, live-list, and moved-card
+  // FOR UPDATE locks (routed by SQL text).
+  function rawLockMock(opts: { liveLists?: string[]; card?: boolean }) {
+    const { liveLists = [], card = true } = opts;
+    return vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const sql = strings[0] ?? "";
+      const id = String(values[0] ?? "");
+      if (sql.includes('FROM "list"')) {
+        return liveLists.includes(id)
+          ? [{ id, boardId: "b-1", position: GAP, moveRevision: 0 }]
+          : [];
+      }
+      if (sql.includes('FROM "board"')) {
+        return [{ id }];
+      }
+      if (sql.includes('FROM "card"')) {
+        return card ? [{ id, listId: L, position: GAP * 5, moveRevision: 0 }] : [];
+      }
+      return [];
+    });
+  }
 
-    const tx = {
+  function baseTx(overrides: Record<string, unknown> = {}) {
+    return {
       card: {
-        findUnique: clientFns.findUnique,
-        findFirst: clientFns.findFirst,
-        update: vi.fn(async ({ data }: { data: { position: number } }) => ({
+        findUnique: vi.fn(async ({ where }: { where: { id: string } }) => {
+          if (where.id === "m") {
+            return {
+              id: "m",
+              listId: L,
+              moveRevision: 0,
+              list: {
+                id: L,
+                boardId: "b-1",
+                archivedAt: null,
+                board: { id: "b-1", workspaceId: "ws-1", archivedAt: null },
+              },
+            };
+          }
+          if (where.id === "keep") {
+            return { id: "keep", listId: L, position: GAP };
+          }
+          return null;
+        }),
+        findFirst: makeCardClient([
+          { id: "keep", listId: L, position: GAP },
+          { id: "m", listId: L, position: GAP * 5 },
+        ]).findFirst,
+        updateMany: vi.fn(async () => ({ count: 1 })),
+        findUniqueOrThrow: vi.fn(async () => ({
           id: "m",
           listId: L,
           title: "Moved",
           description: null,
-          position: data.position,
+          position: GAP * 2,
+          moveRevision: 1,
           priority: null,
           dueDate: null,
           estimateHours: null,
@@ -107,20 +144,189 @@ describe("reorderCardWithinListByNeighbors stale-neighbour recovery (US-062 mn2)
           updatedAt: new Date(0),
         })),
       },
+      list: {
+        findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
+          where.id === L
+            ? {
+                id: L,
+                boardId: "b-1",
+                archivedAt: null,
+                board: { id: "b-1", workspaceId: "ws-1", archivedAt: null },
+              }
+            : null,
+        ),
+      },
+      $queryRaw: rawLockMock({ liveLists: [L] }),
+      ...overrides,
     };
+  }
+
+  it("end intent with a matching expectedMoveRevision appends and CAS-bumps the revision", async () => {
+    const tx = baseTx();
     mockDb.$transaction.mockImplementation(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       async (cb: any) => cb(tx),
     );
 
-    const result = await reorderCardWithinListByNeighbors({
-      cardId: "m",
-      prevCardId: "gone",
+      const result = await reorderCardWithinListByNeighbors({
+        cardId: "m",
+        workspaceId: "ws-1",
+        intent: "end",
+      prevCardId: null,
+      nextCardId: null,
+      expectedMoveRevision: 0,
     });
 
-    // Appended after the last live card excluding the mover → keep.position + GAP.
+    // End intent: after the last live card excluding the mover → keep.position + GAP.
     expect(result.position).toBe(GAP + GAP);
-    expect(tx.card.update).toHaveBeenCalledTimes(1);
+    expect(result.moveRevision).toBe(1);
+    // Compare-and-set on the revision read under the lock, bumping it atomically.
+    expect(tx.card.updateMany).toHaveBeenCalledWith({
+      where: { id: "m", archivedAt: null, deletedAt: null, moveRevision: 0 },
+      data: { listId: L, position: GAP + GAP, moveRevision: 1 },
+    });
+  });
+
+  it("rejects a stale expectedMoveRevision with OrderConflictError(MOVE_REVISION) and never writes", async () => {
+    const tx = baseTx();
+      tx.card.findUnique.mockResolvedValueOnce({
+        id: "m",
+        listId: L,
+        moveRevision: 3,
+        list: {
+          id: L,
+          boardId: "b-1",
+          archivedAt: null,
+          board: { id: "b-1", workspaceId: "ws-1", archivedAt: null },
+        },
+      });
+      tx.$queryRaw.mockImplementation(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+        const sql = strings[0] ?? "";
+        const id = String(values[0] ?? "");
+        if (sql.includes('FROM "board"')) {
+          return [{ id }];
+        }
+        if (sql.includes('FROM "list"')) {
+        return [{ id, boardId: "b-1", position: GAP, moveRevision: 0 }];
+      }
+      if (sql.includes('FROM "card"')) {
+        return [{ id, listId: L, position: GAP * 5, moveRevision: 3 }];
+      }
+      return [];
+    });
+    mockDb.$transaction.mockImplementation(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      async (cb: any) => cb(tx),
+    );
+
+    await expect(
+      reorderCardWithinListByNeighbors({
+        cardId: "m",
+        workspaceId: "ws-1",
+        intent: "end",
+        expectedMoveRevision: 2,
+      }),
+    ).rejects.toMatchObject({ reason: "MOVE_REVISION" });
+    expect(tx.card.updateMany).not.toHaveBeenCalled();
+    expect(tx.card.findUniqueOrThrow).not.toHaveBeenCalled();
+  });
+
+  it("rebases a between intent on the surviving anchor instead of failing", async () => {
+    const tx = baseTx();
+    mockDb.$transaction.mockImplementation(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      async (cb: any) => cb(tx),
+    );
+
+    // prev hint is gone (foreign/stale), next hint "keep" survives → bisect
+    // before keep against its current preceding card (none, excluding the mover).
+    const result = await reorderCardWithinListByNeighbors({
+      cardId: "m",
+      workspaceId: "ws-1",
+      intent: "between",
+      prevCardId: "gone",
+      nextCardId: "keep",
+      expectedMoveRevision: 0,
+    });
+
+    // The CAS write carries the rebased position (keep.position - GAP).
+    expect(tx.card.updateMany).toHaveBeenCalledWith({
+      where: { id: "m", archivedAt: null, deletedAt: null, moveRevision: 0 },
+      data: { listId: L, position: GAP - GAP, moveRevision: 1 },
+    });
+    expect(result.position).toBeDefined();
+  });
+
+  it("throws Card not found when the moved card is missing/archived under the lock", async () => {
+    const tx = baseTx({
+      $queryRaw: rawLockMock({ liveLists: [L], card: false }),
+    });
+    mockDb.$transaction.mockImplementation(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      async (cb: any) => cb(tx),
+    );
+
+    await expect(
+      reorderCardWithinListByNeighbors({
+        cardId: "m",
+        workspaceId: "ws-1",
+        intent: "end",
+        expectedMoveRevision: 0,
+      }),
+    ).rejects.toThrow("Card not found");
+      expect(tx.card.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("lockCardOrderingScopeForUpdate (completion + automation lock order)", () => {
+  it("locks workspace, parent board/list, then card", async () => {
+    const events: string[] = [];
+    const tx = {
+      $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+        const sql = strings[0] ?? "";
+        const id = String(values[0] ?? "");
+        if (sql.includes('FROM "workspace"')) {
+          events.push("workspace");
+          return [{ id }];
+        }
+        if (sql.includes('FROM "board"')) {
+          events.push("board");
+          return [{ id }];
+        }
+        if (sql.includes('FROM "list"')) {
+          events.push("list");
+          return [{ id, boardId: "board-1", position: GAP, moveRevision: 0 }];
+        }
+        if (sql.includes('FROM "card"')) {
+          events.push("card");
+          return [{ id, listId: L, position: GAP, moveRevision: 0 }];
+        }
+        return [];
+      }),
+      card: {
+        findUnique: vi.fn(async () => {
+          events.push("parent-read");
+          return {
+            id: "card-1",
+            listId: L,
+            list: {
+              id: L,
+              boardId: "board-1",
+              archivedAt: null,
+              board: { workspaceId: "ws-1", archivedAt: null },
+            },
+          };
+        }),
+      },
+    } as unknown as Parameters<typeof lockCardOrderingScopeForUpdate>[0];
+
+    await expect(
+      lockCardOrderingScopeForUpdate(tx, "ws-1", "card-1"),
+    ).resolves.toEqual({ boardId: "board-1", listId: L });
+
+    // The parent lookup is non-locking; every actual row lock follows the
+    // workspace → board → list → card hierarchy used by moveCardInTransaction.
+    expect(events).toEqual(["workspace", "parent-read", "board", "list", "card"]);
   });
 });
 

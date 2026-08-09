@@ -39,11 +39,15 @@ export type ListWithCards = {
   title: string;
   boardId: string;
   position: number;
+  /** Logical ordering-move revision (decision 0032); bumped optimistically on drag. */
+  moveRevision: number;
   cards: Array<{
     id: string;
     listId: string;
     title: string;
     position: number;
+    /** Logical ordering-move revision; sibling normalization does not bump it. */
+    moveRevision: number;
     coverImage: string | null;
     priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
     dueDate: Date | null;
@@ -57,6 +61,32 @@ export type ListWithCards = {
     commentCount: number;
   }>;
 };
+
+/** Normalize pre-0032 snapshots without changing identities when already canonical. */
+function normalizeOrderingRevisions(lists: ListWithCards[]): ListWithCards[] {
+  let changed = false;
+  const normalized = lists.map((list) => {
+    const listRevision = list.moveRevision ?? 0;
+    let cardsChanged = false;
+    const cards = list.cards.map((card) => {
+      const moveRevision = card.moveRevision ?? 0;
+      if (moveRevision !== card.moveRevision) {
+        changed = true;
+        cardsChanged = true;
+        return { ...card, moveRevision };
+      }
+      return card;
+    });
+
+    if (listRevision !== list.moveRevision || cardsChanged) {
+      changed = true;
+      return { ...list, moveRevision: listRevision, cards };
+    }
+    return list;
+  });
+
+  return changed ? normalized : lists;
+}
 
 export type SelectedCardData = {
   card: {
@@ -215,7 +245,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
 
   setCurrentUserId: (userId) => set({ currentUserId: userId }),
 
-  setLists: (lists) => set({ lists }),
+  setLists: (lists) => set({ lists: normalizeOrderingRevisions(lists) }),
 
   setSelectedCardId: (cardId) => set({ selectedCardId: cardId }),
 
@@ -337,36 +367,87 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     }
 
     const { cardId, listId, position } = payload;
+    const revision = payload.moveRevision ?? 0;
 
     set((state) => {
-      // Self-echo dedupe: if the card already sits in the target list at the
-      // canonical position this payload carries, the store already reflects the
-      // move (the actor's own echo after a prior position-correcting apply, or a
-      // duplicate echo). No-op to avoid a redundant re-render. A genuine
-      // cross-user move (card elsewhere, or a stale optimistic position) still
-      // applies — applying is what now delivers canonical float-gap positions to
-      // the actor, since reorder/move no longer revalidate (decision 0008).
-      const reflectingList = state.lists.find((list) => list.id === listId);
+      // decision 0032 revision semantics: reject a stale echo whose revision is
+      // LOWER than the store's current revision (a newer move already applied);
+      // dedupe an equal-revision echo that already sits at the canonical
+      // position (the actor's own echo after the optimistic commit, or a
+      // duplicate); everything else (equal revision, different position = a
+      // canonical correction of a stale optimistic slot; higher revision = a
+      // genuine cross-user move) applies.
+      const sourceList = state.lists.find((list) =>
+        list.cards.some((card) => card.id === cardId),
+      );
+      if (!sourceList) {
+        // A destination-board echo can arrive with no local source card. New
+        // emitters include the canonical snapshot for this cross-board case;
+        // legacy moved payloads remain a safe no-op because they lack enough
+        // data to construct a board card.
+        const targetList = state.lists.find((list) => list.id === listId);
+        if (!targetList || !payload.card) {
+          return state;
+        }
+
+        const movedCard = {
+          ...payload.card,
+          listId,
+          position,
+          moveRevision: payload.card.moveRevision ?? revision,
+          coverImage: null,
+          priority: payload.card.priority ?? null,
+          dueDate: payload.card.dueDate ? new Date(payload.card.dueDate) : null,
+          completedAt: null,
+          updatedAt: new Date(),
+          labels: [],
+          members: [],
+          memberCount: 0,
+          checklistDone: 0,
+          checklistTotal: 0,
+          commentCount: 0,
+        };
+
+        return {
+          lists: state.lists.map((list) =>
+            list.id === listId
+              ? { ...list, cards: [...list.cards, movedCard].sort((a, b) => a.position - b.position) }
+              : list,
+          ),
+        };
+      }
+      const foundCard = sourceList.cards.find((card) => card.id === cardId)!;
+
+      if (revision < foundCard.moveRevision) {
+        return state;
+      }
       if (
-        reflectingList &&
-        reflectingList.cards.some((card) => card.id === cardId && card.position === position)
+        revision === foundCard.moveRevision &&
+        foundCard.listId === listId &&
+        foundCard.position === position
       ) {
         return state;
       }
 
-      const sourceList = state.lists.find((list) => list.cards.some((card) => card.id === cardId));
       const targetListExists = state.lists.some((list) => list.id === listId);
-
-      if (!sourceList || !targetListExists) {
-        return state;
+      if (!targetListExists) {
+        // A workspace-wide automation move can leave this board entirely. The
+        // source-room echo names the destination list, which is intentionally
+        // absent from this store; remove the card instead of retaining an
+        // invisible duplicate. The destination room handles insertion.
+        const listsWithoutMovedCard = state.lists.map((list) =>
+          list.id === sourceList.id
+            ? { ...list, cards: list.cards.filter((card) => card.id !== cardId) }
+            : list,
+        );
+        const selectionCleared =
+          state.selectedCardId === cardId
+            ? { selectedCardId: null, selectedCard: null }
+            : {};
+        return { lists: listsWithoutMovedCard, ...selectionCleared };
       }
 
-      const foundCard = sourceList.cards.find((card) => card.id === cardId);
-      if (!foundCard) {
-        return state;
-      }
-
-      const movedCard = { ...foundCard, listId, position };
+      const movedCard = { ...foundCard, listId, position, moveRevision: revision };
 
       const newLists = state.lists.map((list) => {
         const cardsWithoutMovedCard = list.cards.filter((card) => card.id !== cardId);
@@ -412,6 +493,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     }
 
     const { listId, position } = payload;
+    const revision = payload.moveRevision ?? 0;
 
     set((state) => {
       const targetList = state.lists.find((list) => list.id === listId);
@@ -420,15 +502,19 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
         return state;
       }
 
-      // Self-echo dedupe: already at the canonical position → no-op (the actor's
-      // own echo after the position was applied, or a duplicate). A real move
-      // (stale optimistic position, or cross-user) still applies and re-sorts.
-      if (targetList.position === position) {
+      // decision 0032 revision semantics, mirroring applyRemoteCardMoved:
+      // reject lower revisions; dedupe equal revision + same position (the
+      // actor's own echo); apply everything else (equal + different position =
+      // canonical correction; higher revision = cross-user move).
+      if (revision < targetList.moveRevision) {
+        return state;
+      }
+      if (revision === targetList.moveRevision && targetList.position === position) {
         return state;
       }
 
       const newLists = state.lists
-        .map((list) => (list.id === listId ? { ...list, position } : list))
+        .map((list) => (list.id === listId ? { ...list, position, moveRevision: revision } : list))
         .sort((a, b) => a.position - b.position);
 
       return { lists: newLists };
@@ -449,7 +535,10 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
         return state;
       }
 
-      const newLists = [...state.lists, { ...payload.list, cards: [] }].sort(
+      const newLists = [
+        ...state.lists,
+        { ...payload.list, moveRevision: payload.list.moveRevision ?? 0, cards: [] },
+      ].sort(
         (a, b) => a.position - b.position,
       );
 
@@ -538,6 +627,9 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
             {
               ...payload.card,
               coverImage: null,
+              // decision 0032: seed the canonical revision from the payload
+              // (default 0 for pre-0032 emitters) so later drags CAS on it.
+              moveRevision: payload.card.moveRevision ?? 0,
               // US-083 W7 fidelity: a quick-captured card's due date + priority
               // arrive on the wire; older payloads without the fields fall back
               // to null.

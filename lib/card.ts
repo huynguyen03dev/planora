@@ -7,22 +7,16 @@ import db from "@/lib/prisma";
 import {
   CARD_POSITION_GAP,
   LIVE_CARD_SCOPE,
+  OrderConflictError,
+  PlacementIntent,
   PositionSpaceExhaustedError,
-  StaleNeighborError,
+  lockBoardRowsForUpdate,
+  lockCardRowForUpdate,
+  lockListRowsForUpdate,
+  lockWorkspaceRowForUpdate,
   normalizeCardPositions,
-  resolveCardPosition,
+  resolveCardPositionIntent,
 } from "@/lib/ordering";
-
-const MAX_REORDER_CARD_RETRIES = 3;
-
-function isUniqueConstraintError(error: unknown): error is { code: string } {
-  if (typeof error !== "object" || error === null) {
-    return false;
-  }
-
-  const withCode = error as { code?: unknown };
-  return withCode.code === "P2002";
-}
 
 export type CardRecord = {
   id: string;
@@ -30,6 +24,8 @@ export type CardRecord = {
   title: string;
   description: string | null;
   position: number;
+  /** Logical user/automation ordering-move revision; normalization does not bump it. */
+  moveRevision: number;
   priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
   dueDate: Date | null;
   estimateHours: number | null;
@@ -40,6 +36,37 @@ export type CardRecord = {
   createdById: string;
   createdAt: Date;
   updatedAt: Date;
+};
+
+const CARD_RECORD_SELECT = {
+  id: true,
+  listId: true,
+  title: true,
+  description: true,
+  position: true,
+  moveRevision: true,
+  priority: true,
+  dueDate: true,
+  estimateHours: true,
+  completedAt: true,
+  deletedAt: true,
+  coverImage: true,
+  archivedAt: true,
+  createdById: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+export type CardMoveTransactionResult = {
+  card: CardRecord;
+  fromListId: string;
+  fromBoardId: string;
+  targetBoardId: string;
+};
+
+export type CardOrderingScope = {
+  boardId: string;
+  listId: string;
 };
 
 export type CardDetailRecord = {
@@ -98,43 +125,280 @@ export async function createCard(data: {
   listId: string;
   title: string;
   createdById: string;
+  workspaceId: string;
 }): Promise<CardRecord> {
-  const lastCard = await db.card.findFirst({
-    where: {
-      listId: data.listId,
-      ...LIVE_CARD_SCOPE,
-    },
-    orderBy: [{ position: "desc" }, { createdAt: "desc" }],
-    select: { position: true },
+  return await db.$transaction(async (tx) => {
+    const parentList = await tx.list.findUnique({
+      where: { id: data.listId },
+      select: {
+        boardId: true,
+        archivedAt: true,
+        board: { select: { workspaceId: true, archivedAt: true } },
+      },
+    });
+    if (
+      !parentList ||
+      parentList.archivedAt !== null ||
+      parentList.board.archivedAt !== null ||
+      parentList.board.workspaceId !== data.workspaceId
+    ) {
+      throw new Error("LIST_NOT_FOUND");
+    }
+
+    // Global workspace gate, then parent-to-child board → list locks. This is
+    // re-entrant for recursive automation and prevents a cascade-wide lock
+    // inversion.
+    await lockWorkspaceRowForUpdate(tx, data.workspaceId);
+    const board = await lockBoardRowsForUpdate(tx, [parentList.boardId]);
+    if (board.length === 0) {
+      throw new Error("LIST_NOT_FOUND");
+    }
+    const locked = await lockListRowsForUpdate(tx, [data.listId]);
+    if (locked.length === 0) {
+      throw new Error("LIST_NOT_FOUND");
+    }
+
+    const lastCard = await tx.card.findFirst({
+      where: {
+        listId: data.listId,
+        ...LIVE_CARD_SCOPE,
+      },
+      orderBy: [{ position: "desc" }, { createdAt: "desc" }],
+      select: { position: true },
+    });
+
+    const position = lastCard ? lastCard.position + CARD_POSITION_GAP : CARD_POSITION_GAP;
+
+    return tx.card.create({
+      data: {
+        listId: data.listId,
+        title: data.title,
+        createdById: data.createdById,
+        position,
+      },
+      select: CARD_RECORD_SELECT,
+    });
   });
+}
 
-  const position = lastCard ? lastCard.position + CARD_POSITION_GAP : CARD_POSITION_GAP;
+/**
+ * Acquire the parent ordering scope before a card mutation that may evaluate
+ * automation. The initial card lookup is deliberately after the workspace
+ * gate: completion can race a move, and the current parent must be selected
+ * under the same workspace serialization used by moveCardInTransaction.
+ *
+ * Lock order is workspace → board → list → card. Keeping this helper separate
+ * from setCardCompletion preserves that helper's reusable compare-and-set
+ * business semantics while making every production completion path safe for a
+ * recursive move-capable automation cascade.
+ */
+export async function lockCardOrderingScopeForUpdate(
+  tx: Prisma.TransactionClient,
+  workspaceId: string,
+  cardId: string,
+): Promise<CardOrderingScope> {
+  await lockWorkspaceRowForUpdate(tx, workspaceId);
 
-  return db.card.create({
-    data: {
-      listId: data.listId,
-      title: data.title,
-      createdById: data.createdById,
-      position,
-    },
+  const located = await tx.card.findUnique({
+    where: { id: cardId, ...LIVE_CARD_SCOPE },
     select: {
       id: true,
       listId: true,
-      title: true,
-      description: true,
-      position: true,
-      priority: true,
-      dueDate: true,
-      estimateHours: true,
-      completedAt: true,
-      deletedAt: true,
-      coverImage: true,
-      archivedAt: true,
-      createdById: true,
-      createdAt: true,
-      updatedAt: true,
+      list: {
+        select: {
+          id: true,
+          boardId: true,
+          archivedAt: true,
+          board: { select: { workspaceId: true, archivedAt: true } },
+        },
+      },
     },
   });
+
+  if (
+    !located ||
+    located.list.archivedAt !== null ||
+    located.list.board.archivedAt !== null ||
+    located.list.board.workspaceId !== workspaceId
+  ) {
+    throw new Error("Card not found");
+  }
+
+  const boards = await lockBoardRowsForUpdate(tx, [located.list.boardId]);
+  if (boards.length !== 1) {
+    throw new Error("Card not found");
+  }
+
+  const lists = await lockListRowsForUpdate(tx, [located.listId]);
+  if (lists.length !== 1) {
+    throw new Error("Card not found");
+  }
+
+  const lockedCard = await lockCardRowForUpdate(tx, cardId);
+  if (!lockedCard || lockedCard.listId !== located.listId) {
+    throw new Error("Card not found");
+  }
+
+  return {
+    boardId: located.list.boardId,
+    listId: located.listId,
+  };
+}
+
+/**
+ * Move one live card inside an existing transaction.
+ *
+ * This is the single ordering protocol used by human DnD and automation:
+ * workspace gate → sorted boards → sorted live lists → moved card → resolve →
+ * normalize-if-needed → revision CAS. The workspace row lock is deliberately
+ * broader than one board because recursive rules can target any board in their
+ * workspace; re-acquiring it in the same transaction is safe and prevents two
+ * recursive cascades from deadlocking while discovering new targets.
+ *
+ * `expectedMoveRevision` is supplied by human DnD. Automation omits it and
+ * atomically bumps the revision observed under the card lock. Normalization only
+ * rewrites sibling positions; it never bumps or emits sibling revisions.
+ */
+export async function moveCardInTransaction(
+  tx: Prisma.TransactionClient,
+  data: {
+    workspaceId: string;
+    cardId: string;
+    targetListId?: string;
+    intent: PlacementIntent;
+    prevCardId?: string | null;
+    nextCardId?: string | null;
+    expectedMoveRevision?: number;
+  },
+): Promise<CardMoveTransactionResult> {
+  // Non-locking reads identify every parent scope. No row lock is held until
+  // the workspace gate below, so these reads cannot participate in a cycle.
+  const source = await tx.card.findUnique({
+    where: { id: data.cardId, ...LIVE_CARD_SCOPE },
+    select: {
+      id: true,
+      listId: true,
+      moveRevision: true,
+      list: {
+        select: {
+          id: true,
+          boardId: true,
+          archivedAt: true,
+          board: { select: { id: true, workspaceId: true, archivedAt: true } },
+        },
+      },
+    },
+  });
+
+  if (
+    !source ||
+    source.list.archivedAt !== null ||
+    source.list.board.archivedAt !== null ||
+    source.list.board.workspaceId !== data.workspaceId
+  ) {
+    throw new Error("Card not found");
+  }
+
+  const targetListId = data.targetListId ?? source.listId;
+  const target = await tx.list.findUnique({
+    where: { id: targetListId },
+    select: {
+      id: true,
+      boardId: true,
+      archivedAt: true,
+      board: { select: { id: true, workspaceId: true, archivedAt: true } },
+    },
+  });
+
+  if (
+    !target ||
+    target.archivedAt !== null ||
+    target.board.archivedAt !== null ||
+    target.board.workspaceId !== data.workspaceId
+  ) {
+    throw new OrderConflictError("SCOPE_STALE");
+  }
+
+  await lockWorkspaceRowForUpdate(tx, data.workspaceId);
+
+  const boardIds = [source.list.boardId, target.boardId];
+  const lockedBoards = await lockBoardRowsForUpdate(tx, boardIds);
+  if (lockedBoards.length !== new Set(boardIds).size) {
+    throw new OrderConflictError("SCOPE_STALE");
+  }
+
+  const listIds = [source.listId, targetListId];
+  const lockedLists = await lockListRowsForUpdate(tx, listIds);
+  if (lockedLists.length !== new Set(listIds).size) {
+    throw new OrderConflictError("SCOPE_STALE");
+  }
+
+  const card = await lockCardRowForUpdate(tx, data.cardId);
+  if (!card) {
+    throw new Error("Card not found");
+  }
+  if (card.listId !== source.listId) {
+    throw new OrderConflictError("MOVE_REVISION");
+  }
+  if (
+    data.expectedMoveRevision !== undefined &&
+    card.moveRevision !== data.expectedMoveRevision
+  ) {
+    throw new OrderConflictError("MOVE_REVISION");
+  }
+
+  let nextPosition: number;
+  try {
+    nextPosition = await resolveCardPositionIntent(tx, {
+      targetListId,
+      intent: data.intent,
+      prevCardId: data.prevCardId ?? null,
+      nextCardId: data.nextCardId ?? null,
+      excludeCardId: data.cardId,
+    });
+  } catch (error) {
+    if (!(error instanceof PositionSpaceExhaustedError)) {
+      throw error;
+    }
+
+    await normalizeCardPositions(tx, targetListId);
+    nextPosition = await resolveCardPositionIntent(tx, {
+      targetListId,
+      intent: data.intent,
+      prevCardId: data.prevCardId ?? null,
+      nextCardId: data.nextCardId ?? null,
+      excludeCardId: data.cardId,
+    });
+  }
+
+  const updateResult = await tx.card.updateMany({
+    where: {
+      id: data.cardId,
+      ...LIVE_CARD_SCOPE,
+      moveRevision: card.moveRevision,
+    },
+    data: {
+      listId: targetListId,
+      position: nextPosition,
+      moveRevision: card.moveRevision + 1,
+    },
+  });
+
+  if (updateResult.count === 0) {
+    throw new OrderConflictError("MOVE_REVISION");
+  }
+
+  const updatedCard = await tx.card.findUniqueOrThrow({
+    where: { id: data.cardId },
+    select: CARD_RECORD_SELECT,
+  });
+
+  return {
+    card: updatedCard,
+    fromListId: source.listId,
+    fromBoardId: source.list.boardId,
+    targetBoardId: target.boardId,
+  };
 }
 
 export async function archiveCard(cardId: string): Promise<void> {
@@ -151,105 +415,16 @@ export async function archiveCard(cardId: string): Promise<void> {
 
 export async function reorderCardWithinListByNeighbors(data: {
   cardId: string;
+  workspaceId: string;
+  intent: PlacementIntent;
   prevCardId?: string | null;
   nextCardId?: string | null;
+  expectedMoveRevision: number;
 }): Promise<CardRecord> {
-  // Hints are mutable across retries: a StaleNeighborError drops the offending
-  // side so the next attempt re-anchors on the surviving neighbour (or appends).
-  let prevHint = data.prevCardId ?? null;
-  let nextHint = data.nextCardId ?? null;
-
-  for (let attempt = 0; attempt < MAX_REORDER_CARD_RETRIES; attempt += 1) {
-    // Retained across the catch so a collision can renumber the right list
-    // before the next attempt; set once the card is read inside the tx.
-    let listIdForRetry: string | null = null;
-
-    try {
-      return await db.$transaction(async (tx) => {
-        const existingCard = await tx.card.findUnique({
-          where: {
-            id: data.cardId,
-            ...LIVE_CARD_SCOPE,
-          },
-          select: {
-            id: true,
-            listId: true,
-            position: true,
-          },
-        });
-
-        if (!existingCard) {
-          throw new Error("Card not found");
-        }
-
-        listIdForRetry = existingCard.listId;
-
-        // Exclude the card being moved so the adjacency search bisects against
-        // the real occupants, not the mover's own (stale) slot.
-        const nextPosition = await resolveCardPosition(tx, {
-          targetListId: existingCard.listId,
-          prevCardId: prevHint,
-          nextCardId: nextHint,
-          excludeCardId: data.cardId,
-        });
-
-        return await tx.card.update({
-          where: {
-            id: data.cardId,
-            ...LIVE_CARD_SCOPE,
-          },
-          data: {
-            position: nextPosition,
-          },
-          select: {
-            id: true,
-            listId: true,
-            title: true,
-            description: true,
-            position: true,
-            priority: true,
-            dueDate: true,
-            estimateHours: true,
-            completedAt: true,
-            deletedAt: true,
-            coverImage: true,
-            archivedAt: true,
-            createdById: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-        });
-      });
-    } catch (error) {
-      // A stale neighbour hint is recoverable without a renumber: drop that side
-      // and retry so the move re-anchors on the surviving neighbour / appends.
-      if (error instanceof StaleNeighborError && attempt < MAX_REORDER_CARD_RETRIES - 1) {
-        if (error.side === "prev") {
-          prevHint = null;
-        } else {
-          nextHint = null;
-        }
-        continue;
-      }
-
-      // A P2002 (a rival grabbed the slot) or a PositionSpaceExhaustedError (no
-      // gap left to bisect) both mean: renumber the list to restore full gaps,
-      // then retry the reorder against the fresh layout.
-      if (
-        (isUniqueConstraintError(error) || error instanceof PositionSpaceExhaustedError) &&
-        attempt < MAX_REORDER_CARD_RETRIES - 1 &&
-        listIdForRetry
-      ) {
-        const listId = listIdForRetry;
-        await db.$transaction((tx) => normalizeCardPositions(tx, listId));
-        continue;
-      }
-
-      throw error;
-    }
-  }
-
-  throw new Error("Failed to reorder card after retries");
+  return await db.$transaction(async (tx) => {
+    const result = await moveCardInTransaction(tx, data);
+    return result.card;
+  });
 }
 
 export async function getCardWithListAndBoard(
@@ -266,6 +441,7 @@ export async function getCardWithListAndBoard(
       title: true,
       description: true,
       position: true,
+      moveRevision: true,
       priority: true,
       dueDate: true,
       estimateHours: true,
@@ -381,6 +557,7 @@ export async function updateCardEstimate(
       title: true,
       description: true,
       position: true,
+      moveRevision: true,
       priority: true,
       dueDate: true,
       estimateHours: true,
@@ -413,6 +590,7 @@ export async function updateCardDueDate(
       title: true,
       description: true,
       position: true,
+      moveRevision: true,
       priority: true,
       dueDate: true,
       estimateHours: true,
@@ -483,6 +661,7 @@ export async function setCardCompletion(
       title: true,
       description: true,
       position: true,
+      moveRevision: true,
       priority: true,
       dueDate: true,
       estimateHours: true,
@@ -520,6 +699,7 @@ export async function getCardWithListAndMembers(cardId: string): Promise<{
       title: true,
       description: true,
       position: true,
+      moveRevision: true,
       priority: true,
       dueDate: true,
       estimateHours: true,
@@ -641,6 +821,7 @@ export async function getArchivedCardWithListAndBoard(
       title: true,
       description: true,
       position: true,
+      moveRevision: true,
       priority: true,
       dueDate: true,
       estimateHours: true,

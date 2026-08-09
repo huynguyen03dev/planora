@@ -57,17 +57,36 @@ const maybeListIdSchema = z
   .nullable()
   .optional();
 
+// Explicit placement intent + OCC anchor (decision 0032) — mirror the card
+// schemas; see lib/schemas/card.ts for the shared definitions.
+const placementIntentSchema = z.enum(["start", "end", "between"]);
+const expectedMoveRevisionSchema = z
+  .preprocess(
+    (value) => (value === undefined || value === "" ? 0 : Number(value)),
+    z.number().int().min(0, "Invalid move revision"),
+  )
+  .default(0);
+
 export const reorderListSchema = z
   .object({
     listId: z.string().uuid({ message: "Invalid list ID" }),
+    intent: placementIntentSchema,
     prevListId: maybeListIdSchema,
     nextListId: maybeListIdSchema,
+    expectedMoveRevision: expectedMoveRevisionSchema,
   })
   .refine(
     (data) => !(data.prevListId && data.nextListId && data.prevListId === data.nextListId),
     {
       message: "Invalid reorder payload",
       path: ["nextListId"],
+    },
+  )
+  .refine(
+    (data) => data.listId !== data.prevListId && data.listId !== data.nextListId,
+    {
+      message: "Invalid reorder payload",
+      path: ["listId"],
     },
   );
 
