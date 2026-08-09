@@ -179,6 +179,9 @@ export function BoardHeader({
         <div className="min-w-0 flex-1">
           {canEdit && editing ? (
             <Input
+              aria-label="Board title"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "board-title-error" : undefined}
               value={draftTitle}
               onChange={(event) => {
                 setDraftTitle(event.target.value);
@@ -328,7 +331,15 @@ export function BoardHeader({
         </div>
       </div>
 
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {error ? (
+        <p
+          id="board-title-error"
+          role="alert"
+          className="text-sm text-destructive"
+        >
+          {error}
+        </p>
+      ) : null}
     </header>
   );
 }

@@ -8,7 +8,6 @@ import {
   Card,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 
 import { SignUpForm } from "./sign-up-form";
@@ -32,7 +31,8 @@ export default async function SignUpPage({
         <div className="flex flex-1 items-center justify-center px-4">
           <Card className="w-full max-w-sm">
             <CardHeader>
-              <CardTitle className="text-2xl">Create an account</CardTitle>
+              {/* Real page-level heading (CardTitle is a div). */}
+              <h1 className="text-2xl leading-normal font-medium">Create an account</h1>
               <CardDescription>Loading sign up form...</CardDescription>
             </CardHeader>
           </Card>

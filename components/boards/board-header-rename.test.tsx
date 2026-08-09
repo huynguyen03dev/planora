@@ -138,4 +138,36 @@ describe("BoardHeader — inline rename draft preservation", () => {
       ).toBeInTheDocument(),
     );
   });
+
+  it("gives the rename field an accessible name (board title input)", async () => {
+    renderBoard();
+    await user.click(screen.getByRole("heading", { name: "Test Board" }));
+
+    // The field is queryable by its accessible name, not just by role.
+    expect(
+      screen.getByRole("textbox", { name: "Board title" }),
+    ).toHaveValue("Test Board");
+  });
+
+  it("surfaces a failed rename as a role=alert wired to the field via aria-invalid/describedby", async () => {
+    actions.updateBoardAction.mockResolvedValue({
+      success: false,
+      error: "Failed to update board. Please try again.",
+    });
+
+    renderBoard();
+    await user.click(screen.getByRole("heading", { name: "Test Board" }));
+    const input = screen.getByRole("textbox", { name: "Board title" });
+    await user.clear(input);
+    await user.type(input, "Renamed Board");
+    await user.keyboard("{Enter}");
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Failed to update board. Please try again.",
+    );
+    expect(alert).toHaveAttribute("id", "board-title-error");
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAttribute("aria-describedby", "board-title-error");
+  });
 });

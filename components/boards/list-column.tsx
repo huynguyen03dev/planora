@@ -302,6 +302,11 @@ function ListColumnComponent({
               >
                 {canEdit && editing ? (
                   <Input
+                    aria-label="List title"
+                    aria-invalid={Boolean(error)}
+                    aria-describedby={
+                      error ? `list-title-error-${list.id}` : undefined
+                    }
                     value={draftTitle}
                     onChange={(event) => {
                       setDraftTitle(event.target.value);
@@ -369,7 +374,11 @@ function ListColumnComponent({
             </div>
 
             {error ? (
-              <p role="alert" className="text-sm text-destructive">
+              <p
+                id={`list-title-error-${list.id}`}
+                role="alert"
+                className="text-sm text-destructive"
+              >
                 {error}
               </p>
             ) : null}
@@ -454,6 +463,11 @@ function ListColumnComponent({
               addCardExpanded ? (
                 <form {...addCardOutsideProps} onSubmit={handleCreateCard} className="shrink-0 space-y-2">
                   <Input
+                    aria-label="Card title"
+                    aria-invalid={Boolean(addCardError)}
+                    aria-describedby={
+                      addCardError ? `add-card-error-${list.id}` : undefined
+                    }
                     value={newCardTitle}
                     onChange={(event) => {
                       setNewCardTitle(event.target.value);
@@ -471,7 +485,13 @@ function ListColumnComponent({
                   />
 
                   {addCardError ? (
-                    <p className="text-xs text-destructive">{addCardError}</p>
+                    <p
+                      id={`add-card-error-${list.id}`}
+                      role="alert"
+                      className="text-xs text-destructive"
+                    >
+                      {addCardError}
+                    </p>
                   ) : null}
 
                   <div className="flex gap-2">

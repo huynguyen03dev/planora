@@ -144,3 +144,29 @@ describe("CreateBoardModal — synchronous single-flight submit", () => {
     expect(input).toHaveValue("");
   });
 });
+
+describe("CreateBoardModal — scoped error announcement", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("announces a failed create via role=alert wired to the title field", async () => {
+    actions.createBoardAction.mockResolvedValueOnce({
+      success: false,
+      error: "Failed to create board. Please try again.",
+    });
+    renderModal();
+
+    const input = screen.getByLabelText("Board title");
+    await user.type(input, "Q2 Planning");
+    submitForm();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Failed to create board. Please try again.",
+    );
+    expect(alert).toHaveAttribute("id", "create-board-error");
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAttribute("aria-describedby", "create-board-error");
+  });
+});

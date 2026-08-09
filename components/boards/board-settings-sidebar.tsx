@@ -75,7 +75,14 @@ export function BoardSettingsSidebar({
 
         <div className="mt-6 space-y-3">
           <h3 className="text-sm font-medium">Background</h3>
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          {error ? (
+            <p
+              role="alert"
+              className="text-sm text-destructive"
+            >
+              {error}
+            </p>
+          ) : null}
           <ColorPalette
             value={selectedColor}
             onChange={handleChangeColor}

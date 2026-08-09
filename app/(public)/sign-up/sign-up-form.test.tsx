@@ -114,4 +114,110 @@ describe("SignUpForm", () => {
     await user.click(resendButton);
     expect(mockSendVerificationEmail).toHaveBeenCalledWith({ email: "test@example.com" });
   });
+
+  it("renders the page-level heading as a real h1 (not a div) in both states", async () => {
+    render(<SignUpForm />);
+
+    const formHeading = screen.getByRole("heading", {
+      level: 1,
+      name: "Create an account",
+    });
+    expect(formHeading).toBeInTheDocument();
+
+    mockSignUpEmail.mockImplementation((_data, { onSuccess }) => {
+      onSuccess?.();
+      return Promise.resolve();
+    });
+    await user.type(screen.getByLabelText("Name"), "Test User");
+    await user.type(screen.getByLabelText("Email"), "test@example.com");
+    await user.type(screen.getByLabelText("Password"), "password123");
+    await user.click(screen.getByRole("button", { name: "Sign Up" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { level: 1, name: "Check your email" }),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByRole("heading", { level: 1, name: "Create an account" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("moves focus to the success heading after sign-up (view-swap focus, not a steal)", async () => {
+    mockSignUpEmail.mockImplementation((_data, { onSuccess }) => {
+      onSuccess?.();
+      return Promise.resolve();
+    });
+
+    render(<SignUpForm />);
+
+    await user.type(screen.getByLabelText("Name"), "Test User");
+    await user.type(screen.getByLabelText("Email"), "test@example.com");
+    await user.type(screen.getByLabelText("Password"), "password123");
+
+    await user.click(screen.getByRole("button", { name: "Sign Up" }));
+
+    const successHeading = await screen.findByRole("heading", {
+      level: 1,
+      name: "Check your email",
+    });
+    await waitFor(() => {
+      expect(successHeading).toHaveFocus();
+    });
+    // The heading is focusable for AT but stays out of the tab order.
+    expect(successHeading).toHaveAttribute("tabindex", "-1");
+  });
+
+  it("announces the resend result through a persistent polite status region", async () => {
+    mockSignUpEmail.mockImplementation((_data, { onSuccess }) => {
+      onSuccess?.();
+      return Promise.resolve();
+    });
+
+    render(<SignUpForm />);
+
+    await user.type(screen.getByLabelText("Name"), "Test User");
+    await user.type(screen.getByLabelText("Email"), "test@example.com");
+    await user.type(screen.getByLabelText("Password"), "password123");
+    await user.click(screen.getByRole("button", { name: "Sign Up" }));
+
+    await screen.findByRole("heading", { level: 1, name: "Check your email" });
+
+    // The region exists (empty) before the resend so the announcement is not
+    // a mount-time flash; it flips to "Sent!" only after the request resolves.
+    const status = screen.getByRole("status");
+    expect(status).toBeEmptyDOMElement();
+    expect(mockSendVerificationEmail).not.toHaveBeenCalled();
+
+    mockSendVerificationEmail.mockResolvedValue(undefined);
+    await user.click(screen.getByText("resend"));
+
+    await waitFor(() => {
+      expect(status).toHaveTextContent("Sent!");
+    });
+    expect(mockSendVerificationEmail).toHaveBeenCalledWith({
+      email: "test@example.com",
+    });
+
+    // A second resend clears the region while the request is in flight, so a
+    // repeat success re-announces (the visible button label alone is never
+    // announced by AT). Drive it with a deferred promise to observe the gap.
+    const deferredSecondResend: { resolve: (() => void) | null } = {
+      resolve: null,
+    };
+    mockSendVerificationEmail.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          deferredSecondResend.resolve = resolve;
+        }),
+    );
+    await user.click(screen.getByRole("button", { name: "Sent!" }));
+    expect(status).toBeEmptyDOMElement();
+    expect(screen.getByRole("button", { name: "Sending..." })).toBeDisabled();
+
+    deferredSecondResend.resolve?.();
+    await waitFor(() => {
+      expect(status).toHaveTextContent("Sent!");
+    });
+  });
 });

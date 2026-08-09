@@ -105,7 +105,15 @@ export function CreateBoardModal({
         <form onSubmit={handleSubmit} className="space-y-4">
           <input type="hidden" name="workspaceId" value={workspaceId} />
 
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          {error ? (
+            <p
+              id="create-board-error"
+              role="alert"
+              className="text-sm text-destructive"
+            >
+              {error}
+            </p>
+          ) : null}
 
           <div className="space-y-2">
             <Label htmlFor="boardTitle">Board title</Label>
@@ -121,6 +129,8 @@ export function CreateBoardModal({
               autoFocus
               disabled={isPending}
               required
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "create-board-error" : undefined}
             />
           </div>
 
