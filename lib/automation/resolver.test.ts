@@ -1,7 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// ── Hoisted mocks ────────────────────────────────────────────────────────────
-
 const mockDb = vi.hoisted(() => ({
   cardMember: { findMany: vi.fn() },
   card: { findUnique: vi.fn() },
@@ -16,11 +14,7 @@ import {
   resolveRemoveScope,
 } from "./resolver";
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
 const ctx = { cardId: "card-1", workspaceId: "ws-1" };
-
-// ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("resolveRecipient", () => {
   beforeEach(() => {

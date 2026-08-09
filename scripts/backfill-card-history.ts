@@ -1,10 +1,8 @@
 #!/usr/bin/env tsx
 /**
- * Analytics Baseline Backfill Script
- *
- * Captures the launch boundary for an existing workspace and creates the
- * minimum history needed for post-launch analytics without inventing movement,
- * completion, or reopen sequences from before launch.
+ * Captures an existing workspace's launch boundary and creates the minimum
+ * card history needed for post-launch analytics, without inventing
+ * pre-launch movement/completion/reopen sequences.
  */
 
 import type { Prisma } from "@/app/generated/prisma/client";

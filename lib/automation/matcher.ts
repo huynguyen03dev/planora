@@ -13,11 +13,9 @@
 import type { TriggerType, TriggerConfig } from "@/lib/schemas/automation";
 import type { RuleEventPayload } from "./types";
 
-// ─── matchTrigger ───────────────────────────────────────────────────
-
 /**
  * Trigger-TYPE gate: returns `true` iff the rule's trigger type matches the
- * event's trigger type exactly.  No fuzzy matching, no wildcards.
+ * event's trigger type exactly. No fuzzy matching, no wildcards.
  */
 export function matchTrigger(
   ruleTriggerType: TriggerType,
@@ -25,8 +23,6 @@ export function matchTrigger(
 ): boolean {
   return ruleTriggerType === eventTriggerType;
 }
-
-// ─── evaluateConditions ─────────────────────────────────────────────
 
 /**
  * Returns `true` iff every filter present in `triggerConfig` matches the
@@ -56,37 +52,29 @@ export function evaluateConditions(
   triggerConfig: TriggerConfig,
   eventPayload: RuleEventPayload,
 ): boolean {
-  // --- boardId ---
   if (triggerConfig.boardId !== undefined) {
     if (eventPayload.boardId !== triggerConfig.boardId) return false;
   }
 
-  // --- priority ---
   if (triggerConfig.priority !== undefined) {
     if (eventPayload.priority !== triggerConfig.priority) return false;
   }
 
-  // --- listId (context-dependent) ---
   if (triggerConfig.listId !== undefined) {
     if (triggerType === "card-moved-to-list") {
-      // Compare against destination list
       if (eventPayload.listIdTo !== triggerConfig.listId) return false;
     } else {
-      // All other trigger types: compare against payload.listId
       if (eventPayload.listId !== triggerConfig.listId) return false;
     }
   }
 
-  // --- fromListId (move-only) ---
   if (triggerConfig.fromListId !== undefined) {
     if (triggerType !== "card-moved-to-list") {
-      // Present-but-inapplicable filter → no match (stricter option)
       return false;
     }
     if (eventPayload.listIdFrom !== triggerConfig.fromListId) return false;
   }
 
-  // --- labelId ---
   if (triggerConfig.labelId !== undefined) {
     if (eventPayload.labelId !== triggerConfig.labelId) return false;
   }

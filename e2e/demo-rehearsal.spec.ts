@@ -109,8 +109,7 @@ test.afterAll(async () => {
   }
 
   // Remove ONLY rows created by THIS rehearsal, scoped to the demo workspace
-  // (title-scoped deletes could touch a same-titled card in another
-  // workspace — reviewer finding, correction pass 2026-08-02).
+  // (title-scoped deletes could hit a same-titled card in another workspace).
   await pool
     .query(
       `DELETE FROM "cardHistoryEvent"
@@ -146,8 +145,7 @@ test.afterAll(async () => {
   await cleanup({ emails: [outsiderEmail] });
 
   // Fixture preservation proof: the seeded logical shape is intact after the
-  // rehearsal (the rehearsal card + history rows are gone; the demo workspace
-  // was never deleted).
+  // rehearsal (rehearsal card + history rows gone; demo workspace untouched).
   const { rows: shape } = await pool.query(
     `SELECT
        (SELECT count(*)::int FROM "board" b WHERE b."workspaceId" = $1) AS boards,
@@ -260,7 +258,7 @@ async function ensureDemoFixture(browser: Browser): Promise<void> {
     } else {
       // The real sign-up flow needs an unambiguous Mailpit inbox for the
       // fixed demo email (a stale verification link from a previous run would
-      // otherwise be picked up first). Established pattern (helpers/mail.ts).
+      // otherwise be picked up first).
       await clearMailbox();
       const page = await (await browser.newContext()).newPage();
       try {
@@ -271,9 +269,9 @@ async function ensureDemoFixture(browser: Browser): Promise<void> {
     }
   }
 
-  // Seed through the checked-in script (scripts/demo-fixture.ts + lib/):
-  // replaces an existing marker-matching workspace (fresh, same-day) and
-  // FAILS CLOSED on a mismatched marker or missing/unverified users.
+  // Seed through the checked-in script (scripts/demo-fixture.ts): replaces an
+  // existing marker-matching workspace (fresh, same-day) and FAILS CLOSED on
+  // a mismatched marker or missing/unverified users.
   const result = execFileSync(
     "npm",
     ["run", "demo:seed", "--", "--owner-email", OWNER_EMAIL, "--collaborator-email", COLLABORATOR_EMAIL],
@@ -306,14 +304,14 @@ function bell(page: Page) {
 }
 
 test("the locked demo path runs continuously from the seeded fixture", async ({ browser }) => {
-  // ── Setup: self-provision users + fresh same-day fixture (no precondition). ─
+  // Setup: self-provision users + fresh same-day fixture (no precondition).
   await ensureDemoFixture(browser);
   demoWorkspaceId = await getDemoWorkspaceId();
 
   const ownerPage = await (await browser.newContext()).newPage();
   const collabPage = await (await browser.newContext()).newPage();
 
-  // ── Step 1: /today shows the seeded relative-date relationships. ─────────
+  // Step 1: /today shows the seeded relative-date relationships.
   await signIn(ownerPage, OWNER_EMAIL);
   await ownerPage.goto("/today");
   await expect(todaySection(ownerPage, "Due Today").getByText("Review graduation demo script")).toBeVisible();
@@ -323,11 +321,11 @@ test("the locked demo path runs continuously from the seeded fixture", async ({ 
   await expect(todaySection(ownerPage, "Later").getByText("Nothing here yet.")).toBeVisible();
   // Completed card excluded (owner-assigned, -3d, completed):
   await expect(todaySection(ownerPage, "Overdue").getByText("Document safety invariants")).toHaveCount(0);
-  // Collaborator's own overdue card is not on the owner's /today (it is
-  // collaborator-assigned): Overdue stays empty above.
+  // Collaborator-assigned overdue cards are not on the owner's /today
+  // (hence Overdue stays empty above).
 
-  // ── Steps 2–3: collaborator joins the board; owner captures from /today;
-  //    the collaborator sees the card live (W1 barriers). ──────────────────
+  // Steps 2–3: collaborator joins the board; owner captures from /today;
+  // the collaborator sees the card live (W1 barriers).
   await signIn(collabPage, COLLABORATOR_EMAIL);
   const { rows: boardRows } = await pool.query(
     `SELECT b.id, b.title FROM "board" b JOIN "workspace" w ON w.id = b."workspaceId" WHERE w.slug = $1 ORDER BY b.title`,
@@ -361,12 +359,9 @@ test("the locked demo path runs continuously from the seeded fixture", async ({ 
   await expect(quickCaptureDialog(ownerPage)).toBeVisible();
   await ownerPage.getByRole("textbox", { name: "Title" }).fill("Rehearsal capture card");
   await ownerPage.getByRole("button", { name: "Create card" }).click();
-  // The quick-capture success toast is the only status surface carrying
-  // "Card created" — /today now also renders a polite end-of-list
-  // role=status ("All assigned cards are shown", US-083 infinite scroll),
-  // so the bare getByRole("status") is strict-mode ambiguous. Filter to the
-  // toast (same pattern as the Card/List restored assertions below); the
-  // product's own status roles are untouched.
+  // The quick-capture toast is the only status surface carrying "Card
+  // created" — /today also renders a polite end-of-list role=status (US-083
+  // infinite scroll), so bare getByRole("status") is strict-mode ambiguous.
   await expect(
     ownerPage.getByRole("status").filter({ hasText: "Card created" }),
   ).toContainText("Card created");
@@ -376,14 +371,12 @@ test("the locked demo path runs continuously from the seeded fixture", async ({ 
   await expect(cardInListById(collabPage, inboxId, "Rehearsal capture card")).toBeVisible();
   tripwire.check(baseline, "rehearsal quick-capture live window", { expectNoRoutePosts: true });
 
-  // ── Step 4: archive the captured card → Undo restores it in place. ───────
-  // The shared archiveCard helper's `Archive card ... .first()` is ambiguous
-  // on this board: the seeded fixture has a COMPLETED card ("Document safety
-  // invariants"), and completed card faces render their own
-  // aria-label="Archive card" button (US-069) which sorts BEFORE the sheet
-  // portal in DOM order — the first rehearsal run archived the completed card
-  // instead (RED, run log). Pin the sheet-scoped archive here and assert the
-  // archived/offered/restored card by title + DB state (non-vacuous).
+  // Step 4: archive the captured card → Undo restores it in place.
+  // The shared archiveCard helper's `.first()` is ambiguous here: the seeded
+  // fixture has a COMPLETED card whose face renders its own
+  // aria-label="Archive card" (US-069), sorting BEFORE the sheet portal —
+  // the first run archived the wrong card (RED). Pin the sheet-scoped
+  // archive and assert by title + DB state (non-vacuous).
   await ownerPage.goto(`/boards/${roadmapId}`);
   await expect(ownerPage.getByText("Rehearsal capture card", { exact: true })).toBeVisible();
   const captureCardId = await getCardIdByTitle(roadmapId, "Rehearsal capture card");
@@ -401,8 +394,8 @@ test("the locked demo path runs continuously from the seeded fixture", async ({ 
   await expect(undoButton(ownerPage)).toHaveAccessibleName("Undo archive of Rehearsal capture card");
   expect(await getCardArchivedAt(captureCardId), "the captured card is the archived one").not.toBeNull();
   expect(await getCardArchivedAt(completedCardId), "the seeded completed card stays live").toBeNull();
-  // Settle the acting page's own post-archive work (revalidate RSC refresh,
-  // sheet-close replace) before the baseline, so the undo window starts from
+  // Settle the acting page's own post-archive work (RSC revalidate refresh,
+  // sheet-close replace) before the baseline so the undo window starts from
   // a quiescent page (W8-spec pattern).
   await ownerPage.waitForLoadState("networkidle");
   const ownerBaseline = { ...ownerTripwire.counts };
@@ -414,7 +407,7 @@ test("the locked demo path runs continuously from the seeded fixture", async ({ 
   expect(await getCardArchivedAt(captureCardId), "card restored in the DB").toBeNull();
   expect(await getCardArchivedAt(completedCardId), "seeded completed card never archived").toBeNull();
 
-  // ── Step 5: archive the Inbox list → Undo restores the list with cards. ──
+  // Step 5: archive the Inbox list → Undo restores the list with cards.
   await archiveList(ownerPage, inboxId);
   await expect(undoButton(ownerPage)).toHaveAccessibleName("Undo archive of Inbox");
   expect(await getListArchivedAt(inboxId), "the Inbox list is the archived one").not.toBeNull();
@@ -427,11 +420,10 @@ test("the locked demo path runs continuously from the seeded fixture", async ({ 
   ownerTripwire.check(listBaseline, "rehearsal list undo window");
   expect(await listExists(inboxId), "list restored in the DB").toBe(true);
   expect(await getListArchivedAt(inboxId), "list un-archived in the DB").toBeNull();
-  // The seeded cards of the list are back with it:
   await expect(cardInListById(ownerPage, inboxId, "Review graduation demo script")).toBeVisible();
   await expect(cardInListById(ownerPage, inboxId, "Triage customer feedback")).toBeVisible();
 
-  // ── Step 6: live invitation badge for a registered outsider. ─────────────
+  // Step 6: live invitation badge for a registered outsider.
   const stamp = Date.now();
   outsiderEmail = `rehearsal-outsider-${stamp}@e2e.test`;
   const outsiderPage = await (await browser.newContext()).newPage();
@@ -448,7 +440,6 @@ test("the locked demo path runs continuously from the seeded fixture", async ({ 
   await expect(bell(outsiderPage)).toHaveAccessibleName("Notifications");
   const outsiderBaseline = { ...outsiderTripwire.counts };
 
-  // Owner invites through the real members dialog.
   await inviteMember(ownerPage, DEMO_SLUG, outsiderEmail);
 
   // The outsider's already-loaded page shows the live badge — no reload.

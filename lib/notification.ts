@@ -192,7 +192,7 @@ export async function notifyCommentOnCard(data: {
   commenterUserId: string;
   commenterName: string;
 }): Promise<void> {
-  // Get all card members (assigned users) + card creator, exclude commenter
+  // Members + creator, excluding the commenter.
   const card = await db.card.findUnique({
     where: { id: data.cardId },
     select: {
@@ -322,13 +322,13 @@ export async function notifyInvited(data: {
   inviterName: string;
   workspaceName: string;
 }): Promise<void> {
-  // Intentionally a no-op. Pending workspace invitations are now surfaced
-  // directly in the unified inbox (the notification bell) from the invitation
-  // table, with inline Accept / Decline actions — see lib/notifications/inbox.ts
-  // and the /api/invitations/pending route. Creating a separate INVITE
-  // notification row here would duplicate that signal, so we no longer do it.
-  // The signature is preserved so existing callers in the invite flow keep
-  // working without change.
+  // Intentionally a no-op: pending workspace invitations are surfaced directly
+  // in the unified inbox (the notification bell) from the invitation table,
+  // with inline Accept / Decline actions — see lib/notifications/inbox.ts and
+  // the /api/invitations/pending route. Creating a separate INVITE
+  // notification row would duplicate that signal, so we no longer do it. The
+  // signature is preserved so existing callers in the invite flow keep working
+  // unchanged.
   void data;
 }
 

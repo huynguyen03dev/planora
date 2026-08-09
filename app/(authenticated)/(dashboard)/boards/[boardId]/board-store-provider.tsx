@@ -106,7 +106,6 @@ export function BoardStoreProvider({
     setSelectedCard,
   ]);
 
-  // Socket lifecycle: connect once, handle errors
   useEffect(() => {
     const socket = initSocket();
 
@@ -351,7 +350,7 @@ export function BoardStoreProvider({
 
     if (socket.connected) {
       joinBoard(boardId);
-      connectedRef.current = true; // baseline: we were already connected at mount
+      connectedRef.current = true;
     }
 
     function onConnect() {
@@ -370,7 +369,6 @@ export function BoardStoreProvider({
     };
   }, [boardId, router]);
 
-  // Reset store on unmount
   useEffect(() => {
     return () => {
       reset();

@@ -128,10 +128,10 @@ export function BoardHeader({
     }
 
     // A blur that lands while a save is in flight (the input is disabled
-    // mid-flight, and disabling a focused input fires a blur) must not wipe
-    // the typed draft: the in-flight transition settles editing/error state
-    // when it completes, and reverting here would discard a rename that may
-    // still land. Stay in edit mode and keep the draft.
+    // mid-flight, and disabling a focused input fires a blur) must not wipe the
+    // typed draft — the transition settles editing/error state on completion, and
+    // reverting here could discard a rename that may still land. Stay in edit
+    // mode and keep the draft.
     if (isPending) {
       return;
     }

@@ -111,11 +111,11 @@ export type CardWithListBoardRecord = {
 /**
  * W8 shape of `getArchivedCardWithListAndBoard`: the existing record plus the
  * parent-list discriminator. `parentListArchived: true` means the card exists
- * and remains archived but its parent list is archived — restoring it would
- * create a live card inside an invisible list. The resolver deliberately does
- * NOT hide this case behind null: the action needs the workspace/board scope
- * to run the permission gate BEFORE surfacing the dedicated message, so the
- * discrimination can never leak existence to unauthorized callers.
+ * and is archived but its parent list is archived — restoring it would create a
+ * live card inside an invisible list. The resolver deliberately does NOT hide
+ * this behind null: the action needs the workspace/board scope to run the
+ * permission gate BEFORE surfacing the dedicated message, so the discrimination
+ * can never leak existence to unauthorized callers.
  */
 export type ArchivedCardWithListBoardResult = CardWithListBoardRecord & {
   parentListArchived: boolean;
@@ -148,6 +148,7 @@ export async function createCard(data: {
     // Global workspace gate, then parent-to-child board → list locks. This is
     // re-entrant for recursive automation and prevents a cascade-wide lock
     // inversion.
+
     await lockWorkspaceRowForUpdate(tx, data.workspaceId);
     const board = await lockBoardRowsForUpdate(tx, [parentList.boardId]);
     if (board.length === 0) {
@@ -183,14 +184,14 @@ export async function createCard(data: {
 
 /**
  * Acquire the parent ordering scope before a card mutation that may evaluate
- * automation. The initial card lookup is deliberately after the workspace
- * gate: completion can race a move, and the current parent must be selected
- * under the same workspace serialization used by moveCardInTransaction.
+ * automation. The card lookup is deliberately after the workspace gate:
+ * completion can race a move, so the current parent must be selected under the
+ * same workspace serialization used by moveCardInTransaction.
  *
  * Lock order is workspace → board → list → card. Keeping this helper separate
  * from setCardCompletion preserves that helper's reusable compare-and-set
- * business semantics while making every production completion path safe for a
- * recursive move-capable automation cascade.
+ * semantics while making every production completion path safe for a recursive
+ * move-capable automation cascade.
  */
 export async function lockCardOrderingScopeForUpdate(
   tx: Prisma.TransactionClient,
@@ -248,16 +249,16 @@ export async function lockCardOrderingScopeForUpdate(
 /**
  * Move one live card inside an existing transaction.
  *
- * This is the single ordering protocol used by human DnD and automation:
- * workspace gate → sorted boards → sorted live lists → moved card → resolve →
+ * Single ordering protocol for human DnD and automation: workspace gate →
+ * sorted boards → sorted live lists → moved card → resolve →
  * normalize-if-needed → revision CAS. The workspace row lock is deliberately
  * broader than one board because recursive rules can target any board in their
  * workspace; re-acquiring it in the same transaction is safe and prevents two
  * recursive cascades from deadlocking while discovering new targets.
  *
- * `expectedMoveRevision` is supplied by human DnD. Automation omits it and
- * atomically bumps the revision observed under the card lock. Normalization only
- * rewrites sibling positions; it never bumps or emits sibling revisions.
+ * `expectedMoveRevision` comes from human DnD; automation omits it and
+ * atomically bumps the revision observed under the card lock. Normalization
+ * only rewrites sibling positions; it never bumps or emits sibling revisions.
  */
 export async function moveCardInTransaction(
   tx: Prisma.TransactionClient,
@@ -473,10 +474,9 @@ export async function getCardWithListAndBoard(
     return null;
   }
 
-  // US-074 Slice B2: reject if the parent list is archived, making the card
-  // immutable through all ordinary card/checklist/comment/member/label/attachment
-  // actions. Only archive-aware flows (getArchivedCardWithListAndBoard,
-  // getArchivedCards) resolve cards under archived lists.
+  // US-074 Slice B2: reject if the parent list is archived — cards under
+  // archived lists are immutable through ordinary actions; only archive-aware
+  // flows (getArchivedCardWithListAndBoard, getArchivedCards) resolve them.
   if (card.list.archivedAt !== null) {
     return null;
   }
@@ -536,8 +536,6 @@ export async function updateCardDetails(
     select: CARD_DETAIL_SELECT,
   });
 }
-
-// ─── Analytics-related card operations ─────────────────────────────
 
 export async function updateCardEstimate(
   cardId: string,
@@ -606,11 +604,10 @@ export async function updateCardDueDate(
 }
 
 /**
- * Resolve the next `completedAt` for a completion toggle (US-045). Pure: complete
- * writes a fresh timestamp, reopen clears it. A re-complete of an already-complete
- * card preserves the existing timestamp so the current-streak anchor (US-064) is
- * stable; a complete after a reopen sets a new timestamp (the reopen already
- * cleared it). `now` is injected so the transition is deterministic under test.
+ * Resolve the next `completedAt` for a completion toggle (US-045). Complete
+ * writes a fresh timestamp, reopen clears it; re-completing an already-complete
+ * card preserves the existing timestamp so the current-streak anchor (US-064)
+ * stays stable. `now` is injected so the transition is deterministic under test.
  */
 export function resolveCompletedAt(
   complete: boolean,
@@ -638,10 +635,10 @@ export async function setCardCompletion(
 
   // Compare-and-set: flip only a card still in its pre-toggle state. Under two
   // concurrent toggles the loser's WHERE matches zero rows, so exactly one caller
-  // sees `transitioned: true` — the CARD_COMPLETED / CARD_REOPENED history event
-  // is never double-written for one streak (decision 0021). A re-complete of an
-  // already-complete card likewise matches zero rows, preserving the original
-  // timestamp (the US-064 streak anchor) with no redundant write.
+  // sees `transitioned: true` — the CARD_COMPLETED / CARD_REOPENED event is never
+  // double-written for one streak (decision 0021). Re-completing an already-
+  // complete card likewise matches zero rows, preserving the original timestamp
+  // (the US-064 streak anchor) with no redundant write.
   const { count } = await client.card.updateMany({
     where: {
       id: cardId,
@@ -679,8 +676,7 @@ export async function setCardCompletion(
 }
 
 /**
- * Get card with list and members for history snapshot.
- * Used to capture metadata for analytics events.
+ * Card + list + board + member ids snapshot, for analytics event capture.
  */
 export async function getCardWithListAndMembers(cardId: string): Promise<{
   card: CardRecord;
@@ -858,8 +854,8 @@ export async function getArchivedCardWithListAndBoard(
   // (which would lose the workspace/board scope needed to gate the dedicated
   // "restore the list first" outcome), flag it: restoreCardAction checks the
   // permission first, then discriminates. The in-transaction FOR UPDATE
-  // revalidation (restoreCardAction) re-checks the same condition against the
-  // true race where the list is archived between this read and the commit.
+  // revalidation re-checks the same condition against the true race where the
+  // list is archived between this read and the commit.
   const { list, ...cardData } = card;
   return {
     card: cardData,

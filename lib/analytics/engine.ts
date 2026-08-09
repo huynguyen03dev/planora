@@ -34,7 +34,7 @@ type CompletedMetric = {
   completedLateCount: number;
   // Streak-anchored (currently-complete, anchor in range) → throughput / totalCompleted.
   completedCardIds: Set<string>;
-  // reopenRate is EVENT-BASED and decoupled from the streak "currently complete"
+  // reopenRate is EVENT-BASED, decoupled from the streak "currently complete"
   // filter (decision 0021): denominator = cards with any completion in range;
   // numerator = cards reopened (after a completion) in range. Keeping these
   // separate stops a completed-then-reopened-and-open card — which drops out of
@@ -524,11 +524,11 @@ function buildBurndownSeries(
 /**
  * The completion event that began the card's *current* completed streak — the
  * first CARD_COMPLETED after its last CARD_REOPENED, or the first completion if
- * it was never reopened (decision 0021 / US-064). Returns null when the card is
- * currently reopened (its last completion-relevant event is a CARD_REOPENED) or
- * never completed. This anchors throughput + cycle-time on when the work was
- * *actually* finished, robust to accidental/premature ticks under the US-045
- * casual toggle. The vestigial `firstCompletion` metadata flag is no longer read.
+ * never reopened (decision 0021 / US-064). Returns null when the card is
+ * currently reopened or never completed. This anchors throughput + cycle-time
+ * on when work was *actually* finished, robust to accidental/premature ticks
+ * under the US-045 casual toggle. The vestigial `firstCompletion` flag is no
+ * longer read.
  */
 function findCurrentStreakCompletionEvent(
   cardEvents: HistoryEvent[],
@@ -798,12 +798,11 @@ async function getWorkspaceAnalyticsLaunch(workspaceId: string): Promise<Date | 
 }
 
 /**
- * Shared fetch + shape step behind `getWorkspaceAnalytics` and
- * `getLeadTimeRows`: resolves the workspace timezone/launch boundary, derives
- * the selected + previous ranges from the SAME filters, and loads the board
- * scope + card history + card titles into the CardHistoryContext. Keeping this
- * in one place guarantees the load-more action computes rows against exactly
- * the range and filters the dashboard rendered.
+ * Shared fetch + shape step behind `getWorkspaceAnalytics` and `getLeadTimeRows`:
+ * resolves the workspace timezone/launch boundary, derives the selected +
+ * previous ranges from the SAME filters, and loads board scope + card history +
+ * titles into the CardHistoryContext. One place guarantees the load-more action
+ * computes rows against exactly the range and filters the dashboard rendered.
  */
 async function buildAnalyticsContext(workspaceId: string, filters: AnalyticsFilters) {
   const timezone = await getWorkspaceTimezone(workspaceId);
@@ -985,12 +984,12 @@ export async function getWorkspaceAnalytics(
 
 /**
  * Offset-paginated read of just the lead-time detail rows for the dashboard
- * "Load more" action (US — no silent 100-row cap). Reuses the same context
- * builder as `getWorkspaceAnalytics`, so the returned window is computed
- * against EXACTLY the range and filters the dashboard rendered; `hasMore`
- * reports whether rows exist past the window. KPIs are intentionally NOT
- * computed here — they always cover every completion in range and are served
- * by the initial payload.
+ * "Load more" action (no silent 100-row cap). Reuses the same context builder
+ * as `getWorkspaceAnalytics`, so the returned window is computed against
+ * EXACTLY the range and filters the dashboard rendered; `hasMore` reports
+ * whether rows exist past the window. KPIs are intentionally NOT computed
+ * here — they always cover every completion in range and are served by the
+ * initial payload.
  */
 export async function getLeadTimeRows(
   workspaceId: string,

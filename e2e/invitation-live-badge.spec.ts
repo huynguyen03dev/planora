@@ -181,8 +181,8 @@ test("invitation:new — a live invitation badge increments for Bob, shows in th
 
   created.push({ workspaceId, emails: [alice.email, bob.email.toLowerCase(), carol.email] });
 
-  // ── Observers settle (tripwires armed BEFORE the load, baselined after the
-  // ── connect-time badge resync) — Alice must not act before this.
+  // Observers settle (tripwires armed BEFORE the load, baselined after the
+  // connect-time badge resync) — Alice must not act before this.
   const bobTripwire = armProofTripwire(bobPage, "/boards");
   await settleObserver(bobPage, "/boards");
   const bobBaseline = { ...bobTripwire.counts };
@@ -199,18 +199,18 @@ test("invitation:new — a live invitation badge increments for Bob, shows in th
   // cannot be explained by the dropdown's open-time inbox fetch.
   await expect(bobPage.getByText(/invitation to/i)).toHaveCount(0);
 
-  // ── Act: Alice invites the registered Bob through the real members dialog.
+  // Act: Alice invites the registered Bob through the real members dialog.
   await inviteMember(alicePage, slug, bob.email);
 
-  // ── Assert live: Bob's badge increments with no reload, no navigation, no
-  // ── socket reconnect, and no inbox fetch (dropdown still closed).
+  // Assert live: Bob's badge increments with no reload, no navigation, no
+  // socket reconnect, and no inbox fetch (dropdown still closed).
   await expect(bell(bobPage)).toHaveAccessibleName("Notifications (1 unread)");
   bobTripwire.check(bobBaseline, "invitation:new live-badge window");
   expect(bobPage.url()).toContain("/boards");
   await expect(bobPage.getByText(/invitation to/i)).toHaveCount(0);
 
-  // ── Assert inbox: the invitation is displayed in Bob's bell dropdown,
-  // ── sourced live from the invitation table.
+  // Assert inbox: the invitation is displayed in Bob's bell dropdown,
+  // sourced live from the invitation table.
   await bell(bobPage).click();
   await expect(
     bobPage.getByText(`Invitation to WS ${tag}`, { exact: false }),
@@ -219,17 +219,17 @@ test("invitation:new — a live invitation badge increments for Bob, shows in th
     bobPage.getByText(/Alice invited you as editor/i),
   ).toBeVisible();
 
-  // ── Assert denial: Carol — connected and watching throughout — sees no
-  // ── badge change. The signal stayed inside Bob's user room.
+  // Assert denial: Carol — connected and watching throughout — sees no
+  // badge change. The signal stayed inside Bob's user room.
   await expect(bell(carolPage)).toHaveAccessibleName("Notifications");
   carolTripwire.check(carolBaseline, "Carol denial window");
 
-  // ── Act: Bob accepts the invitation from the inbox.
+  // Act: Bob accepts the invitation from the inbox.
   await bobPage.getByRole("button", { name: /^accept$/i }).click();
   await bobPage.waitForURL(/\/boards\?workspace=/, { timeout: 20_000 });
 
-  // ── Assert: the badge is cleared (the invitation is consumed) and Bob is a
-  // ── real workspace member — asserted in Postgres, the source of truth.
+  // Assert: the badge is cleared (the invitation is consumed) and Bob is a
+  // real workspace member — asserted in Postgres, the source of truth.
   await expect(bell(bobPage)).toHaveAccessibleName("Notifications");
   await expect
     .poll(() => isWorkspaceMember(workspaceId, bobId))

@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client"
   output   = "../app/generated/prisma"
@@ -9,8 +6,6 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
-
-// ─── Enums ─────────────────────────────────────────────────────────
 
 enum Priority {
   URGENT
@@ -66,7 +61,7 @@ enum CardHistoryEventType {
   BASELINE_CAPTURED
 }
 
-// ─── Better Auth–managed tables ────────────────────────────────────
+// Better Auth–managed tables
 
 model User {
   id            String   @id
@@ -205,7 +200,7 @@ model Invitation {
   @@map("invitation")
 }
 
-// ─── App-managed tables ────────────────────────────────────────────
+// App-managed tables
 
 model Board {
   id              String    @id @default(uuid())
@@ -250,11 +245,9 @@ model List {
   board        Board     @relation(fields: [boardId], references: [id], onDelete: Cascade)
   title        String
   position     Float
-  // Logical ordering-move revision (decision 0032): bumped when this list is
-  // created, restored, or deliberately reordered. Internal sibling
-  // normalization rewrites positions only and does not bump sibling revisions.
-  // Clients send the revision they saw as `expectedMoveRevision`; the write
-  // CASes on it so a stale-client reorder is rejected with ORDER_CONFLICT.
+  // CAS revision (decision 0032): bumped on deliberate reorder; internal
+  // sibling normalization rewrites positions only. Clients send
+  // `expectedMoveRevision`; stale-client writes fail with ORDER_CONFLICT.
   moveRevision Int       @default(0)
   archivedAt   DateTime?
   createdAt    DateTime  @default(now())
@@ -263,10 +256,10 @@ model List {
   cards Card[]
 
   @@index([boardId, archivedAt])
-  // Partial UNIQUE index `list_boardId_position_live_key` on (boardId, position)
-  // WHERE archivedAt IS NULL enforces live-list position uniqueness (US-074, decision 0026).
-  // It cannot be expressed as `@@unique` (Prisma has no WHERE predicate), so it lives in
-  // migration SQL only and is intentionally invisible to `prisma migrate` — expect drift.
+  // Partial UNIQUE index `list_boardId_position_live_key` (boardId, position)
+  // WHERE archivedAt IS NULL enforces live-list position uniqueness (US-074,
+  // decision 0026). Prisma has no WHERE-predicate `@@unique`, so it lives in
+  // migration SQL only — invisible to `prisma migrate`, expect drift.
   @@map("list")
 }
 
@@ -277,11 +270,9 @@ model Card {
   title         String
   description   String?   @db.Text
   position      Float
-  // Logical ordering-move revision (decision 0032): bumped when this card is
-  // created, restored, or deliberately reordered/moved by a user or rule.
-  // Internal sibling normalization rewrites positions only and does not bump
-  // sibling revisions. Clients send `expectedMoveRevision`; the write CASes on
-  // it so a stale-client reorder is rejected with ORDER_CONFLICT.
+  // CAS revision (decision 0032): bumped on deliberate reorder/move by a user
+  // or rule; internal sibling normalization rewrites positions only. Clients
+  // send `expectedMoveRevision`; stale-client writes fail with ORDER_CONFLICT.
   moveRevision Int       @default(0)
   priority      Priority?
   dueDate       DateTime?
@@ -306,12 +297,11 @@ model Card {
   @@index([listId, position])
   @@index([listId, archivedAt])
   @@index([dueDate, completedAt])
-  // Partial UNIQUE index `card_listId_position_live_key` on (listId, position)
+  // Partial UNIQUE index `card_listId_position_live_key` (listId, position)
   // WHERE archivedAt IS NULL AND deletedAt IS NULL enforces live-card position
-  // uniqueness (US-056, decision 0015). It cannot be expressed as `@@unique`
-  // (Prisma has no WHERE predicate), so it lives in the
-  // 20260701134906_card_position_integrity migration only and is intentionally
-  // invisible to `prisma migrate` — expect a drift report; never drop it.
+  // uniqueness (US-056, decision 0015). Prisma has no WHERE-predicate
+  // `@@unique`, so it lives in migration 20260701134906_card_position_integrity
+  // only — invisible to `prisma migrate`, expect drift; never drop it.
   @@map("card")
 }
 
@@ -447,7 +437,7 @@ model Notification {
   @@map("notification")
 }
 
-// ─── Scheduler bookkeeping (due-date reminders) ───────────────────
+// Scheduler bookkeeping (due-date reminders)
 
 model CardReminder {
   id        String   @id @default(uuid())
@@ -461,8 +451,6 @@ model CardReminder {
   @@index([cardId])
   @@map("cardReminder")
 }
-
-// ─── Automation rules engine ─────────────────────────────────────
 
 model Rule {
   id            String   @id @default(uuid())
@@ -493,8 +481,8 @@ model Rule {
 model RuleExecutionLog {
   id          String   @id @default(uuid())
   // Denormalized workspace + rule name so the audit row survives rule deletion
-  // (the CardHistoryEvent survival pattern). ruleId goes null on delete but the
-  // workspace scope and the human-readable name remain for the log panel.
+  // (CardHistoryEvent survival pattern); ruleId nulls but the name remains for
+  // the log panel.
   workspaceId String
   ruleId      String?
   ruleName    String
@@ -520,7 +508,7 @@ model RuleExecutionLog {
   @@map("ruleExecutionLog")
 }
 
-// ─── Analytics History (append-only, survives card/list deletion) ───
+// Analytics History (append-only, survives card/list deletion)
 
 model CardHistoryEvent {
   id           String               @id @default(uuid())

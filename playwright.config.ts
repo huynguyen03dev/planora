@@ -5,13 +5,10 @@ import { defineConfig, devices } from "@playwright/test";
 import { shouldReuseExistingE2eServer } from "@/lib/e2e-server-policy";
 
 /**
- * E2E config for the two-client realtime harness (US-009).
- *
- * Boots the REAL app (`server.ts` = Next.js + Socket.io) and drives two browser
- * contexts against it. Single worker: the suite shares one server and one
- * database, and the realtime tests coordinate two users on one board, so
- * parallel files would race on shared state. This suite is intentionally NOT
- * part of the required CI gate (US-008) — it runs in its own workflow.
+ * E2E harness for the two-client realtime suite (US-009): boots the real
+ * server.ts app and drives two browser contexts. Single worker — files would
+ * race on the shared server/database. Runs in its own workflow, not the
+ * required CI gate (US-008).
  */
 const PORT = 3000;
 const BASE_URL = `http://localhost:${PORT}`;

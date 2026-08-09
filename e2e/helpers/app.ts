@@ -99,9 +99,8 @@ export async function addCardToList(page: Page, listId: string, cardTitle: strin
 // ── Keyboard drag-and-drop ────────────────────────────────────────────────
 // @hello-pangea/dnd's pointer/CDP drag does NOT engage the sensor; the keyboard
 // sensor does. Each step is gated on the library's own `aria-live` announcement
-// (a visually-hidden `[id^="rfd-announcement-"]` region), which is the
-// deterministic signal that the lift/move/drop actually took effect — far less
-// flaky than fixed waits.
+// (a visually-hidden `[id^="rfd-announcement-"]` region) — the deterministic
+// signal that the lift/move/drop took effect, far less flaky than fixed waits.
 
 /** The board's @hello-pangea/dnd screen-reader announcement region. */
 function announcement(page: Page) {
@@ -216,7 +215,7 @@ export async function archiveCard(page: Page, cardId: string): Promise<void> {
   // data-rfd-draggable-id and role=button on the same div), so click it
   // directly — a descendant-scoped getByRole would match nothing.
   await page.locator(`[data-rfd-draggable-id="${cardId}"]`).click();
-  // Header quick-action (aria-label) opens the confirm dialog.
+  // Header quick-action opens the confirm dialog.
   await page.getByRole("button", { name: "Archive card" }).first().click();
   // Confirm inside the alert dialog (scoped so it can't match the header button).
   await page
@@ -226,10 +225,8 @@ export async function archiveCard(page: Page, cardId: string): Promise<void> {
   // The confirm click fires the Server Action asynchronously (the dialog
   // closes once it resolves), and Playwright's click() does not await that
   // transition — so the archive can still be committing when this helper
-  // returns. Callers that navigate straight away (today.spec.ts AC5 arrange:
-  // archive then `goto("/today")`) would race the commit and assert on a
-  // stale /today render. A non-null archivedAt is only visible after the
-  // transaction commits, so polling the DB is the exact commit barrier.
+  // returns. Polling the DB for a non-null archivedAt is the exact commit
+  // barrier (callers like today.spec.ts navigate straight after archiving).
   await expect
     .poll(() => getCardArchivedAt(cardId), { timeout: 15_000 })
     .not.toBeNull();
@@ -317,13 +314,10 @@ export async function renameOpenCard(page: Page, newTitle: string): Promise<void
   await expect(page.getByText(/saving/i)).toHaveCount(0);
 }
 
-// ── Label management (in the open card detail sheet) ──────────────────────
 // US-033 moved board-label CRUD (rename / recolor / delete / create) out of the
-// inline card list into a "Manage labels" dialog (card-labels-section.tsx →
-// ManageLabelsDialog). Each label there is an <li> that renders its name as text
-// plus Edit / Delete controls. Driving rename/delete here exercises the real
-// updateLabelAction / deleteLabelAction — the Server Actions whose realtime emit
-// US-010 adds.
+// inline card list into a "Manage labels" dialog. Driving rename/delete here
+// exercises the real updateLabelAction / deleteLabelAction — the Server Actions
+// whose realtime emit US-010 adds.
 
 /** Open the "Manage labels" dialog from the open card sheet; returns its locator. */
 async function openManageLabelsDialog(page: Page) {
@@ -366,17 +360,15 @@ export async function deleteBoardLabel(page: Page, name: string): Promise<void> 
   await row.getByRole("button", { name: /^delete$/i }).click();
   // Confirm inside the alert dialog (scoped so it can't match the row's Delete
   // button). The row wait alone passes spuriously: the modal alert hides the
-  // parent dialog with aria-hidden, so the role-based row locator matches
-  // nothing the instant the alert opens — before any delete has run.
+  // parent dialog with aria-hidden, so the row locator matches nothing the
+  // instant the alert opens — before any delete has run.
   const confirmDialog = page.getByRole("alertdialog", { name: `delete "${name}"` });
   await confirmDialog.getByRole("button", { name: "Delete" }).click();
-  // Only once the alert has closed (the action resolved) can row count 0 mean
-  // the refresh removed the row — i.e. the label is actually deleted.
+  // Row count 0 is meaningful only after the alert closed (action resolved).
   await expect(confirmDialog).toHaveCount(0);
   await expect(row).toHaveCount(0);
 }
 
-// ── Card members (in the open card detail sheet) ──────────────────────────
 // Members render ONLY in the card detail sheet (never on the card face), so the
 // realtime proof observes the open sheet. assignCardMemberAction /
 // removeCardMemberAction are the actions whose realtime emit US-011 adds.
@@ -434,8 +426,6 @@ export async function inviteMember(page: Page, slug: string, email: string): Pro
   await page.getByRole("button", { name: /^send invite$/i }).click();
   await expect(page.getByRole("dialog", { name: "Invite to workspace" })).toHaveCount(0);
 }
-
-// ── List/card scoping locators (strict, id-based) ─────────────────────────
 
 /** A list column root, scoped by list id (the column is draggable under that id). */
 export function listColumnById(page: Page, listId: string) {

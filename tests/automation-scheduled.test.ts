@@ -141,7 +141,6 @@ describe("evaluateScheduledCard — Tier 1 + Tier 2 dedup", () => {
       data: { cardId: "card-1", userId: "user-1", milestone: SCHEDULED_MILESTONE },
     });
 
-    // Notification sent
     expect(mockNotifyAutomation).toHaveBeenCalledWith({
       recipientUserId: "user-1",
       cardId: "card-1",

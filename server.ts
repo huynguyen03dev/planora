@@ -49,14 +49,10 @@ app.prepare().then(() => {
     const userId = (socket.data as SocketData).userId;
     socket.join(ROOMS.user(userId));
 
-    // Per-socket "wanted" sets: which boards/workspaces this client currently
-    // wants to be in (F1). board:join / workspace:join are async (authz query),
-    // so a fast A→B navigation (or a React StrictMode double-mount) can emit
-    // leave *before* the join's await resolves. Recording intent synchronously
-    // lets the post-await code detect that the client already left — otherwise
-    // the join would still call socket.join() + presenceRegistry.add(), leaving
-    // a ghost room membership / watcher that never gets cleaned until
-    // disconnect.
+    // F1 race guard: record which boards/workspaces this socket wants to join
+    // synchronously, so a leave emitted during the join's async authz query can
+    // cancel it — otherwise the join leaves a ghost room membership / watcher
+    // until disconnect.
     const wantedBoards = new Set<string>();
     const wantedWorkspaces = new Set<string>();
 
@@ -68,17 +64,16 @@ app.prepare().then(() => {
       const role = await getBoardMembershipRole(userId, boardId);
 
       if (!role) {
-        // The client may have navigated away while the authz query was in
-        // flight — don't error a socket that no longer wants this board.
+        // Client may have navigated away during the authz query — don't error
+        // a socket that no longer wants this board.
         if (socket.connected && wantedBoards.has(boardId)) {
           socket.emit("board:error", { message: "Not authorized to join this board" });
         }
         return;
       }
 
-      // The tab may have closed, or the client left the board, during the auth
-      // round-trip — don't join a room or register a watcher for a ghost
-      // (F1).
+      // Tab may have closed or the client left during the auth round-trip —
+      // don't join a room or register a watcher for a ghost (F1).
       if (!socket.connected || !wantedBoards.has(boardId)) {
         wantedBoards.delete(boardId);
         return;
@@ -100,9 +95,8 @@ app.prepare().then(() => {
       // the board-independent profile.
       const watcher: Watcher = { ...profile, role };
 
-      // Broadcast only when this is the user's first socket on the board; the
-      // broadcast targets the room the joiner is now in, so they receive the
-      // full list too.
+      // Broadcast only on the user's first socket on the board; the joiner is
+      // in the room the broadcast targets, so they receive the full list too.
       if (presenceRegistry.add(boardId, socket.id, watcher)) {
         emitBoardPresence(boardId, presenceRegistry.watchers(boardId));
       }
@@ -148,10 +142,9 @@ app.prepare().then(() => {
     });
 
     socket.on("disconnect", () => {
-      // Drop this socket from every board it was viewing and refresh presence for
-      // the boards where the user actually left (last tab gone). Uses the
-      // registry's reverse index, so `socket.rooms` (already cleared by now) is
-      // not needed.
+      // Drop the socket from every board it viewed and refresh presence only
+      // where the user actually left (last tab gone); uses the registry's
+      // reverse index since `socket.rooms` is already cleared.
       for (const boardId of presenceRegistry.removeSocket(socket.id)) {
         emitBoardPresence(boardId, presenceRegistry.watchers(boardId));
       }
@@ -162,17 +155,15 @@ app.prepare().then(() => {
     console.log(`> Ready on http://${hostname}:${port}`);
   });
 
-  // ── Due-date reminder scheduler driver ───────────────────────────────
-  // In-process setInterval that hits the cron route every 15 minutes.
-  // No-op when CRON_SECRET is unset (prod may use external cron instead).
+  // In-process driver hitting the cron route every 15 minutes; no-op when
+  // CRON_SECRET is unset (prod may use external cron instead).
   let reminderInterval: ReturnType<typeof setInterval> | null = null;
 
   if (process.env.CRON_SECRET) {
     const CRON_INTERVAL_MS = 15 * 60 * 1000;
-    // F8 (round-2): self-fetch targets 127.0.0.1 (IPv4 loopback) — `hostname`
-    // may be "0.0.0.0" (not connectable) or resolve localhost to ::1 while the
-    // server binds IPv4-only. CRON_SELF_URL overrides for custom setups
-    // (tunnels, load balancers).
+    // F8: self-fetch targets 127.0.0.1 (IPv4 loopback) — `hostname` may be
+    // "0.0.0.0" (not connectable) or resolve to ::1 while the server binds
+    // IPv4-only; CRON_SELF_URL overrides for tunnels/load balancers.
     const appUrl = process.env.CRON_SELF_URL ?? `http://127.0.0.1:${port}`;
 
     reminderInterval = setInterval(async () => {
@@ -197,7 +188,7 @@ app.prepare().then(() => {
     console.log("[due-date-scheduler] CRON_SECRET unset — in-process driver disabled");
   }
 
-  // ── Graceful shutdown (MEDIUM-2) ────────────────────────────────────
+  // Graceful shutdown (MEDIUM-2).
   const shutdown = () => {
     console.log("[server] Shutting down...");
     if (reminderInterval) {

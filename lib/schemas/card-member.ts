@@ -1,7 +1,5 @@
-// lib/schemas/card-member.ts
 import { z } from "zod";
 
-// Schema for assigning a member to a card
 export const assignCardMemberSchema = z.object({
   cardId: z
     .string({ message: "Card ID is required" })
@@ -14,7 +12,6 @@ export const assignCardMemberSchema = z.object({
     .max(255, "User ID is too long"),
 });
 
-// Schema for removing a member from a card
 export const removeCardMemberSchema = z.object({
   cardId: z
     .string({ message: "Card ID is required" })

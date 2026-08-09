@@ -43,33 +43,29 @@ export type TodaySectionGroup = {
 };
 
 /**
- * Explicit pagination page size for `/today` (US-083 follow-up). No silent
- * cap: the initial render + every infinite-scroll batch fetch this many rows
- * with `hasMore` reported exactly (limit+1 probe), so the whole personal
- * read model stays reachable. 30 keeps each auto-loaded batch light (≈ a
- * viewport of tiles) while the sentinel-driven loop never hides cards.
- * Client-safe (no server-only import) so both the RSC seam and the client
- * boundary share the same value.
+ * Explicit pagination page size for `/today` (US-083 follow-up). No silent cap:
+ * the initial render + every infinite-scroll batch fetch this many rows with
+ * `hasMore` reported exactly (limit+1 probe), so the whole personal read model
+ * stays reachable. Client-safe (no server-only import) so the RSC seam and the
+ * client boundary share the same value.
  */
 export const TODAY_PAGE_SIZE = 30;
 
 /**
- * The client-side cursor for the next `/today` page. The query layer sorts
- * by `(dueDate asc nulls last, id asc)` and the cursor is the (dueDate, id)
- * of the last loaded card in THAT order — a null dueDate is a real cursor
- * position (the no-due "Later" group sorts last), so it is carried as `null`
- * and must not be confused with "no cursor".
+ * The client-side cursor for the next `/today` page. The query layer sorts by
+ * `(dueDate asc nulls last, id asc)` and the cursor is the (dueDate, id) of the
+ * last loaded card in THAT order — a null dueDate is a real cursor position
+ * (the no-due "Later" group sorts last) and must not be confused with "no
+ * cursor".
  */
 export type TodayCursor = { dueDate: string | null; id: string };
 
 /**
- * Picks the card that sorts last under the server's (dueDate asc nulls
- * last, id asc) order — i.e. the exact cursor position the next page must
- * continue after. Works over any subset (the displayed cards are always a
- * deduped prefix of the server order, so the max IS the last loaded row);
- * re-grouping for display sorts by (dueDate, title) and does not change it.
- * Completed cards are skipped defensively (the read model never returns
- * them). Null when there is nothing loaded yet.
+ * Picks the card that sorts last under the server's (dueDate asc nulls last,
+ * id asc) order — the exact cursor position the next page must continue after.
+ * Works over any subset (displayed cards are always a deduped prefix of the
+ * server order, so the max IS the last loaded row). Completed cards are skipped
+ * defensively (the read model never returns them). Null when nothing is loaded.
  */
 export function getTodayLoadMoreCursor(cards: TodayCard[]): TodayCursor | null {
   let cursor: TodayCursor | null = null;
