@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -73,6 +74,9 @@ export function CreateWorkspaceModal({
       <DialogContent className="w-[calc(100%-2rem)]">
         <DialogHeader>
           <DialogTitle>Create workspace</DialogTitle>
+          <DialogDescription>
+            Workspaces group your boards and members together.
+          </DialogDescription>
         </DialogHeader>
 
         <form action={handleSubmit}>

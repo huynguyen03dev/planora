@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -100,6 +101,9 @@ export function CreateBoardModal({
       <DialogContent className="w-[calc(100%-2rem)]">
         <DialogHeader>
           <DialogTitle>Create board</DialogTitle>
+          <DialogDescription>
+            Create a board to start organizing cards and lists.
+          </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">

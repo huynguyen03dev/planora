@@ -87,3 +87,47 @@ describe("CreateWorkspaceModal — scoped error announcement", () => {
     expect(input).not.toHaveAttribute("aria-describedby");
   });
 });
+
+describe("CreateWorkspaceModal — dialog description (warning-free structure)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("describes the dialog with a DialogDescription wired via aria-describedby", () => {
+    renderModal();
+
+    const dialog = screen.getByRole("dialog", { name: "Create workspace" });
+    const describedBy = dialog.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(dialog).toHaveAccessibleDescription(
+      "Workspaces group your boards and members together.",
+    );
+
+    // The referenced element is the primitive's description node.
+    const description = document.getElementById(describedBy!);
+    expect(description).toBeInTheDocument();
+    expect(description).toHaveTextContent(
+      "Workspaces group your boards and members together.",
+    );
+  });
+
+  it("opens without the Radix missing-description warning", () => {
+    // DialogContent always sets aria-describedby to a generated id; Radix
+    // console.warns when no DialogDescription element exists with that id.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      renderModal();
+
+      const radixWarnings = warnSpy.mock.calls.filter((args) =>
+        args.some(
+          (arg) =>
+            typeof arg === "string" && /description|aria-describedby/i.test(arg),
+        ),
+      );
+      expect(radixWarnings).toHaveLength(0);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+});
