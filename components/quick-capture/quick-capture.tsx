@@ -51,10 +51,10 @@ const TOAST_DISMISS_MS = 6000;
  * is awaited in the open path), the lazy options fetch (one read-only Server
  * Action, first open only), the board/list defaults, the submit through the
  * EXISTING `createCardAction` (optional description/due date/priority ride
- * the same FormData), and the success toast (a transient `role="status"`
- * owned by this component — no Notification row, no app-wide toast
- * framework). No auto-navigation; the toast's "View Card on Board" deep link
- * is the only path off the current route.
+ * the same FormData), and a self-contained success toast (transient
+ * `role="status"`, no app-wide toast framework). No auto-navigation; the
+ * toast's "View Card on Board" deep link is the only path off the current
+ * route.
  *
  * Shortcuts: bare `C` and `Cmd/Ctrl+K` via the locked guard contract in
  * `lib/quick-capture.ts` — preventDefault ONLY when actually handled.
@@ -79,14 +79,13 @@ export function QuickCapture() {
   const [shortcutsReady, setShortcutsReady] = useState(false);
 
   // Lazy options: fetched once on the FIRST open, then cached for the
-  // session. The dialog itself never waits on it. A failed fetch can be
-  // retried from the inline error state. Closing the dialog mid-fetch
-  // clears the started flag AND invalidates the in-flight request
-  // (fetchSeqRef bump), so the next open refetches — and a late
-  // resolve/reject of the stale request can never overwrite the newer one
-  // (request-id discrimination). Board/list selects stay CONTROLLED from
-  // first mount (`?? ""` — never `undefined`) so they never flip
-  // uncontrolled → controlled while options load.
+  // session; the dialog itself never waits on it, and a failed fetch can be
+  // retried from the inline error state. Closing mid-fetch clears the started
+  // flag AND invalidates the in-flight request (fetchSeqRef bump), so the
+  // next open refetches and a late resolve/reject of the stale request can
+  // never overwrite the newer one (request-id discrimination). Board/list
+  // selects stay CONTROLLED from first mount (`?? ""` — never `undefined`)
+  // so they never flip uncontrolled → controlled while options load.
   const fetchStartedRef = useRef(false);
   const fetchSeqRef = useRef(0);
   const [retryKey, setRetryKey] = useState(0);

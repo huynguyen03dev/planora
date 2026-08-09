@@ -13,8 +13,8 @@ import { useEffect, useId, useRef } from "react";
  * `ref.contains(target)` on purpose: the latter compares node identity, which
  * is unreliable under the happy-dom test environment, whereas `closest` walks
  * the real ancestor chain. A per-instance `useId` scopes the match to this
- * composer so sibling composers don't swallow each other's outside-clicks.
- * The listener is only attached while `enabled` is true.
+ * composer so siblings don't swallow each other's outside-clicks. The listener
+ * is only attached while `enabled` is true.
  */
 export function useClickOutside(
   enabled: boolean,

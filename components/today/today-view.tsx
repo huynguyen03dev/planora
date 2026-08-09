@@ -33,11 +33,10 @@ type TodayViewProps = {
 };
 
 // Priority chip — shared meta-chip ramp with the card face
-// (components/boards/list-card-item.tsx, lib/constants.ts): token tint pairs
-// (label-*, warning), AA-measured in globals.css for both themes, icon + word,
-// never color-only (WCAG 1.4.1).
+// (lib/constants.ts): token tint pairs (label-*, warning), AA-measured in
+// globals.css for both themes; icon + word, never color-only (WCAG 1.4.1).
 
-// Due chip tint per bucket — values are the shared card-face due-state ramp
+// Due chip tint per bucket — the shared card-face due-state ramp
 // (lib/constants.ts): destructive for overdue, warning tint for today, warning
 // text for this week (≈ card-face "soon"), muted for later (≈ "upcoming"). The
 // chip ALWAYS carries an icon + word + aria-label — the tint is reinforcement,
@@ -152,12 +151,10 @@ function TodayEmptyState({ variant }: { variant: "no-workspaces" | "nothing-assi
 }
 
 /**
- * Deterministic pre-mount placeholder. Server HTML and the first client
- * paint must be IDENTICAL (hydration can never rebucket), so while the
- * component is not yet mounted we render no time-dependent grouping at all —
- * just the page header + this skeleton (same shape as loading.tsx). One
- * `role="status"` announcement; the Skeleton blocks are aria-hidden per the
- * ui/skeleton contract.
+ * Deterministic pre-mount placeholder. Server HTML and the first client paint
+ * must be IDENTICAL (hydration can never rebucket), so before mount we render
+ * no time-dependent grouping — just the page header + this skeleton (same
+ * shape as loading.tsx), with one `role="status"` announcement.
  */
 function TodaySkeletonSections() {
   return (
@@ -273,9 +270,8 @@ export function TodayView({
 }: TodayViewProps) {
   // The viewer's clock, captured once at the FIRST client render. SSR never
   // reads it: pre-mount we render the deterministic skeleton, and hydration's
-  // first client paint matches the server HTML exactly. Grouping/labels use
-  // this captured clock only after mount, so a remote viewer whose local
-  // midnight differs from the server's can never rebucket on hydration.
+  // first client paint matches the server HTML exactly, so a remote viewer
+  // whose local midnight differs from the server's can never rebucket.
   const [clock] = useState(() => now ?? new Date());
 
   // Explicit keyset pagination (no silent cap): the first page arrives via
@@ -291,7 +287,7 @@ export function TodayView({
 
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   // Synchronous in-flight flag: set before the first await, so two observer
-  // callbacks in the SAME tick (or a double-click on the fallback) collapse
+  // callbacks in the same tick (or a double-click on the fallback) collapse
   // into one request — the state guard alone cannot see the update yet.
   const requestInFlightRef = useRef(false);
 
@@ -314,8 +310,8 @@ export function TodayView({
       const formData = new FormData();
       formData.set("limit", String(TODAY_PAGE_SIZE));
       formData.set("cursorId", cursor.id);
-      // Empty string = a null dueDate (the no-due Later group) — a real
-      // cursor position, not "no cursor".
+      // Empty string = a null dueDate (the no-due Later group) — a real cursor
+      // position, not "no cursor".
       formData.set("cursorDueDate", cursor.dueDate ?? "");
       const result = await loadMoreTodayCardsAction(formData);
       if (!result.success) {

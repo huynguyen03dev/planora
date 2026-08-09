@@ -152,15 +152,11 @@ export function CardDetailSheet({
   const storeSelectedCard = useBoardStore((state) => state.selectedCard);
   const [dismissedCardId, setDismissedCardId] = useState<string | null>(null);
 
-  // The URL is the authority for "is a card selected". The `open`/`card` props
-  // are server-derived and can lag reality: router.replace() is async, and a
-  // stale in-flight router.refresh() payload (fetched while ?cardId was still in
-  // the URL — queued autosave, socket reconnect, list:restored, drag resync) can
-  // land AFTER the close navigation. page.tsx keys this component by the server
-  // card id (`selectedCard?.id ?? "card-detail-sheet-closed"`), so that stale
-  // payload REMOUNTS the sheet with open=true and a reset dismissedCardId — the
-  // dialog would flash open even though the URL no longer selects a card. The
-  // urlCardId check keeps the dialog closed across that remount (close-flash).
+  // The URL is the authority for whether a card is selected. The server-derived
+  // `open`/`card` props can lag reality (a stale in-flight router.refresh()
+  // payload can land after the close navigation and remount this sheet with
+  // open=true), so the urlCardId check keeps the dialog closed across that
+  // remount (close-flash).
   const urlCardId = searchParams.get("cardId");
 
   const liveComments: UIComment[] =
@@ -171,9 +167,9 @@ export function CardDetailSheet({
     storeSelectedCard && card && storeSelectedCard.card.id === card.id
       ? storeSelectedCard.activity
       : initialActivity;
-  // Members render only here (not on the card face), so they live-update from
-  // the store's selectedCard when this is the open card — mirroring comments.
-  // This is what makes a remote assign/remove appear without a reload (US-011).
+  // Members render only here, so they live-update from the store's selectedCard
+  // when this is the open card — a remote assign/remove appears without a reload
+  // (US-011).
   const liveAssignees =
     storeSelectedCard && card && storeSelectedCard.card.id === card.id
       ? storeSelectedCard.assignees
@@ -182,12 +178,9 @@ export function CardDetailSheet({
     storeSelectedCard && card && storeSelectedCard.card.id === card.id
       ? storeSelectedCard.assignableMembers.map((m) => ({ ...m, role: "" }))
       : assignableMembers;
-  // F4 (round-2): the open sheet's label set merges from the store when this is
-  // the open card — mirroring comments/members — so a remote label attach /
-  // detach (or the rename/recolor fan-out) reaches the sheet live, instead of
-  // waiting for a router.refresh to reseed the server `cardLabelIds` prop. The
-  // seed (page.tsx) guarantees the fresh-open case matches the prop; the
-  // attach/remove round-trip in the sheet stays server-authoritative.
+  // When this is the open card, merge the store's label set so a remote
+  // attach/detach (or rename/recolor fan-out) reaches the sheet live; the
+  // page.tsx seed stays authoritative for the fresh-open case.
   const storeLabels =
     storeSelectedCard && card && storeSelectedCard.card.id === card.id
       ? storeSelectedCard.labels
@@ -195,10 +188,8 @@ export function CardDetailSheet({
   const liveLabelIds: string[] = storeLabels
     ? storeLabels.map((label) => label.id)
     : cardLabelIds;
-  // Chips render from boardLabels filtered by the attached ids — override the
-  // open card's entries with the live store snapshot so a remote rename/recolor
-  // updates the chip text/color too, and union any store label the (stale)
-  // prop list lacks (a label created remotely while the sheet is open).
+  // Render chips from the live store snapshot so a remote rename/recolor
+  // updates chip text/color, and union labels created remotely while open.
   const liveBoardLabels: LabelChip[] = storeLabels
     ? [
         ...boardLabels.map(
@@ -218,24 +209,17 @@ export function CardDetailSheet({
     urlCardId === currentCard.id &&
     dismissedCardId !== currentCard.id;
 
-  // Once the URL stops selecting this card, the dismissal latch is obsolete
-  // (the router.replace committed). Forget it so a later intentional reopen
-  // (BoardContent.openCard pushes ?cardId again) isn't swallowed — even when a
-  // stale server payload keeps this instance mounted with the same key. The
-  // urlCardId check above keeps the dialog closed regardless, so clearing the
-  // latch can never reopen it by itself. This is the React "adjust state during
-  // render" pattern (guarded, so it can't loop) — same as the title/description
-  // baseline sync below.
+  // Once the URL drops this card the dismissal latch is obsolete (the
+  // router.replace committed) — forget it so a later reopen isn't swallowed;
+  // the urlCardId check keeps the dialog closed regardless. Guarded "adjust
+  // state during render" pattern (can't loop).
   if (dismissedCardId === currentCard.id && urlCardId !== currentCard.id) {
     setDismissedCardId(null);
   }
 
-  // Bind the hero title/description to the live store value (not the stale server
-  // prop) so a remote rename or description edit isn't clobbered when the field
-  // blurs (US-043). Comments/activity/members already merge from the store above.
-  // The meta fields (due date, priority, estimate) merge the same way (F3): the
-  // store patches them on card:meta-updated, so the sheet's drafts reconcile to
-  // the live value instead of a stale server prop.
+  // Bind title/description drafts to the live store value so a remote edit
+  // isn't clobbered on blur (US-043); due date/priority/estimate merge the same
+  // way (F3), reconciling drafts to the live card instead of a stale prop.
   const liveCard: CardDetailRecord =
     storeSelectedCard && storeSelectedCard.card.id === currentCard.id
       ? {
@@ -270,10 +254,9 @@ export function CardDetailSheet({
       <DialogContent
         className="h-[min(90vh,820px)] max-w-[min(96vw,768px)] overflow-hidden bg-popover p-0"
         onEscapeKeyDown={(e) => {
-          // While the hero title is being edited, Escape reverts the field
-          // (handled on the input) and must NOT close the dialog. Cancel Radix's
-          // dismiss here — the supported API — only when the title input holds an
-          // unsaved edit; otherwise Escape closes the dialog as usual (US-043).
+          // With an unsaved title edit, Escape reverts the field (handled on the
+          // input) and must not close the dialog — cancel Radix's dismiss here,
+          // the supported API (US-043).
           const active = document.activeElement as HTMLInputElement | null;
           if (
             active?.id === "card-detail-title" &&
@@ -316,9 +299,8 @@ type CardDetailDialogBodyProps = {
   activityHasMore: boolean;
   attachments: AttachmentRecord[];
   assignees: CardMemberRecord[];
-  // Role-less: the dropdown renders name/email only, and the live store snapshot
-  // (selectedCard.assignableMembers) carries no role. AssignableWorkspaceMemberRecord
-  // from the server prop is structurally assignable here (US-011).
+  // The live store snapshot carries no role; the server prop's
+  // AssignableWorkspaceMemberRecord is structurally assignable here (US-011).
   assignableMembers: AssignableWorkspaceMemberRecord[];
   boardId: string;
   boardLabels: LabelChip[];
@@ -362,10 +344,9 @@ function CardDetailDialogBody({
   // Failures surface through `error` (full text, no truncation).
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
-  // Cursor-paginated comments/activity: the first page is server-seeded (props),
-  // and these hold the pages appended via "Load more". The body is keyed by
-  // card id, so all of this resets when a different card opens. `hasMore` is
-  // seeded from the server flag and updated from each action response.
+  // Server-seeded first page + pages appended via "Load more"; the body is keyed
+  // by card id so this resets on card change. `hasMore` seeds from the server
+  // flag and updates from each action response.
   const [extraComments, setExtraComments] = useState<UIComment[]>([]);
   const [extraActivity, setExtraActivity] = useState<UIActivity[]>([]);
   const [commentsHasMoreState, setCommentsHasMoreState] = useState(commentsHasMore);
@@ -374,12 +355,9 @@ function CardDetailDialogBody({
   const [activityPending, startActivityTransition] = useTransition();
   const selectedDueDate = parseDateInputValue(draftDueDate);
 
-  // The hero title/description bind to the live store value (passed in via
-  // `card`). Reflect a remote edit into the draft whenever the local user isn't
-  // actively typing that field, so the next blur can't clobber a remote rename
-  // (US-043). This is the React "adjust state during render" pattern (guarded by
-  // a baseline so it can't loop) — not an effect — and the focus flags keep an
-  // in-progress local edit from being overwritten mid-keystroke.
+  // Reflect a remote edit into the draft unless the user is actively typing that
+  // field, so the next blur can't clobber it (US-043). Guarded "adjust state
+  // during render" baseline pattern — not an effect — so it can't loop.
   const [titleEditing, setTitleEditing] = useState(false);
   const [descriptionEditing, setDescriptionEditing] = useState(false);
 
@@ -396,15 +374,10 @@ function CardDetailDialogBody({
     if (!descriptionEditing) setDraftDescription(liveDescription);
   }
 
-  // Meta drafts (due date, priority, estimate) reconcile to the live card the
-  // same way title/description do: a remote card:meta-updated (or a refresh
-  // reseed) is reflected into the draft whenever the user is NOT actively
-  // interacting with that control, so the next commit can't clobber a remote
-  // change. "Interacting" means the picker is open; a pick made during that
-  // open session is the user's own intent and is never overwritten, while
-  // closing without a pick resyncs to the live value so a mid-interaction
-  // remote change can't leave the draft stale. Same render-time baseline
-  // pattern (guarded, so it can't loop) as title/description above.
+  // Meta drafts reconcile to the live card like title/description: a remote
+  // change is reflected unless the picker is open (a pick made there is the
+  // user's own intent and is never overwritten); closing without a pick resyncs
+  // so the draft can't stay stale. Same guarded baseline pattern as above.
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [estimateOpen, setEstimateOpen] = useState(false);
   const priorityPickedRef = useRef(false);
@@ -431,11 +404,9 @@ function CardDetailDialogBody({
     if (!dueDateOpen) setDraftDueDate(toDateInputValue(card.dueDate));
   }
 
-  // A picker that closes without a pick (outside click / Escape) ends the
-  // interaction without committing intent: resync the draft to the live value
-  // so a remote change that arrived while it was open doesn't stay stale. A
-  // pick made in the session (ref) already committed the draft, so closing
-  // never overwrites the user's own selection.
+  // Closing without a pick commits no intent: resync the draft to the live value
+  // so a mid-interaction remote change can't stay stale; a pick already
+  // committed via the ref, so closing never overwrites the user's selection.
   function handlePriorityOpenChange(open: boolean) {
     setPriorityOpen(open);
     if (!open) {
@@ -466,11 +437,9 @@ function CardDetailDialogBody({
     }
   }
 
-  // Queued autosave (U2): a blur/commit that lands while a save is in flight
-  // is queued and drained when the in-flight save finishes (Notion/Trello
-  // style) — the old `if (isPending) return` silently discarded it. No control
-  // is disabled by another field's save; only the status indicator reflects
-  // in-flight state.
+  // Queue saves that land while one is in flight and drain when it finishes
+  // (U2) — the old isPending-return silently dropped them; no control is
+  // disabled by another field's save.
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queueRef = useRef<Array<() => Promise<boolean>>>([]);
   const drainingRef = useRef(false);
@@ -509,11 +478,9 @@ function CardDetailDialogBody({
               savedAny = true;
             }
           } catch {
-            // A rejected/thrown save (network blip, unexpected server failure)
-            // must not kill the drain: surface a generic error and keep
-            // draining the saves queued behind it. Ownership resets in the
-            // outer finally, so later saves recover instead of leaving the
-            // sheet stuck in "Saving…".
+            // A rejected save must not kill the drain: surface a generic error
+            // and keep draining; the outer finally resets ownership so later
+            // saves recover.
             setError("Something went wrong. Please try again.");
           }
         }
@@ -538,9 +505,8 @@ function CardDetailDialogBody({
     };
   }, []);
 
-  // Action-row affordances scroll the matching editor into view inside the left
-  // column and move focus to its primary control, so the document-style "Add to
-  // card" row is keyboard-operable and every editor stays reachable (US-043).
+  // Scroll the matching editor into view and focus its primary control so the
+  // "Add to card" row is keyboard-operable (US-043).
   function focusSection(sectionId: string, focusId?: string) {
     const section = document.getElementById(sectionId);
     if (!section) return;
@@ -565,10 +531,9 @@ function CardDetailDialogBody({
   );
 
   // One canonical list per section: seeded items + loaded pages, deduped by id
-  // and sorted by the same key the cursors use. Comments render oldest first
-  // (createdAt asc, id asc — the DB order); activity newest first (createdAt
-  // desc, id desc). Sorting keeps realtime-appended rows (store) interleaved
-  // correctly with loaded pages instead of drifting to the wrong end.
+  // and sorted by the cursor keys (comments oldest-first, activity newest-first)
+  // so realtime-appended rows interleave correctly instead of drifting to the
+  // wrong end.
   const displayedComments = useMemo(() => {
     const seen = new Set<string>();
     return [...comments, ...extraComments]
@@ -599,10 +564,9 @@ function CardDetailDialogBody({
       });
   }, [activity, extraActivity]);
 
-  // Fetches the next page behind the last loaded row. The cursor is the
-  // (createdAt, id) of the last displayed item — matching the server order —
-  // so rows appended by realtime while the sheet is open never shift or
-  // duplicate pages. Appends with an id dedupe as a safety net.
+  // Fetches the next page after the last displayed row; the cursor matches the
+  // server order so realtime appends never shift or duplicate pages (id-dedupe
+  // as a safety net).
   function loadMoreComments() {
     const cursor = displayedComments[displayedComments.length - 1];
     if (!cursor) return;
@@ -692,11 +656,9 @@ function CardDetailDialogBody({
     });
   }
 
-  // Unified save model (US-032): every field autosaves, so the three competing
-  // save surfaces (Save changes/Reset, Save estimate, Save due date) are gone.
-  // Title + description persist on blur; estimate, due date, and priority commit
-  // on change — matching the Priority control that already autosaved. Blurs that
-  // land while a save is in flight are queued, never dropped (U2).
+  // Unified autosave (US-032): title+description persist on blur; estimate, due
+  // date, and priority commit on change. Blurs landing mid-save are queued,
+  // never dropped (U2).
   function queueSaveDetails(nextTitle: string, nextDescription: string) {
     const trimmedTitle = nextTitle.trim();
     if (!trimmedTitle) {
@@ -855,11 +817,9 @@ function CardDetailDialogBody({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Document-style header: the title is the hero (inline-editable), with an
-          "Add to card" action row beneath it — no breadcrumb, no "Edit card"
-          heading, no uppercase TITLE label (US-043). The Dialog still needs an
-          accessible name/description for Radix + screen readers, supplied
-          visually-hidden below. */}
+      {/* Document-style header: the title is the hero (inline-editable) with an
+          "Add to card" action row beneath it (US-043); the visually-hidden
+          DialogTitle supplies the accessible name Radix + screen readers need. */}
       <DialogTitle className="sr-only">{card.title || "Card details"}</DialogTitle>
       <DialogDescription className="sr-only">
         Card details and editors. Edit the title, description, labels, dates,
@@ -889,10 +849,10 @@ function CardDetailDialogBody({
               }}
               onFocus={(e) => {
                 setTitleEditing(true);
-                // Radix's auto-focus-on-open (and a Tab into the field) selects
-                // the whole title, so a stray keystroke would wipe it. After the
-                // browser settles, collapse a full selection to the caret-at-end;
-                // a click that places its own caret is left untouched (US-043).
+                // Radix's auto-focus selects the whole title; after the browser
+                // settles, collapse a full selection to the caret-at-end so a
+                // stray keystroke can't wipe it (a click-placed caret is left
+                // untouched) (US-043).
                 const el = e.currentTarget;
                 requestAnimationFrame(() => {
                   if (
@@ -922,7 +882,7 @@ function CardDetailDialogBody({
                 }
               }}
               // card-title token: 22px / weight 500 / 1.25 / -0.4px tracking
-              // (DESIGN.md §244 / §335), not the old text-2xl/600.
+              // (DESIGN.md §244 / §335).
               className="-mx-2 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2 py-1 text-[22px] font-medium leading-[1.25] tracking-[-0.4px] outline-none hover:bg-muted/50 focus-visible:border-ring focus-visible:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-60"
             />
           ) : (
@@ -932,9 +892,8 @@ function CardDetailDialogBody({
           )}
 
           <div className="flex shrink-0 items-center gap-2 pt-1.5">
-            {/* Save/error status lives inline in the header (Google-Docs style) so
-                it takes no vertical room — it used to be an empty min-h spacer at
-                the top of the column that pushed the Description down (US-043). */}
+            {/* Save/error status lives inline in the header so it takes no
+                vertical room (US-043). */}
             <span
               id="card-detail-title-status"
               aria-live="polite"
@@ -986,9 +945,8 @@ function CardDetailDialogBody({
               </Button>
             </DialogClose>
 
-            {/* Archive confirm (portal — in-tree position is irrelevant). Any
-                card is archivable from here regardless of completion state; the
-                board face only offers archive on completed cards (US-069). */}
+            {/* Any card is archivable from here regardless of completion state;
+                the board face only offers archive on completed cards (US-069). */}
             {canArchive ? (
               <ArchiveCardDialog
                 cardId={card.id}
@@ -1064,9 +1022,9 @@ function CardDetailDialogBody({
               Attachment
             </Button>
 
-            {/* Cover demoted from a top-of-column panel to a secondary action
-                (US-043). Both paths preserved: pick an existing image attachment
-                or upload a new one, including the zero-attachments case. */}
+            {/* Cover is a secondary action (US-043): pick an existing image
+                attachment or upload a new one, including the zero-attachments
+                case. */}
             <Popover>
               <PopoverTrigger asChild>
                 <Button type="button" variant="outline" size="sm">
@@ -1181,25 +1139,22 @@ function CardDetailDialogBody({
             alt="Card cover"
             className="h-48 w-full object-cover"
           />
-          {/* US-053: kept intentionally. This is a bottom-edge fade over an
-              arbitrary user-supplied cover image so it blends into the document
-              surface below — a legibility scrim over user content, not a
-              decorative chrome gradient. The §389 ban targets atmospheric chrome
-              gradients; a solid bg-background/80 here would wash out the cover. */}
+          {/* Kept intentionally (US-053): a legibility scrim over arbitrary
+              user-supplied cover art, not decorative chrome — the §389 ban
+              targets atmospheric gradients; a solid bg-background/80 here would
+              wash out the cover. */}
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background via-background/10 to-transparent" />
         </div>
       ) : null}
 
       {/* Single ~720px reading column (the modal width is the document measure)
-          with 32px padding. Sub-sections are divided by border hairlines, not
-          boxed sub-cards, and the former right rail collapses into the stack
-          (US-052 / DESIGN.md §103–110 / §332–340). */}
+          with 32px padding; sub-sections are hairline-divided, not boxed
+          sub-cards, and the former right rail collapses into the stack
+          (US-052 / DESIGN.md §103–110). */}
       <div className="min-h-0 flex-1 overflow-y-auto px-8 py-8">
-        {/* Properties (meta row): the relocated right-rail controls + the former
-            priority/dates sub-card boxes collapse into one compact, de-boxed
-            property strip under the title. Property labels/controls stay
-            body-sm (14px); only the document body (description, comments) steps
-            to body (16px) — DESIGN.md §256–258. */}
+        {/* Properties (meta row): the relocated right-rail controls collapse
+            into one compact, de-boxed property strip; labels stay body-sm, only
+            the document body steps to 16px (DESIGN.md §256–258). */}
         <div className="space-y-3">
           <div id="card-section-members" className="flex items-start gap-3">
             <span className="w-20 shrink-0 pt-1.5 text-sm text-muted-foreground">
@@ -1537,10 +1492,9 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // Synchronous same-tick single-flight: `isPending` only flips on the next
-  // render, so two Enter presses (or Enter + submit click) in the same tick
-  // would double-post. The ref guards immediately and releases on completion
-  // or failure, so a retry after either always works.
+  // Same-tick single-flight: isPending only flips on the next render, so the
+  // ref drops a double Enter/submit immediately and releases on completion or
+  // failure so a retry always works.
   const submittingRef = useRef(false);
 
   const {
@@ -1599,11 +1553,10 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
     });
   }
 
-  // Form submit path (submit button + Enter). A textarea does not implicitly
-  // submit its form, so the textarea keydown handler below routes Enter here;
-  // Shift+Enter stays a newline. When the mention list is open, Enter/Tab
-  // select a mention instead — the hook preventDefaults, which also stops
-  // submission, so a mention pick never posts the comment.
+  // A textarea doesn't implicitly submit its form, so Enter routes here
+  // (Shift+Enter stays a newline). While the mention list is open, Enter/Tab
+  // select a mention — the hook preventDefaults, which also stops submission,
+  // so a mention pick never posts.
   function handleFormSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     handleSubmit();
@@ -1648,9 +1601,9 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
               id={mentionListboxId}
               role="listbox"
               aria-label="Mention a member"
-              // pointer-events-auto: the list is portaled to <body>, which Radix
-              // Dialog marks pointer-events:none while open; re-enable it here or
-              // clicks fall through to the textarea behind the (inert) backdrop.
+              // The list is portaled to <body>, which Radix Dialog marks
+              // pointer-events:none while open — re-enable it here or clicks fall
+              // through to the textarea.
               className="pointer-events-auto z-50 w-56 overflow-y-auto rounded-lg border bg-popover text-popover-foreground shadow-lg"
             >
               {mentionItems.length === 0 ? (
@@ -1697,7 +1650,7 @@ function renderMentionContent(content: string, memberNames: string[]) {
   if (!memberNames.length) return content;
 
   // Share the single mention resolver (lib/mention.ts) with the notify path so
-  // what is highlighted and what is notified never diverge.
+  // highlight and notification never diverge.
   const matches = resolveMentions(
     content,
     memberNames.map((name) => ({ name })),
@@ -1781,7 +1734,6 @@ function ActivityItem({ activity }: ActivityItemProps) {
 }
 
 function getActivityLabel(action: string, entityType: string, metadata: Record<string, unknown> | null): string {
-  // Handle member assignment activities
   if (metadata && typeof metadata === "object" && "actionType" in metadata) {
     const actionType = (metadata as { actionType: string }).actionType;
     const targetName = (metadata as { targetUserName?: string }).targetUserName || "a member";

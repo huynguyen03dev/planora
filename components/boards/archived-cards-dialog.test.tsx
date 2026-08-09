@@ -86,7 +86,6 @@ describe("ArchivedCardsDialog (US-074 Slice B UI)", () => {
     expect(cardsPanel).toHaveAttribute("aria-labelledby", "archived-cards-tab");
     expect(screen.getByText("Card 1")).toBeInTheDocument();
 
-    // Switch to Lists tab
     await user.click(listsTab);
     expect(cardsTab).toHaveAttribute("aria-selected", "false");
     expect(listsTab).toHaveAttribute("aria-selected", "true");
@@ -144,10 +143,8 @@ describe("ArchivedCardsDialog (US-074 Slice B UI)", () => {
     const restoreBtn = screen.getByRole("button", { name: "Restore" });
     await user.click(restoreBtn);
 
-    // While pending
     expect(screen.getByRole("button", { name: "Restoring…" })).toBeDisabled();
 
-    // Resolve the promise
     resolveRestore({ success: true });
   });
 
