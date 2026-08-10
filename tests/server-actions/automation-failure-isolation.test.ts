@@ -26,6 +26,7 @@ import {
 
 const WS_A = "A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6";
 const BOARD_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const BOARD_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const LIST_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const TARGET_LIST = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const CARD_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
@@ -34,6 +35,8 @@ const LABEL_ID = "ffffffff-ffff-4fff-8fff-ffffffffffff";
 const STALE_LIST = "11111111-1111-4111-8111-111111111111";
 /** A list that has been archived — the stale target. */
 const ARCHIVED_LIST = "22222222-2222-4222-8222-222222222222";
+/** A live list on ANOTHER board of the same workspace — the cross-board target. */
+const CROSS_BOARD_LIST = "44444444-4444-4444-8444-444444444444";
 const RULE_ID = "33333333-3333-4333-8333-333333333333";
 
 const h = vi.hoisted(() => {
@@ -538,6 +541,78 @@ describe("moveCardAction + stale rule target (decision 0030 isolation)", () => {
           status: "failed",
           code: "TARGET_LIST_ARCHIVED",
           targetId: ARCHIVED_LIST,
+        }),
+      ],
+    });
+  });
+
+  it("a CROSS-BOARD target list (same workspace): the user's own move commits, the rule step is audited → failed (same-board invariant)", async () => {
+    signInAs("actor", WS_A, "admin");
+    sameBoardSetup();
+
+    const tx = makeTx();
+    rulesMock(tx, [
+      {
+        id: RULE_ID,
+        name: "Move across boards",
+        boardId: BOARD_A,
+        triggerType: "card-moved-to-list",
+        triggerConfig: {},
+        actions: [{ type: "move-card-to-list", targetListId: CROSS_BOARD_LIST }],
+      },
+    ]);
+    // The rule's target resolves INSIDE the workspace but on another board.
+    (tx.list.findUnique as ReturnType<typeof vi.fn>).mockImplementation(
+      async ({ where }: { where: { id?: string } }) =>
+        where.id === CROSS_BOARD_LIST
+          ? {
+              id: CROSS_BOARD_LIST,
+              boardId: BOARD_B,
+              archivedAt: null,
+              board: { id: BOARD_B, workspaceId: WS_A, archivedAt: null },
+            }
+          : {
+              id: TARGET_LIST,
+              boardId: BOARD_A,
+              archivedAt: null,
+              board: { id: BOARD_A, workspaceId: WS_A, archivedAt: null },
+            },
+    );
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+
+    const result = await moveCardAction(
+      formData({ cardId: CARD_ID, targetListId: TARGET_LIST, intent: "end" }),
+    );
+
+    // The user's same-board move commits — a rule's cross-board target never
+    // rolls back the primary mutation (the F4 collateral-damage bug is dead).
+    expect(result).toEqual({ success: true });
+    expect(tx.card.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: CARD_ID, moveRevision: 0 }),
+        data: expect.objectContaining({ listId: TARGET_LIST, position: 16384, moveRevision: 1 }),
+      }),
+    );
+    // The rule's cross-board move never wrote.
+    const crossBoardAttempts = (tx.card.update as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c) => (c[0] as { data?: { listId?: string } }).data?.listId === CROSS_BOARD_LIST,
+    );
+    expect(crossBoardAttempts).toHaveLength(0);
+
+    // Audit: structured TARGET_LIST_CROSS_BOARD code + stale target id.
+    const log = lastLogCreate(tx);
+    expect(log.data).toMatchObject({
+      ruleId: RULE_ID,
+      triggerType: "card-moved-to-list",
+      status: "failed",
+      error: "1 of 1 action steps failed",
+    });
+    expect(log.data.metadata).toEqual({
+      steps: [
+        expect.objectContaining({
+          status: "failed",
+          code: "TARGET_LIST_CROSS_BOARD",
+          targetId: CROSS_BOARD_LIST,
         }),
       ],
     });

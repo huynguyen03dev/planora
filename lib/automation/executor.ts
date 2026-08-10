@@ -254,7 +254,7 @@ export async function executeRuleActions(
           where: { id: step.targetListId },
           select: {
             archivedAt: true,
-            board: { select: { workspaceId: true } },
+            board: { select: { id: true, workspaceId: true } },
           },
         });
 
@@ -309,8 +309,40 @@ export async function executeRuleActions(
           );
         }
 
+          // Same-board invariant: all card moves stay within the card's board.
+          // A target list on another board is a stale target — isolated
+          // per-step (decision 0030), never an abort. The shared helper
+          // enforces the same predicate as a hard backstop.
+          const cardList = await client.card.findUnique({
+            where: { id: cardId },
+            select: { list: { select: { boardId: true } } },
+          });
+          if (!cardList) {
+            // Missing card is not a stale target — let the shared move helper
+            // surface the canonical abort (existing behavior).
+            throw new Error("Card not found");
+          }
+          if (cardList.list.boardId !== targetList.board.id) {
+            throw new RuleExecutionError(
+              `move-card-to-list: target list "${step.targetListId}" is on a different board than the card`,
+              {
+                workspaceId,
+                ruleId: rule.id,
+                ruleName: rule.name,
+                chainId: params.chainId,
+                chainDepth: params.chainDepth,
+                cardId,
+                triggerType: params.triggerType,
+                cause: new Error(
+                  `target list "${step.targetListId}" is on board "${targetList.board.id}", card "${cardId}" is on board "${cardList.list.boardId}"`,
+                ),
+              },
+              STALE_TARGET_CODES.TARGET_LIST_CROSS_BOARD,
+            );
+          }
+
           // Automation and human DnD share the same transaction-safe ordering
-          // protocol: the helper locks workspace, sorted boards/lists, and card,
+          // protocol: the helper locks workspace, board, lists, and card,
           // resolves the current end position, normalizes if needed, and bumps
           // moveRevision with a CAS. Recursive calls reuse the already-held
           // workspace lock in this transaction.
@@ -329,9 +361,8 @@ export async function executeRuleActions(
 
           const moveEvents = buildCardMoveLifecycleEvents({
             workspaceId,
-            // The card's canonical board is the destination board: a
-            // workspace-wide rule may legally target a list on another board;
-            // recursive matching and history must follow the committed state.
+            // Same-board invariant: the target board IS the card's board, so
+            // the canonical board id doubles as the source board id.
             boardId: moved.targetBoardId,
             cardId,
             actorId,
@@ -350,20 +381,6 @@ export async function executeRuleActions(
             position: moved.card.position,
             moveRevision: moved.card.moveRevision,
           });
-          if (moved.fromBoardId !== moved.targetBoardId) {
-            // Destination event inserts the canonical card for target-board
-            // viewers; the source-board echo removes it from its old board.
-            // Both are deferred until commit and re-read the same canonical
-            // state, so no stale position/revision is emitted.
-            effects.push({
-              kind: "card-moved",
-              boardId: moved.fromBoardId,
-              cardId,
-              listId: moved.card.listId,
-              position: moved.card.position,
-              moveRevision: moved.card.moveRevision,
-            });
-          }
           producedEvents.push({
             triggerType: "card-moved-to-list",
             payload: {

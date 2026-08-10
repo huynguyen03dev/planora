@@ -123,11 +123,13 @@ normalizes positions on overflow. The neighbour math is pure and unit-tested in
 `lib/dnd/apply-drop.ts` (`translateCardDrop`, `translateListDrop`).
 
 **Concurrency (decision 0032):** every production ordering transaction takes a
-workspace `FOR UPDATE` gate, then board rows, live list rows (each in ascending
-id order), and finally the moved card. This workspace-scoped serialization is
-required because recursive automation can target another board before the
-cascade completes; human moves and automation use the same
-`moveCardInTransaction` protocol. Each `List`/`Card` carries a logical
+workspace `FOR UPDATE` gate, then the board row, live list rows (each in
+ascending id order), and finally the moved card. Every card move — human DnD
+and automation alike — stays within ONE board (same-board invariant): the
+shared `moveCardInTransaction` helper rejects a target list on any other board
+before any lock is taken, so a single board row serializes the move scope. The
+workspace gate is still the automation cascade's deadlock-prevention boundary.
+Each `List`/`Card` carries a logical
 `moveRevision` for user/automation moves. Create, restore, and reorder bump the
 moved row; internal normalization preserves sibling order and rewrites only
 positions, so it does not bump or emit siblings. The drag sends the item's
@@ -145,15 +147,17 @@ Automation starts `evaluateRules` and `executeRuleActions` at the workspace
 serialization gate before any ordered step can mutate or lock its card. The
 same workspace row is safely re-acquired by recursive evaluations, so it is the
 deadlock-prevention boundary for the cascade. `moveCardInTransaction` retains
-the narrower parent lock order—sorted boards/lists, then card—inside that gate;
-this makes an ordered sequence such as `set-priority` followed by
+the narrower parent lock order — board, then sorted lists, then card — inside
+that gate; this makes an ordered sequence such as `set-priority` followed by
 `move-card-to-list` safe without per-step lock patches.
 
-Workspace-wide automation that moves a card across boards emits the committed
-card state to both affected board rooms: the destination room inserts it and
-the source room removes it. The destination payload includes the canonical
-card snapshot so a board that did not previously contain the card can insert
-it. Recursive rules match the canonical destination board event.
+Automation `move-card-to-list` shares the same-board invariant: at fire time
+the executor validates that the target list lives on the card's current board.
+A target on another board of the same workspace is a structured stale target
+(`TARGET_LIST_CROSS_BOARD`) — the step is isolated and audited per-step
+(decision 0030), never a partial mutation and never a rollback of the primary
+move. A same-board move emits the committed card state once to the single
+affected board room; recursive rules match the canonical board event.
 
 Completion/reopen is a non-position mutation, but it can produce a recursive
 move-capable automation event. The human action keeps its workspace → board →
