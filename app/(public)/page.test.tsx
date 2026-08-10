@@ -1,7 +1,11 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import HomePage from "./page";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("HomePage", () => {
   it("presents a clear product promise and primary signup path", () => {
@@ -37,5 +41,52 @@ describe("HomePage", () => {
     expect(
       screen.getByRole("heading", { name: "Routine work, automated" }),
     ).toBeInTheDocument();
+  });
+
+  it("smooth-scrolls to features on every activation", () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: false })),
+    );
+    render(<HomePage />);
+
+    const exploreFeatures = screen.getByRole("link", {
+      name: "Explore features",
+    });
+    fireEvent.click(exploreFeatures);
+    fireEvent.click(exploreFeatures);
+
+    expect(scrollIntoView).toHaveBeenCalledTimes(2);
+    expect(scrollIntoView).toHaveBeenLastCalledWith({
+      behavior: "smooth",
+      block: "start",
+    });
+  });
+
+  it("avoids animated scrolling when reduced motion is requested", () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: true })),
+    );
+    render(<HomePage />);
+
+    fireEvent.click(
+      screen.getByRole("link", { name: "Explore features" }),
+    );
+
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      behavior: "auto",
+      block: "start",
+    });
   });
 });
