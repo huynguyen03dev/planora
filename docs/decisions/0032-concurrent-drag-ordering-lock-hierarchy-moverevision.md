@@ -167,14 +167,19 @@ retry-on-stale.
   transaction, but it never bumps sibling `moveRevision` or emits sibling
   events. Sibling relative order therefore stays correct in an optimistic
   client; a later authoritative board read supplies the normalized numeric
-  positions. A cross-board automation move emits the canonical card once to
-  the destination room and once to the source room so both boards reconcile.
+  positions. All card moves — human DnD and automation — stay within one board
+  (same-board invariant), so the shared move helper emits the canonical card
+  once to the single affected board room; there is no cross-board source echo.
 - The `moveRevision` column is new; pre-0032 rows default to 0 and remain valid
   (a client that never saw a revision sends 0 and matches).
 - Socket payloads for `card:moved`/`list:moved` gained `moveRevision`; older
   emitters' payloads without it are treated as revision 0 by receivers.
-- A cross-board automation `card:moved` includes the canonical card snapshot in
-  the destination-room payload; the source-room payload removes the old copy.
+- Same-board invariant: `moveCardInTransaction` validates `source board ===
+  target board` before taking any lock and therefore locks the single shared
+  board row (never an array of two identical ids); the automation executor
+  rejects a cross-board target list as the structured stale-target code
+  `TARGET_LIST_CROSS_BOARD` (decision 0030), so a cross-board move can never
+  partially mutate.
 - Ordering writers and automation-capable completion paths MUST follow the lock
   order; a future writer that locks a card before its workspace/parent scope
   would reintroduce deadlocks (the DB proof's completion control demonstrates

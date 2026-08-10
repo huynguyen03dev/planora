@@ -988,6 +988,22 @@ describe("moveCardAction (two-workspace — the sharpest case)", () => {
     expectNoWrites(...writeSeams);
   });
 
+  it("same-workspace cross-board: a target list on ANOTHER board of the same workspace is rejected before any write", async () => {
+    // Same-board invariant (product decision): the target list resolves inside
+    // WS_A but on a different board — the move must stay within one board. The
+    // caller is a fully privileged WS-A admin to prove the rejection is
+    // structural (same-board), not a permission artifact.
+    signInAs("u", WS_A, "admin");
+    h.getCardWithListAndBoard.mockResolvedValue(
+      cardWithListAndBoardFixture(WS_A, { boardId: BOARD_A, cardId: CARD_ID, listId: LIST_ID }),
+    );
+    h.getListWithBoard.mockResolvedValue(
+      listWithBoardFixture(WS_A, { boardId: BOARD_B, listId: TARGET_LIST }),
+    );
+    expect(await moveCardAction(form())).toEqual({ success: false, error: "List not found" });
+    expectNoWrites(...writeSeams);
+  });
+
   it("allow: WS-A editor, same board → transaction body relocates the card to the target list", async () => {
     signInAs("u", WS_A, "editor");
     sameBoardSetup();

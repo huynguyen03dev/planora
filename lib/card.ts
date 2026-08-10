@@ -250,11 +250,12 @@ export async function lockCardOrderingScopeForUpdate(
  * Move one live card inside an existing transaction.
  *
  * Single ordering protocol for human DnD and automation: workspace gate →
- * sorted boards → sorted live lists → moved card → resolve →
- * normalize-if-needed → revision CAS. The workspace row lock is deliberately
- * broader than one board because recursive rules can target any board in their
- * workspace; re-acquiring it in the same transaction is safe and prevents two
- * recursive cascades from deadlocking while discovering new targets.
+ * sorted board → sorted live lists → moved card → resolve →
+ * normalize-if-needed → revision CAS. Same-board invariant (product decision):
+ * source and target lists must share a board, so one board row lock serializes
+ * the whole move scope. The workspace lock is deliberately broader — it
+ * prevents automation cascade deadlocks — and re-acquiring it in the same
+ * transaction is safe.
  *
  * `expectedMoveRevision` comes from human DnD; automation omits it and
  * atomically bumps the revision observed under the card lock. Normalization
@@ -320,14 +321,24 @@ export async function moveCardInTransaction(
     throw new OrderConflictError("SCOPE_STALE");
   }
 
-  await lockWorkspaceRowForUpdate(tx, data.workspaceId);
-
-  const boardIds = [source.list.boardId, target.boardId];
-  const lockedBoards = await lockBoardRowsForUpdate(tx, boardIds);
-  if (lockedBoards.length !== new Set(boardIds).size) {
+  // Same-board invariant: every move (DnD and automation) stays within one
+  // board. Reject cross-board targets before locking — the backstop for forged
+  // payloads and automation bypassing its own guard.
+  if (source.list.boardId !== target.boardId) {
     throw new OrderConflictError("SCOPE_STALE");
   }
 
+  await lockWorkspaceRowForUpdate(tx, data.workspaceId);
+
+  // Single board lock: both lists share one board (validated above), so one
+  // board row serializes the whole move scope.
+  const lockedBoards = await lockBoardRowsForUpdate(tx, [source.list.boardId]);
+  if (lockedBoards.length !== 1) {
+    throw new OrderConflictError("SCOPE_STALE");
+  }
+
+  // Lists can differ (a same-list reorder dedupes to one row), so keep both
+  // ids in the Set-based staleness check.
   const listIds = [source.listId, targetListId];
   const lockedLists = await lockListRowsForUpdate(tx, listIds);
   if (lockedLists.length !== new Set(listIds).size) {

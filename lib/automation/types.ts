@@ -69,6 +69,10 @@ export const STALE_TARGET_CODES = {
   TARGET_LIST_NOT_FOUND: "TARGET_LIST_NOT_FOUND",
   TARGET_LIST_ARCHIVED: "TARGET_LIST_ARCHIVED",
   TARGET_LIST_FOREIGN_WORKSPACE: "TARGET_LIST_FOREIGN_WORKSPACE",
+  // Same-board invariant (product decision): the target list resolves in the
+  // workspace but lives on a different board than the card — every move,
+  // including automation, must stay within one board.
+  TARGET_LIST_CROSS_BOARD: "TARGET_LIST_CROSS_BOARD",
   MEMBER_NOT_IN_WORKSPACE: "MEMBER_NOT_IN_WORKSPACE",
   LABEL_NOT_FOUND: "LABEL_NOT_FOUND",
 } as const;

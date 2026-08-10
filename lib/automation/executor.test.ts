@@ -107,6 +107,8 @@ import { resolveRecipient, resolveRemoveScope, CrossWorkspaceTargetError } from 
 function makeClient(targetListOverrides?: {
   archivedAt?: Date | null;
   workspaceId?: string;
+  /** Board id of the target list (defaults to the card's board, "board-1"). */
+  boardId?: string;
   /** When true, list.findUnique resolves to null (list not found). */
   notFound?: boolean;
 }): Prisma.TransactionClient {
@@ -132,6 +134,9 @@ function makeClient(targetListOverrides?: {
       }),
       findFirst: vi.fn(),
       update: vi.fn().mockResolvedValue({}),
+      // Same-board invariant (product decision): the executor reads the card's
+      // current list board to reject cross-board automation targets.
+      findUnique: vi.fn().mockResolvedValue({ list: { boardId: "board-1" } }),
     },
     cardMember: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -143,7 +148,13 @@ function makeClient(targetListOverrides?: {
       findUnique: vi.fn().mockResolvedValue(
         target.notFound
           ? null
-          : { archivedAt: target.archivedAt ?? null, board: { workspaceId: target.workspaceId } },
+          : {
+              archivedAt: target.archivedAt ?? null,
+              board: {
+                id: target.boardId ?? "board-1",
+                workspaceId: target.workspaceId ?? "ws-1",
+              },
+            },
       ),
     },
     label: {
@@ -484,26 +495,21 @@ describe("executeRuleActions", () => {
       );
     });
 
-    it("emits both board rooms and recurses from the canonical destination board", async () => {
-      const client = makeClient();
-      vi.mocked(moveCardInTransaction).mockResolvedValue({
-        card: {
-          listId: "list-on-board-2",
-          position: CARD_POSITION_GAP,
-          moveRevision: 4,
-          estimateHours: null,
-        } as never,
-        fromListId: "list-1",
-        fromBoardId: "board-1",
-        targetBoardId: "board-2",
-      });
+    it("ISOLATES a target list on a DIFFERENT board of the same workspace: TARGET_LIST_CROSS_BOARD, no move attempted", async () => {
+      // Same-board invariant (product decision): a workspace-wide rule may
+      // reference a list on another board, but at fire time the move must stay
+      // on the card's board. The card sits on board-1; the target list is on
+      // board-2 (same workspace) → structured stale-target failure, isolated
+      // per-step (decision 0030): never a partial move, never an abort.
+      const client = makeClient({ boardId: "board-2" });
+      const cardFindUnique = client.card.findUnique as ReturnType<typeof vi.fn>;
+      cardFindUnique.mockResolvedValue({ list: { boardId: "board-1" } });
+
+      const actions: ActionStep[] = [{ type: "move-card-to-list", targetListId: "list-on-board-2" }];
 
       const result = await executeRuleActions({
         client,
-        rule: {
-          ...baseRule,
-          actions: [{ type: "move-card-to-list", targetListId: "list-on-board-2" }],
-        },
+        rule: { ...baseRule, actions },
         event: baseEvent,
         actorId: ACTOR,
         triggerType: "card-moved-to-list",
@@ -511,38 +517,57 @@ describe("executeRuleActions", () => {
         chainDepth: 0,
       });
 
-      expect(result.effects).toEqual([
-        {
-          kind: "card-moved",
-          boardId: "board-2",
-          cardId: "card-1",
-          listId: "list-on-board-2",
+      expect(moveCardInTransaction).not.toHaveBeenCalled();
+      expect(result.stepOutcomes[0]).toMatchObject({
+        stepIndex: 0,
+        actionType: "move-card-to-list",
+        status: "failed",
+        code: "TARGET_LIST_CROSS_BOARD",
+        targetId: "list-on-board-2",
+      });
+      expect(result.stepOutcomes[0]).toMatchObject({
+        message: expect.stringContaining("different board"),
+      });
+      // No deferred effect, no produced event, no card mutation.
+      expect(result.effects).toEqual([]);
+      expect(result.producedEvents).toEqual([]);
+      expect((client.card.update as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    });
+
+    it("same-board control: a same-board target passes validation and reaches the shared move helper", async () => {
+      const client = makeClient();
+      vi.mocked(moveCardInTransaction).mockResolvedValue({
+        card: {
+          listId: "list-2",
           position: CARD_POSITION_GAP,
-          moveRevision: 4,
-        },
-        {
-          kind: "card-moved",
-          boardId: "board-1",
-          cardId: "card-1",
-          listId: "list-on-board-2",
-          position: CARD_POSITION_GAP,
-          moveRevision: 4,
-        },
-      ]);
-      expect(result.producedEvents).toEqual([
-        {
-          triggerType: "card-moved-to-list",
-          payload: {
-            cardId: "card-1",
-            boardId: "board-2",
-            listIdFrom: "list-1",
-            listIdTo: "list-on-board-2",
-          },
-        },
-      ]);
-      expect(buildCardMoveLifecycleEvents).toHaveBeenCalledWith(
-        expect.objectContaining({ boardId: "board-2" }),
-      );
+          moveRevision: 1,
+          estimateHours: null,
+        } as never,
+        fromListId: "list-1",
+        fromBoardId: "board-1",
+        targetBoardId: "board-1",
+      });
+
+      const result = await executeRuleActions({
+        client,
+        rule: { ...baseRule, actions: [{ type: "move-card-to-list", targetListId: "list-2" }] },
+        event: baseEvent,
+        actorId: ACTOR,
+        triggerType: "card-moved-to-list",
+        chainId: "",
+        chainDepth: 0,
+      });
+
+      expect(moveCardInTransaction).toHaveBeenCalledWith(client, {
+        workspaceId: "ws-1",
+        cardId: "card-1",
+        targetListId: "list-2",
+        intent: "end",
+      });
+      expect(result.stepOutcomes[0]).toMatchObject({ status: "success" });
+      // A same-board move emits exactly ONE card-moved effect (no source echo).
+      expect(result.effects).toHaveLength(1);
+      expect(result.effects[0]).toMatchObject({ kind: "card-moved", boardId: "board-1" });
     });
 
     // Target-list validation (US-074 Slice B2 + decision 0030)

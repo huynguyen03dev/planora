@@ -21,6 +21,7 @@ import {
   getCardWithListAndMembers,
   getArchivedCardWithListAndBoard,
   lockCardOrderingScopeForUpdate,
+  moveCardInTransaction,
   reorderCardWithinListByNeighbors,
   resolveCompletedAt,
   setCardCompletion,
@@ -275,6 +276,102 @@ describe("reorderCardWithinListByNeighbors (decision 0032 lock + OCC protocol)",
       }),
     ).rejects.toThrow("Card not found");
       expect(tx.card.updateMany).not.toHaveBeenCalled();
+  });
+
+  describe("moveCardInTransaction (same-board invariant + single board lock)", () => {
+    /** Extract the board-row lock calls (SQL text + bound id) from a fake tx. */
+    function boardLockCalls(tx: ReturnType<typeof baseTx>) {
+      const raw = tx.$queryRaw as unknown as ReturnType<typeof vi.fn>;
+      return raw.mock.calls
+        .map((call: unknown[]) => {
+          const strings = call[0] as TemplateStringsArray;
+          return { sql: strings?.[0] ?? "", id: String(call[1] ?? "") };
+        })
+        .filter((c: { sql: string }) => c.sql.includes('FROM "board"'));
+    }
+
+    it("same-board cross-list move succeeds and locks the single shared board row", async () => {
+      const tx = baseTx({
+        list: {
+          findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
+            where.id === "list-2"
+              ? {
+                  id: "list-2",
+                  boardId: "b-1",
+                  archivedAt: null,
+                  board: { id: "b-1", workspaceId: "ws-1", archivedAt: null },
+                }
+              : null,
+          ),
+        },
+        $queryRaw: rawLockMock({ liveLists: [L, "list-2"] }),
+      });
+      mockDb.$transaction.mockImplementation(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        async (cb: any) => cb(tx),
+      );
+
+      const result = await moveCardInTransaction(
+        tx as unknown as Parameters<typeof moveCardInTransaction>[0],
+        {
+          workspaceId: "ws-1",
+          cardId: "m",
+          targetListId: "list-2",
+          intent: "end",
+        },
+      );
+
+      expect(result.fromListId).toBe(L);
+      expect(result.fromBoardId).toBe("b-1");
+      expect(result.targetBoardId).toBe("b-1");
+      // Source board === target board → ONE board lock for the single shared id
+      // (never an array of two identical ids), covering the whole move scope.
+      const boardLocks = boardLockCalls(tx);
+      expect(boardLocks).toHaveLength(1);
+      expect(boardLocks[0].id).toBe("b-1");
+      expect(tx.card.updateMany).toHaveBeenCalledWith({
+        where: { id: "m", archivedAt: null, deletedAt: null, moveRevision: 0 },
+        data: { listId: "list-2", position: GAP, moveRevision: 1 },
+      });
+    });
+
+    it("cross-board target (forged request): rejects with OrderConflictError(SCOPE_STALE) before any lock or write", async () => {
+      const tx = baseTx({
+        list: {
+          findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
+            where.id === "list-2"
+              ? {
+                  id: "list-2",
+                  boardId: "b-2",
+                  archivedAt: null,
+                  board: { id: "b-2", workspaceId: "ws-1", archivedAt: null },
+                }
+              : null,
+          ),
+        },
+        $queryRaw: rawLockMock({ liveLists: [L, "list-2"] }),
+      });
+      mockDb.$transaction.mockImplementation(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        async (cb: any) => cb(tx),
+      );
+
+      await expect(
+        moveCardInTransaction(
+          tx as unknown as Parameters<typeof moveCardInTransaction>[0],
+          {
+            workspaceId: "ws-1",
+            cardId: "m",
+            targetListId: "list-2",
+            intent: "end",
+          },
+        ),
+      ).rejects.toMatchObject({ reason: "SCOPE_STALE" });
+      expect(tx.card.updateMany).not.toHaveBeenCalled();
+      expect(tx.card.findUniqueOrThrow).not.toHaveBeenCalled();
+      // Rejected on the pre-lock equality predicate → no row lock was taken.
+      expect(boardLockCalls(tx)).toHaveLength(0);
+    });
   });
 });
 

@@ -117,11 +117,14 @@ list analogue in `lib/list.ts`) read only CURRENT live occupants of the target
 scope and are pure, unit-tested.
 
 **Lock hierarchy (cascade-safe, one row per statement):** every production
-ordering transaction first locks its workspace row, then locks board rows in
-ascending id, live list rows in ascending id, and finally the moved card. The
-workspace gate is intentionally broader than one board: recursive automation
-can discover another board after the first move, so a board-only plan cannot
-prove cascade-wide deadlock safety. `lockBoardRowsForUpdate` and
+ordering transaction first locks its workspace row, then locks the board row,
+live list rows in ascending id, and finally the moved card. All card moves —
+human DnD and automation — stay within one board (same-board invariant):
+`moveCardInTransaction` validates source board === target board before any lock
+and therefore locks the single shared board row (never an array of two
+identical ids). The workspace gate is still intentionally broader than one
+board — it is the automation cascade's deadlock-prevention boundary and
+serializes all ordering writes in the workspace. `lockBoardRowsForUpdate` and
 `lockListRowsForUpdate` sort their ids; the shared
 `moveCardInTransaction` helper is used by human moves and automation. The SQL
 fixture proves the lock/CAS behavior directly; application-path coverage is in
