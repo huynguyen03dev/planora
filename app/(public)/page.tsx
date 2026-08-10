@@ -3,6 +3,8 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { getBoardTheme } from "@/lib/constants";
 
+import { SmoothAnchorLink } from "./smooth-anchor-link";
+
 const previewColumns = [
   {
     title: "Backlog",
@@ -188,10 +190,12 @@ export default function HomePage() {
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <Button size="lg" asChild>
               <Link href="/sign-up">Start planning</Link>
-            </Button>
-            <Button size="lg" variant="secondary" asChild>
-              <Link href="#features">Explore features</Link>
-            </Button>
+              </Button>
+              <Button size="lg" variant="secondary" asChild>
+                <SmoothAnchorLink href="#features">
+                  Explore features
+                </SmoothAnchorLink>
+              </Button>
           </div>
           <p className="mt-4 text-sm text-muted-foreground">
             Boards · Today view · Quick capture · Automations
