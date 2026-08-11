@@ -235,22 +235,22 @@ function ListCardItemComponent({
                     shown. Edit opens the card; Archive only on completed cards. */}
                 {showQuickActions ? (
                   <div
-                    className="absolute right-0.5 top-0.5 z-10 flex items-center gap-0.5 rounded-md bg-card/85 p-0.5 opacity-0 shadow-sm backdrop-blur-sm transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none"
+                    className="absolute right-0.5 top-0.5 z-10 flex items-center gap-0 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none"
                     onClick={(event) => event.stopPropagation()}
                   >
                     {canEdit ? (
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon-sm"
+                        size="icon-xs"
                         aria-label={`Edit card ${card.title}`}
                         title="Edit"
                         onClick={() => onOpenCard(card.id)}
-                        className="text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                        className="size-7 rounded-sm p-0 text-muted-foreground hover:bg-muted hover:text-foreground pointer-coarse:size-7"
                       >
                         <HugeiconsIcon
                           icon={PencilEdit01Icon}
-                          size={16}
+                          size={14}
                           strokeWidth={2}
                           className="text-current transition-colors"
                         />
@@ -260,15 +260,15 @@ function ListCardItemComponent({
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon-sm"
+                        size="icon-xs"
                         aria-label="Archive card"
                         title="Archive"
                         onClick={() => setArchiveDialogOpen(true)}
-                        className="text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                        className="size-7 rounded-sm p-0 text-muted-foreground hover:bg-muted hover:text-foreground pointer-coarse:size-7"
                       >
                         <HugeiconsIcon
                           icon={Archive02Icon}
-                          size={16}
+                          size={14}
                           strokeWidth={2}
                           className="text-current transition-colors"
                         />

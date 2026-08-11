@@ -336,7 +336,6 @@ export default async function BoardPage({
         </div>
 
         <CardDetailSheet
-          key={selectedCard?.id ?? "card-detail-sheet-closed"}
           open={Boolean(selectedCard)}
           card={selectedCard}
           comments={comments}

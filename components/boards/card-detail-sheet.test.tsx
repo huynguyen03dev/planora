@@ -1018,15 +1018,13 @@ describe("CardDetailSheet — meta draft reconciliation (dueDate/priority/estima
 // ─────────────────────────────────────────────────────────────────────────────
 // Close/reopen lifecycle (close-flash regression, fix/card-detail-close-flash)
 //
-// page.tsx keys CardDetailSheet by the server-selected card:
-//   key={selectedCard?.id ?? "card-detail-sheet-closed"}
-// so a card → no-card → card server re-render UNMOUNTS and REMOUNTS the sheet,
-// destroying the dismissedCardId latch. The close-flash happens when an
-// in-flight router.refresh() payload (fetched while ?cardId was still in the
-// URL — queued autosave, socket reconnect, list:restored, drag resync) lands
-// AFTER the close navigation: the server re-renders with the card selected
-// again, the key flips back, and a fresh sheet mounts with open=true and
-// dismissedCardId=null. The URL no longer selects a card, so the dialog must
+// A keyed parent can still force a card → no-card → card server re-render to
+// UNMOUNT and REMOUNT the sheet, destroying the dismissedCardId latch. The
+// close-flash happens when an in-flight router.refresh() payload (fetched while
+// ?cardId was still in the URL — queued autosave, socket reconnect,
+// list:restored, drag resync) lands AFTER the close navigation: the server
+// re-renders with the card selected again and a fresh sheet mounts with open=true
+// and dismissedCardId=null. The URL no longer selects a card, so the dialog must
 // stay closed — the open state must be URL-authoritative, not server-payload
 // authoritative.
 //
@@ -1034,7 +1032,8 @@ describe("CardDetailSheet — meta draft reconciliation (dueDate/priority/estima
 // dialog never flashes open after close and that intentional reopens still
 // work.
 //
-// The harness mirrors page.tsx: key follows the card prop, open=!!card.
+// The harness intentionally keeps the historical keyed-parent stress case;
+// production now keeps CardDetailSheet mounted across server prop changes.
 function keyedSheet(
   card: CardDetailRecord | null,
   overrides: Partial<Parameters<typeof CardDetailSheet>[0]> = {},
@@ -1150,6 +1149,21 @@ describe("CardDetailSheet — close/reopen lifecycle (close-flash regression)", 
 
     urlParams.delete("cardId");
     rerender(keyedSheet(null));
+    expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
+  });
+
+  it("closes from an outside click without reopening during the route update", async () => {
+    const { rerender } = render(keyedSheet(card));
+    const overlay = document.querySelector('[data-slot="dialog-overlay"]');
+
+    expect(overlay).toBeInTheDocument();
+    await user.click(overlay!);
+    expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
+      scroll: false,
+    });
+
+    urlParams.delete("cardId");
+    rerender(keyedSheet(card));
     expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
   });
 });
