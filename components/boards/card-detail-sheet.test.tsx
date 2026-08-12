@@ -22,7 +22,9 @@ const actions = vi.hoisted(() => ({
   setCardCoverAction: vi.fn(),
   assignCardMemberAction: vi.fn(),
   removeCardMemberAction: vi.fn(),
+  createChecklistAction: vi.fn(),
   createCommentAction: vi.fn(),
+  uploadAttachmentAction: vi.fn(),
   loadMoreCardDetailAction: vi.fn(),
   archiveCardAction: vi.fn(),
 }));
@@ -129,9 +131,8 @@ function renderSheet(props: Partial<Parameters<typeof CardDetailSheet>[0]> = {})
 
 const user = userEvent.setup({ pointerEventsCheck: 0 });
 
-async function openDescriptionEditor() {
-  await user.click(screen.getByRole("button", { name: "Description" }));
-  return screen.findByPlaceholderText("Add a more detailed description...");
+function renderSheetWithDescription() {
+  return renderSheet({ card: makeCard({ description: "Existing description" }) });
 }
 
 describe("CardDetailSheet — title autosave", () => {
@@ -150,7 +151,22 @@ describe("CardDetailSheet — title autosave", () => {
     expect(screen.getByLabelText("Card title")).toHaveValue("Original title");
   });
 
-  it("keeps optional blocks collapsed until they are added", async () => {
+  it("creates optional blocks in a small dialog before showing them", async () => {
+    actions.updateCardDetailsAction.mockResolvedValue({ success: true });
+    actions.createChecklistAction.mockResolvedValue({
+      success: true,
+      checklist: {
+        id: "checklist-new",
+        cardId: "card-1",
+        title: "Launch steps",
+        position: 1024,
+        items: [],
+      },
+    });
+    actions.uploadAttachmentAction.mockResolvedValue({
+      success: true,
+      attachmentId: "attachment-new",
+    });
     renderSheet();
 
     expect(screen.getByText("Comments and activity")).toBeInTheDocument();
@@ -158,14 +174,60 @@ describe("CardDetailSheet — title autosave", () => {
     expect(document.getElementById("card-section-checklist")).not.toBeInTheDocument();
     expect(document.getElementById("card-section-attachments")).not.toBeInTheDocument();
 
-    const description = await openDescriptionEditor();
-    expect(description).toHaveFocus();
-    expect(screen.queryByRole("button", { name: "Description" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add to card" }));
+    await user.click(screen.getByRole("menuitem", { name: "Description" }));
+    expect(screen.getByRole("dialog", { name: "Add description" })).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Add a more detailed description...")).not.toBeInTheDocument();
+    const descriptionDraft = screen.getByPlaceholderText("Write a description...");
+    expect(descriptionDraft).toHaveFocus();
+    await user.type(descriptionDraft, "Customer context");
+    await user.click(screen.getByRole("button", { name: "Add description" }));
 
-    await user.click(screen.getByRole("button", { name: "Checklist" }));
-    await user.click(screen.getByRole("button", { name: "Attachment" }));
+    await waitFor(() => expect(actions.updateCardDetailsAction).toHaveBeenCalledTimes(1));
+    expect(screen.queryByPlaceholderText("Write a description...")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Add a more detailed description...")).toHaveValue("Customer context");
+
+    await user.click(screen.getByRole("button", { name: "Add to card" }));
+    expect(
+      screen.queryByRole("menuitem", { name: "Description" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Checklist" }));
+    expect(document.getElementById("card-section-checklist")).not.toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText("Checklist title"), "Launch steps");
+    await user.click(screen.getByRole("button", { name: "Create checklist" }));
+    await waitFor(() => expect(actions.createChecklistAction).toHaveBeenCalledTimes(1));
     expect(document.getElementById("card-section-checklist")).toBeInTheDocument();
-    expect(document.getElementById("card-section-attachments")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add to card" }));
+    expect(
+      screen.queryByRole("menuitem", { name: "Checklist" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Attachment" }));
+    expect(document.getElementById("card-section-attachments")).not.toBeInTheDocument();
+    const file = new File(["hello"], "brief.pdf", { type: "application/pdf" });
+    await user.upload(screen.getByLabelText("Attachment file"), file);
+    await user.click(screen.getByRole("button", { name: "Upload attachment" }));
+    await waitFor(() => expect(actions.uploadAttachmentAction).toHaveBeenCalledTimes(1));
+    // The upload action returns only an id. The section waits for the refreshed
+    // server record instead of flashing a misleading empty attachment block.
+    expect(document.getElementById("card-section-attachments")).not.toBeInTheDocument();
+  });
+
+  it("keeps an optional block hidden when creation fails", async () => {
+    actions.updateCardDetailsAction.mockResolvedValue({
+      success: false,
+      error: "Failed to update card. Please try again.",
+    });
+    renderSheet();
+
+    await user.click(screen.getByRole("button", { name: "Add to card" }));
+    await user.click(screen.getByRole("menuitem", { name: "Description" }));
+    await user.type(screen.getByPlaceholderText("Write a description..."), "Customer context");
+    await user.click(screen.getByRole("button", { name: "Add description" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Failed to update card");
+    expect(screen.getByRole("dialog", { name: "Add description" })).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Add a more detailed description...")).not.toBeInTheDocument();
   });
 
   it("autosaves the title on blur when it changed", async () => {
@@ -213,7 +275,7 @@ describe("CardDetailSheet — title autosave", () => {
       )
       .mockResolvedValue({ success: true });
 
-    renderSheet();
+    renderSheetWithDescription();
 
     const title = screen.getByLabelText("Card title");
     await user.clear(title);
@@ -225,7 +287,8 @@ describe("CardDetailSheet — title autosave", () => {
     );
 
     // Description blur lands while save 1 is still in flight.
-    const description = await openDescriptionEditor();
+    const description = screen.getByPlaceholderText("Add a more detailed description...");
+    await user.clear(description);
     await user.type(description, "More details");
     await user.tab(); // blur description → save 2 queued, not dropped
 
@@ -252,7 +315,7 @@ describe("CardDetailSheet — title autosave", () => {
         }),
     );
 
-    renderSheet();
+    renderSheetWithDescription();
 
     const title = screen.getByLabelText("Card title");
     await user.clear(title);
@@ -265,7 +328,7 @@ describe("CardDetailSheet — title autosave", () => {
 
     // The shared isPending freeze is gone: while the title save is pending,
     // the description editor and the estimate picker stay enabled.
-    const description = await openDescriptionEditor();
+    const description = screen.getByPlaceholderText("Add a more detailed description...");
     expect(description).not.toBeDisabled();
     expect(title).not.toBeDisabled();
     expect(
@@ -863,7 +926,7 @@ describe("CardDetailSheet — autosave queue recovery (rejected save)", () => {
           }),
       )
       .mockResolvedValueOnce({ success: true });
-    renderSheet();
+    renderSheetWithDescription();
 
     const title = screen.getByLabelText("Card title");
     await user.clear(title);
@@ -876,7 +939,8 @@ describe("CardDetailSheet — autosave queue recovery (rejected save)", () => {
 
     // A description blur lands while save 1 is still in flight → queued behind
     // it in the same drain.
-    const description = await openDescriptionEditor();
+    const description = screen.getByPlaceholderText("Add a more detailed description...");
+    await user.clear(description);
     await user.type(description, "More details");
     await user.tab();
 
@@ -900,7 +964,7 @@ describe("CardDetailSheet — autosave queue recovery (rejected save)", () => {
     actions.updateCardDetailsAction
       .mockRejectedValueOnce(new Error("network down"))
       .mockResolvedValueOnce({ success: true });
-    renderSheet();
+    renderSheetWithDescription();
 
     const title = screen.getByLabelText("Card title");
     await user.clear(title);
@@ -915,7 +979,8 @@ describe("CardDetailSheet — autosave queue recovery (rejected save)", () => {
     );
 
     // A later blur queues a NEW save; the drain (ownership was reset) runs it.
-    const description = await openDescriptionEditor();
+    const description = screen.getByPlaceholderText("Add a more detailed description...");
+    await user.clear(description);
     await user.type(description, "More details");
     await user.tab();
 

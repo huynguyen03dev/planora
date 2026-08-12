@@ -8,6 +8,7 @@ import {
   Calendar03Icon,
   Cancel01Icon,
   Image01Icon,
+  PlusSignIcon,
   UserMultipleIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -15,6 +16,7 @@ import { format } from "date-fns";
 
 import {
   assignCardMemberAction,
+  createChecklistAction,
   createCommentAction,
   loadMoreCardDetailAction,
   removeCardMemberAction,
@@ -24,10 +26,18 @@ import {
   updateCardDueDateAction,
   updateCardEstimateAction,
   updateCardPriorityAction,
+  uploadAttachmentAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
 import { MemberAvatar } from "@/components/member-avatar";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
@@ -38,6 +48,8 @@ import {
   DialogClose,
   DialogContent,
   DialogDescription,
+  DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -65,6 +77,7 @@ import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId
 import { useMentionAutocomplete } from "./use-mention-autocomplete";
 
 const estimateOptions = ["", "1", "2", "4", "8", "16"] as const;
+type OptionalCardSection = "description" | "checklist" | "attachment";
 
 function toDateInputValue(date: Date | null): string {
   return date ? date.toISOString().slice(0, 10) : "";
@@ -349,11 +362,20 @@ function CardDetailDialogBody({
   const [activityHasMoreState, setActivityHasMoreState] = useState(activityHasMore);
   const [commentsPending, startCommentsTransition] = useTransition();
   const [activityPending, startActivityTransition] = useTransition();
+  const [creatorSection, setCreatorSection] = useState<OptionalCardSection | null>(null);
+  const [createdChecklists, setCreatedChecklists] = useState<ChecklistData[]>([]);
   const [descriptionOpen, setDescriptionOpen] = useState(Boolean(card.description?.trim()));
-  const [checklistOpen, setChecklistOpen] = useState(checklists.length > 0);
   const [attachmentsOpen, setAttachmentsOpen] = useState(attachments.length > 0);
-  const descriptionRef = useRef<HTMLTextAreaElement>(null);
-  const focusDescriptionOnOpenRef = useRef(false);
+  const displayedChecklists = useMemo(() => {
+    const serverIds = new Set(checklists.map((checklist) => checklist.id));
+    return [
+      ...checklists,
+      ...createdChecklists.filter((checklist) => !serverIds.has(checklist.id)),
+    ];
+  }, [checklists, createdChecklists]);
+  const checklistOpen = displayedChecklists.length > 0;
+  const hasMissingOptionalSection =
+    !descriptionOpen || !checklistOpen || !attachmentsOpen;
   const selectedDueDate = parseDateInputValue(draftDueDate);
 
   // Reflect a remote edit into the draft unless the user is actively typing that
@@ -386,23 +408,10 @@ function CardDetailDialogBody({
   }, [liveDescription]);
 
   useEffect(() => {
-    if (checklists.length > 0) {
-      setChecklistOpen(true);
-    }
-  }, [checklists.length]);
-
-  useEffect(() => {
     if (attachments.length > 0) {
       setAttachmentsOpen(true);
     }
   }, [attachments.length]);
-
-  useEffect(() => {
-    if (descriptionOpen && focusDescriptionOnOpenRef.current) {
-      focusDescriptionOnOpenRef.current = false;
-      descriptionRef.current?.focus();
-    }
-  }, [descriptionOpen]);
 
   // Meta drafts reconcile to the live card like title/description: a remote
   // change is reflected unless the picker is open (a pick made there is the
@@ -534,22 +543,6 @@ function CardDetailDialogBody({
       }
     };
   }, []);
-
-  function revealDescription() {
-    if (!canEdit) return;
-    focusDescriptionOnOpenRef.current = true;
-    setDescriptionOpen(true);
-  }
-
-  function revealChecklist() {
-    if (!canEdit) return;
-    setChecklistOpen(true);
-  }
-
-  function revealAttachments() {
-    if (!canEdit) return;
-    setAttachmentsOpen(true);
-  }
 
   const assignedMemberIds = new Set(assignees.map((member) => member.id));
   const availableMembers = assignableMembers.filter(
@@ -992,25 +985,42 @@ function CardDetailDialogBody({
 
         {canEdit ? (
           <div className="flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-3">
-            {!descriptionOpen || !checklistOpen || !attachmentsOpen ? (
-              <span className="mr-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Add
-              </span>
-            ) : null}
-            {!descriptionOpen ? (
-              <Button type="button" variant="ghost" size="sm" onClick={revealDescription}>
-                Description
-              </Button>
-            ) : null}
-            {!checklistOpen ? (
-              <Button type="button" variant="ghost" size="sm" onClick={revealChecklist}>
-                Checklist
-              </Button>
-            ) : null}
-            {!attachmentsOpen ? (
-              <Button type="button" variant="ghost" size="sm" onClick={revealAttachments}>
-                Attachment
-              </Button>
+            {hasMissingOptionalSection ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" variant="ghost" size="sm">
+                    <HugeiconsIcon
+                      icon={PlusSignIcon}
+                      size={16}
+                      strokeWidth={2}
+                    />
+                    Add to card
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-44">
+                  {!descriptionOpen ? (
+                    <DropdownMenuItem
+                      onSelect={() => setCreatorSection("description")}
+                    >
+                      Description
+                    </DropdownMenuItem>
+                  ) : null}
+                  {!checklistOpen ? (
+                    <DropdownMenuItem
+                      onSelect={() => setCreatorSection("checklist")}
+                    >
+                      Checklist
+                    </DropdownMenuItem>
+                  ) : null}
+                  {!attachmentsOpen ? (
+                    <DropdownMenuItem
+                      onSelect={() => setCreatorSection("attachment")}
+                    >
+                      Attachment
+                    </DropdownMenuItem>
+                  ) : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
             ) : null}
 
             {/* Cover is a real secondary action: pick an existing image
@@ -1119,6 +1129,26 @@ function CardDetailDialogBody({
                 </Button>
               </PopoverContent>
             </Popover>
+
+            <CreateCardSectionDialog
+              section={creatorSection}
+              cardId={card.id}
+              cardTitle={draftTitle}
+              onOpenChange={(open) => {
+                if (!open) setCreatorSection(null);
+              }}
+              onDescriptionCreated={(description) => {
+                setDraftDescription(description);
+                lastSavedDetailsRef.current = {
+                  title: draftTitle.trim(),
+                  description,
+                };
+                setDescriptionOpen(true);
+              }}
+              onChecklistCreated={(checklist) => {
+                setCreatedChecklists((current) => [...current, checklist]);
+              }}
+            />
           </div>
         ) : null}
       </div>
@@ -1374,7 +1404,6 @@ function CardDetailDialogBody({
 
             {canEdit ? (
               <Textarea
-                ref={descriptionRef}
                 id="card-detail-description"
                 value={draftDescription}
                 onChange={(e) => {
@@ -1404,7 +1433,7 @@ function CardDetailDialogBody({
           <div id="card-section-checklist" className="mt-6 border-t border-border pt-6">
             <CardChecklistsSection
               cardId={card.id}
-              checklists={checklists}
+              checklists={displayedChecklists}
               canEdit={canEdit}
             />
           </div>
@@ -1477,6 +1506,187 @@ function CardDetailDialogBody({
         ) : null}
       </div>
     </div>
+  );
+}
+
+type CreateCardSectionDialogProps = {
+  section: OptionalCardSection | null;
+  cardId: string;
+  cardTitle: string;
+  onOpenChange: (open: boolean) => void;
+  onDescriptionCreated: (description: string) => void;
+  onChecklistCreated: (checklist: ChecklistData) => void;
+};
+
+function CreateCardSectionDialog({
+  section,
+  cardId,
+  cardTitle,
+  onOpenChange,
+  onDescriptionCreated,
+  onChecklistCreated,
+}: CreateCardSectionDialogProps) {
+  const router = useRouter();
+  const [description, setDescription] = useState("");
+  const [checklistTitle, setChecklistTitle] = useState("");
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [error, setError] = useState("");
+  const [isPending, startTransition] = useTransition();
+
+  function close() {
+    setDescription("");
+    setChecklistTitle("");
+    setAttachment(null);
+    setError("");
+    onOpenChange(false);
+  }
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!section || isPending) return;
+
+    const trimmedDescription = description.trim();
+    const trimmedChecklistTitle = checklistTitle.trim();
+    if (section === "description" && !trimmedDescription) {
+      setError("Description cannot be empty.");
+      return;
+    }
+    if (section === "checklist" && !trimmedChecklistTitle) {
+      setError("Checklist title cannot be empty.");
+      return;
+    }
+    if (section === "attachment" && !attachment) {
+      setError("Choose a file to upload.");
+      return;
+    }
+
+    setError("");
+    startTransition(async () => {
+      try {
+        if (section === "description") {
+          const formData = new FormData();
+          formData.set("cardId", cardId);
+          formData.set("title", cardTitle.trim());
+          formData.set("description", trimmedDescription);
+          const result = await updateCardDetailsAction(formData);
+          if (!result.success) {
+            setError(result.error);
+            return;
+          }
+          onDescriptionCreated(trimmedDescription);
+        } else if (section === "checklist") {
+          const formData = new FormData();
+          formData.set("cardId", cardId);
+          formData.set("title", trimmedChecklistTitle);
+          const result = await createChecklistAction(formData);
+          if (!result.success) {
+            setError(result.error);
+            return;
+          }
+          onChecklistCreated(result.checklist);
+        } else {
+          const formData = new FormData();
+          formData.set("cardId", cardId);
+          formData.set("file", attachment!);
+          const result = await uploadAttachmentAction(formData);
+          if (!result.success) {
+            setError(result.error);
+            return;
+          }
+        }
+
+        close();
+        router.refresh();
+      } catch {
+        setError("Something went wrong. Please try again.");
+      }
+    });
+  }
+
+  const title =
+    section === "description"
+      ? "Add description"
+      : section === "checklist"
+        ? "Create checklist"
+        : "Upload attachment";
+
+  return (
+    <Dialog
+      open={section !== null}
+      onOpenChange={(open) => {
+        if (isPending) return;
+        if (open) {
+          onOpenChange(true);
+        } else {
+          close();
+        }
+      }}
+    >
+      <DialogContent
+        className="max-w-md"
+        onEscapeKeyDown={(event) => isPending && event.preventDefault()}
+      >
+        <form onSubmit={submit}>
+          <DialogHeader>
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>
+              Create it here. The section will appear on the card only after this succeeds.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-4">
+            {section === "description" ? (
+              <Textarea
+                autoFocus
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                placeholder="Write a description..."
+                rows={6}
+                disabled={isPending}
+              />
+            ) : section === "checklist" ? (
+              <Input
+                autoFocus
+                value={checklistTitle}
+                onChange={(event) => setChecklistTitle(event.target.value)}
+                placeholder="Checklist title"
+                disabled={isPending}
+              />
+            ) : section === "attachment" ? (
+              <Input
+                type="file"
+                aria-label="Attachment file"
+                onChange={(event) => setAttachment(event.target.files?.[0] ?? null)}
+                accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                disabled={isPending}
+              />
+            ) : null}
+            {error ? (
+              <p role="alert" className="mt-2 text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="ghost" disabled={isPending} onClick={close}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                isPending ||
+                (section === "description" && !description.trim()) ||
+                (section === "checklist" && !checklistTitle.trim()) ||
+                (section === "attachment" && !attachment)
+              }
+            >
+              {isPending ? "Creating..." : title}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
