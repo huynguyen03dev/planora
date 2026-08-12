@@ -97,6 +97,16 @@ function toDueDateValue(date: Date): string {
   return format(date, "yyyy-MM-dd");
 }
 
+function normalizeMemberSearch(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLocaleLowerCase()
+    .trim();
+}
+
 
 
 type UIComment = {
@@ -359,6 +369,7 @@ function CardDetailDialogBody({
   const [commentsPending, startCommentsTransition] = useTransition();
   const [activityPending, startActivityTransition] = useTransition();
   const [creatorSection, setCreatorSection] = useState<OptionalCardSection | null>(null);
+  const [memberSearch, setMemberSearch] = useState("");
   const [createdChecklists, setCreatedChecklists] = useState<ChecklistData[]>([]);
   const [descriptionOpen, setDescriptionOpen] = useState(Boolean(card.description?.trim()));
   const [attachmentsOpen, setAttachmentsOpen] = useState(attachments.length > 0);
@@ -544,6 +555,14 @@ function CardDetailDialogBody({
   const availableMembers = assignableMembers.filter(
     (member) => !assignedMemberIds.has(member.id),
   );
+  const normalizedMemberSearch = normalizeMemberSearch(memberSearch);
+  const filteredAvailableMembers = normalizedMemberSearch
+    ? availableMembers.filter((member) =>
+        normalizeMemberSearch(`${member.name} ${member.email}`).includes(
+          normalizedMemberSearch,
+        ),
+      )
+    : availableMembers;
 
   // Covers may only be sourced from this card's own image attachments
   // (the server rejects anything else — US-018 anti-tracking-pixel contract).
@@ -1022,7 +1041,11 @@ function CardDetailDialogBody({
             {/* Cover is a real secondary action: pick an existing image
                 attachment or upload a new one, including the zero-attachments
                 case. It never scrolls the document. */}
-            <Popover>
+                  <Popover
+                    onOpenChange={(open) => {
+                      if (!open) setMemberSearch("");
+                    }}
+                  >
               <PopoverTrigger asChild>
                 <Button type="button" variant="ghost" size="sm">
                   <HugeiconsIcon icon={Image01Icon} size={16} strokeWidth={2} />
@@ -1215,33 +1238,57 @@ function CardDetailDialogBody({
                       Add
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent align="start" className="w-72 space-y-2">
-                    <p className="text-sm font-semibold">Assign members</p>
-                    {availableMembers.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        All workspace members are already assigned to this card.
-                      </p>
-                    ) : (
-                      <div className="space-y-1">
-                        {availableMembers.map((member) => (
-                          <Button
-                            key={member.id}
-                            variant="ghost"
-                            className="h-auto w-full justify-start gap-3 py-1.5"
-                            onClick={() => handleAssignMember(member.id)}
-                          >
-                            <MemberAvatar seed={member.id} name={member.name} image={member.image} size="sm" />
-                            <span className="flex min-w-0 flex-col text-left">
-                              <span className="truncate text-sm font-medium">{member.name}</span>
-                              <span className="truncate text-xs font-normal text-muted-foreground">
-                                {member.email}
-                              </span>
-                            </span>
-                          </Button>
-                        ))}
-                      </div>
-                    )}
-                  </PopoverContent>
+                    <PopoverContent align="start" className="w-72 space-y-3">
+                      <p className="text-sm font-semibold">Assign members</p>
+                      {availableMembers.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          All workspace members are already assigned to this card.
+                        </p>
+                      ) : (
+                        <>
+                          <Input
+                            autoFocus
+                            type="search"
+                            value={memberSearch}
+                            onChange={(event) => setMemberSearch(event.target.value)}
+                            placeholder="Search by name or email..."
+                            aria-label="Search members"
+                          />
+                          {filteredAvailableMembers.length === 0 ? (
+                            <p className="py-3 text-center text-sm text-muted-foreground">
+                              No members match your search.
+                            </p>
+                          ) : (
+                            <div className="max-h-64 space-y-1 overflow-y-auto">
+                              {filteredAvailableMembers.map((member) => (
+                                <Button
+                                  key={member.id}
+                                  type="button"
+                                  variant="ghost"
+                                  className="h-auto w-full justify-start gap-3 py-1.5"
+                                  onClick={() => handleAssignMember(member.id)}
+                                >
+                                  <MemberAvatar
+                                    seed={member.id}
+                                    name={member.name}
+                                    image={member.image}
+                                    size="sm"
+                                  />
+                                  <span className="flex min-w-0 flex-col text-left">
+                                    <span className="truncate text-sm font-medium">
+                                      {member.name}
+                                    </span>
+                                    <span className="truncate text-xs font-normal text-muted-foreground">
+                                      {member.email}
+                                    </span>
+                                  </span>
+                                </Button>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </PopoverContent>
                 </Popover>
               ) : null}
             </div>
