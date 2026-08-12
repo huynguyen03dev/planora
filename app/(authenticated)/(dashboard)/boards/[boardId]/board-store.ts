@@ -346,7 +346,6 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     lists: [],
     selectedCardId: null,
     selectedCard: null,
-    cardDetailDismissedId: null,
     socketConnected: false,
     isDragging: false,
     pendingResync: false,
