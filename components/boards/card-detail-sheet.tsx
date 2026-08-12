@@ -353,6 +353,8 @@ function CardDetailDialogBody({
   const [dueDateOpen, setDueDateOpen] = useState(false);
   const [draftPriority, setDraftPriority] = useState(card.priority ?? "NONE");
   const coverInputRef = useRef<HTMLInputElement>(null);
+  const [coverPopoverOpen, setCoverPopoverOpen] = useState(false);
+  const [coverUploadName, setCoverUploadName] = useState<string | null>(null);
   const [error, setError] = useState("");
   // Save lifecycle (U2/U3): "saving" while a queued save drains, "saved" for
   // a ~1.5s confirmation after the last successful save, "idle" otherwise.
@@ -566,9 +568,16 @@ function CardDetailDialogBody({
 
   // Covers may only be sourced from this card's own image attachments
   // (the server rejects anything else — US-018 anti-tracking-pixel contract).
-  const imageAttachments = attachments.filter((attachment) =>
-    attachment.fileType.startsWith("image/"),
-  );
+    const imageAttachments = attachments.filter((attachment) =>
+      attachment.fileType.startsWith("image/"),
+    );
+    // A directly uploaded cover is persisted as an attachment so Cloudinary
+    // metadata remains available, but presenting the same image again in the
+    // Attachments section makes the user's single cover action look like two
+    // separate additions.
+    const visibleAttachments = card.coverImage
+      ? attachments.filter((attachment) => attachment.fileUrl !== card.coverImage)
+      : attachments;
 
   // One canonical list per section: seeded items + loaded pages, deduped by id
   // and sorted by the cursor keys (comments oldest-first, activity newest-first)
@@ -680,6 +689,7 @@ function CardDetailDialogBody({
   }
 
   function submitCover(coverImage: string) {
+    if (coverUploadName) return;
     setError("");
     queueSave(async () => {
       const fd = new FormData();
@@ -1041,11 +1051,13 @@ function CardDetailDialogBody({
             {/* Cover is a real secondary action: pick an existing image
                 attachment or upload a new one, including the zero-attachments
                 case. It never scrolls the document. */}
-                  <Popover
-                    onOpenChange={(open) => {
-                      if (!open) setMemberSearch("");
-                    }}
-                  >
+            <Popover
+              open={coverPopoverOpen}
+              onOpenChange={(open) => {
+                if (!open && coverUploadName) return;
+                setCoverPopoverOpen(open);
+              }}
+            >
               <PopoverTrigger asChild>
                 <Button type="button" variant="ghost" size="sm">
                   <HugeiconsIcon icon={Image01Icon} size={16} strokeWidth={2} />
@@ -1060,6 +1072,7 @@ function CardDetailDialogBody({
                       type="button"
                       variant="ghost"
                       size="sm"
+                      disabled={Boolean(coverUploadName)}
                       onClick={() => submitCover("")}
                     >
                       Remove
@@ -1088,9 +1101,10 @@ function CardDetailDialogBody({
                             key={attachment.id}
                             type="button"
                             title={attachment.fileName}
+                            disabled={Boolean(coverUploadName)}
                             onClick={() => submitCover(attachment.fileUrl)}
                             className={cn(
-                              "relative aspect-video overflow-hidden rounded border-2 transition",
+                              "relative aspect-video overflow-hidden rounded border-2 transition disabled:cursor-not-allowed disabled:opacity-50",
                               isCurrent
                                 ? "border-primary"
                                 : "border-transparent hover:border-muted-foreground/40",
@@ -1116,35 +1130,59 @@ function CardDetailDialogBody({
                   type="file"
                   ref={coverInputRef}
                   accept="image/*"
+                  disabled={Boolean(coverUploadName)}
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (!file) return;
+                    if (!file || coverUploadName) return;
                     setError("");
+                    setCoverUploadName(file.name);
                     queueSave(async () => {
-                      const fd = new FormData();
-                      fd.set("cardId", card.id);
-                      fd.set("file", file);
-                      const result = await setCardCoverAction(fd);
-                      if (!result.success) {
-                        setError(result.error);
-                        return false;
+                      try {
+                        const fd = new FormData();
+                        fd.set("cardId", card.id);
+                        fd.set("file", file);
+                        const result = await setCardCoverAction(fd);
+                        if (!result.success) {
+                          setError(result.error);
+                          return false;
+                        }
+                        setError("");
+                        router.refresh();
+                        return true;
+                      } finally {
+                        setCoverUploadName(null);
+                        if (coverInputRef.current) {
+                          coverInputRef.current.value = "";
+                        }
                       }
-                      setError("");
-                      router.refresh();
-                      return true;
                     });
-                    e.target.value = "";
                   }}
                 />
+                {coverUploadName ? (
+                  <p role="status" className="text-xs text-muted-foreground">
+                    Uploading {coverUploadName}… Keep this window open.
+                  </p>
+                ) : null}
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   className="w-full"
+                  disabled={Boolean(coverUploadName)}
                   onClick={() => coverInputRef.current?.click()}
                 >
-                  Upload new image
+                  {coverUploadName ? (
+                    <>
+                      <span
+                        aria-hidden="true"
+                        className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+                      />
+                      Uploading…
+                    </>
+                  ) : (
+                    "Upload new image"
+                  )}
                 </Button>
               </PopoverContent>
             </Popover>
@@ -1231,64 +1269,68 @@ function CardDetailDialogBody({
                 </span>
               )}
               {canEdit ? (
-                <Popover>
+                <Popover
+                  onOpenChange={(open) => {
+                    if (!open) setMemberSearch("");
+                  }}
+                >
                   <PopoverTrigger asChild>
                     <Button type="button" variant="outline" size="sm">
                       <HugeiconsIcon icon={UserMultipleIcon} size={16} strokeWidth={2} />
                       Add
                     </Button>
                   </PopoverTrigger>
-                    <PopoverContent align="start" className="w-72 space-y-3">
-                      <p className="text-sm font-semibold">Assign members</p>
-                      {availableMembers.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">
-                          All workspace members are already assigned to this card.
-                        </p>
-                      ) : (
-                        <>
-                          <Input
-                            autoFocus
-                            type="search"
-                            value={memberSearch}
-                            onChange={(event) => setMemberSearch(event.target.value)}
-                            placeholder="Search by name or email..."
-                            aria-label="Search members"
-                          />
-                          {filteredAvailableMembers.length === 0 ? (
-                            <p className="py-3 text-center text-sm text-muted-foreground">
-                              No members match your search.
-                            </p>
-                          ) : (
-                            <div className="max-h-64 space-y-1 overflow-y-auto">
-                              {filteredAvailableMembers.map((member) => (
-                                <Button
-                                  key={member.id}
-                                  type="button"
-                                  variant="ghost"
-                                  className="h-auto w-full justify-start gap-3 py-1.5"
-                                  onClick={() => handleAssignMember(member.id)}
-                                >
-                                  <MemberAvatar
-                                    seed={member.id}
-                                    name={member.name}
-                                    image={member.image}
-                                    size="sm"
-                                  />
-                                  <span className="flex min-w-0 flex-col text-left">
-                                    <span className="truncate text-sm font-medium">
-                                      {member.name}
-                                    </span>
-                                    <span className="truncate text-xs font-normal text-muted-foreground">
-                                      {member.email}
-                                    </span>
+                  <PopoverContent align="start" className="w-72 space-y-3">
+                    <p className="text-sm font-semibold">Assign members</p>
+                    {availableMembers.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        All workspace members are already assigned to this card.
+                      </p>
+                    ) : (
+                      <>
+                        <Input
+                          autoFocus
+                          type="search"
+                          value={memberSearch}
+                          onChange={(event) => setMemberSearch(event.target.value)}
+                          placeholder="Search by name or email..."
+                          aria-label="Search members"
+                        />
+                        {filteredAvailableMembers.length === 0 ? (
+                          <p className="py-3 text-center text-sm text-muted-foreground">
+                            No members match your search.
+                          </p>
+                        ) : (
+                          <div className="max-h-64 space-y-1 overflow-y-auto">
+                            {filteredAvailableMembers.map((member) => (
+                              <Button
+                                key={member.id}
+                                type="button"
+                                variant="ghost"
+                                className="h-auto w-full justify-start gap-3 py-1.5"
+                                onClick={() => handleAssignMember(member.id)}
+                              >
+                                <MemberAvatar
+                                  seed={member.id}
+                                  name={member.name}
+                                  image={member.image}
+                                  size="sm"
+                                />
+                                <span className="flex min-w-0 flex-col text-left">
+                                  <span className="truncate text-sm font-medium">
+                                    {member.name}
                                   </span>
-                                </Button>
-                              ))}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </PopoverContent>
+                                  <span className="truncate text-xs font-normal text-muted-foreground">
+                                    {member.email}
+                                  </span>
+                                </span>
+                              </Button>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </PopoverContent>
                 </Popover>
               ) : null}
             </div>
@@ -1542,11 +1584,11 @@ function CardDetailDialogBody({
 
         {attachmentsOpen ? (
           <div id="card-section-attachments" className="mt-6 border-t border-border pt-6">
-            <CardAttachments
-              cardId={card.id}
-              attachments={attachments}
-              canEdit={canEdit}
-            />
+              <CardAttachments
+                cardId={card.id}
+                attachments={visibleAttachments}
+                canEdit={canEdit}
+              />
           </div>
         ) : null}
       </div>
