@@ -1,6 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  experimental: {
+    // Attachments are validated at 50 MB in lib/cloudinary.ts. Allow a small
+    // multipart overhead so valid files reach that application-level guard.
+    serverActions: {
+      bodySizeLimit: "52mb",
+    },
+  },
   turbopack: {
     root: process.cwd(),
   },
