@@ -5,13 +5,9 @@ import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Archive02Icon,
-  Attachment01Icon,
   Calendar03Icon,
   Cancel01Icon,
-  Flag03Icon,
   Image01Icon,
-  Tag01Icon,
-  Task01Icon,
   UserMultipleIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -353,6 +349,11 @@ function CardDetailDialogBody({
   const [activityHasMoreState, setActivityHasMoreState] = useState(activityHasMore);
   const [commentsPending, startCommentsTransition] = useTransition();
   const [activityPending, startActivityTransition] = useTransition();
+  const [descriptionOpen, setDescriptionOpen] = useState(Boolean(card.description?.trim()));
+  const [checklistOpen, setChecklistOpen] = useState(checklists.length > 0);
+  const [attachmentsOpen, setAttachmentsOpen] = useState(attachments.length > 0);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const focusDescriptionOnOpenRef = useRef(false);
   const selectedDueDate = parseDateInputValue(draftDueDate);
 
   // Reflect a remote edit into the draft unless the user is actively typing that
@@ -373,6 +374,35 @@ function CardDetailDialogBody({
     setDescriptionBaseline(liveDescription);
     if (!descriptionEditing) setDraftDescription(liveDescription);
   }
+
+  // Optional document blocks become visible as soon as realtime/server data
+  // arrives, but stay collapsed when they are genuinely empty. Once a user
+  // opens a block, clearing its content does not unexpectedly hide the editor
+  // they are working in.
+  useEffect(() => {
+    if (liveDescription.trim()) {
+      setDescriptionOpen(true);
+    }
+  }, [liveDescription]);
+
+  useEffect(() => {
+    if (checklists.length > 0) {
+      setChecklistOpen(true);
+    }
+  }, [checklists.length]);
+
+  useEffect(() => {
+    if (attachments.length > 0) {
+      setAttachmentsOpen(true);
+    }
+  }, [attachments.length]);
+
+  useEffect(() => {
+    if (descriptionOpen && focusDescriptionOnOpenRef.current) {
+      focusDescriptionOnOpenRef.current = false;
+      descriptionRef.current?.focus();
+    }
+  }, [descriptionOpen]);
 
   // Meta drafts reconcile to the live card like title/description: a remote
   // change is reflected unless the picker is open (a pick made there is the
@@ -505,18 +535,20 @@ function CardDetailDialogBody({
     };
   }, []);
 
-  // Scroll the matching editor into view and focus its primary control so the
-  // "Add to card" row is keyboard-operable (US-043).
-  function focusSection(sectionId: string, focusId?: string) {
-    const section = document.getElementById(sectionId);
-    if (!section) return;
-    section.scrollIntoView({ behavior: "smooth", block: "start" });
-    const target = focusId
-      ? document.getElementById(focusId)
-      : section.querySelector<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-        );
-    target?.focus({ preventScroll: true });
+  function revealDescription() {
+    if (!canEdit) return;
+    focusDescriptionOnOpenRef.current = true;
+    setDescriptionOpen(true);
+  }
+
+  function revealChecklist() {
+    if (!canEdit) return;
+    setChecklistOpen(true);
+  }
+
+  function revealAttachments() {
+    if (!canEdit) return;
+    setAttachmentsOpen(true);
   }
 
   const assignedMemberIds = new Set(assignees.map((member) => member.id));
@@ -817,8 +849,7 @@ function CardDetailDialogBody({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Document-style header: the title is the hero (inline-editable) with an
-          "Add to card" action row beneath it (US-043); the visually-hidden
+      {/* Document-style header: the title is the hero. The visually-hidden
           DialogTitle supplies the accessible name Radix + screen readers need. */}
       <DialogTitle className="sr-only">{card.title || "Card details"}</DialogTitle>
       <DialogDescription className="sr-only">
@@ -960,74 +991,34 @@ function CardDetailDialogBody({
         </div>
 
         {canEdit ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="mr-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Add to card
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => focusSection("card-section-labels")}
-            >
-              <HugeiconsIcon icon={Tag01Icon} size={16} strokeWidth={2} />
-              Labels
-            </Button>
-            {/* Order mirrors the body section order (Labels → Checklist →
-                Priority → Dates) so clicking the row left-to-right scrolls
-                monotonically down, never up-then-down (US-043). */}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => focusSection("card-section-checklist")}
-            >
-              <HugeiconsIcon icon={Task01Icon} size={16} strokeWidth={2} />
-              Checklist
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => focusSection("card-section-priority", "card-priority")}
-            >
-              <HugeiconsIcon icon={Flag03Icon} size={16} strokeWidth={2} />
-              Priority
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => focusSection("card-section-dates", "card-due-date")}
-            >
-              <HugeiconsIcon icon={Calendar03Icon} size={16} strokeWidth={2} />
-              Dates
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => focusSection("card-section-members")}
-            >
-              <HugeiconsIcon icon={UserMultipleIcon} size={16} strokeWidth={2} />
-              Members
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => focusSection("card-section-attachments")}
-            >
-              <HugeiconsIcon icon={Attachment01Icon} size={16} strokeWidth={2} />
-              Attachment
-            </Button>
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-3">
+            {!descriptionOpen || !checklistOpen || !attachmentsOpen ? (
+              <span className="mr-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Add
+              </span>
+            ) : null}
+            {!descriptionOpen ? (
+              <Button type="button" variant="ghost" size="sm" onClick={revealDescription}>
+                Description
+              </Button>
+            ) : null}
+            {!checklistOpen ? (
+              <Button type="button" variant="ghost" size="sm" onClick={revealChecklist}>
+                Checklist
+              </Button>
+            ) : null}
+            {!attachmentsOpen ? (
+              <Button type="button" variant="ghost" size="sm" onClick={revealAttachments}>
+                Attachment
+              </Button>
+            ) : null}
 
-            {/* Cover is a secondary action (US-043): pick an existing image
+            {/* Cover is a real secondary action: pick an existing image
                 attachment or upload a new one, including the zero-attachments
-                case. */}
+                case. It never scrolls the document. */}
             <Popover>
               <PopoverTrigger asChild>
-                <Button type="button" variant="outline" size="sm">
+                <Button type="button" variant="ghost" size="sm">
                   <HugeiconsIcon icon={Image01Icon} size={16} strokeWidth={2} />
                   Cover
                 </Button>
@@ -1374,44 +1365,50 @@ function CardDetailDialogBody({
           </div>
         </div>
 
-        {/* Document body — hairline-divided sections (no boxed sub-cards).
-            Description + comment body read at 16px / 1.55 leading. */}
-        <section className="mt-6 space-y-3 border-t border-border pt-6">
-          <h3 className="text-base font-semibold">Description</h3>
+        {/* Document body — optional blocks stay collapsed until they have data
+            or the user explicitly creates/reveals them. Comments remain the
+            default conversation surface. */}
+        {descriptionOpen ? (
+          <section className="mt-6 space-y-3 border-t border-border pt-6">
+            <h3 className="text-base font-semibold">Description</h3>
 
-          {canEdit ? (
-            <Textarea
-              id="card-detail-description"
-              value={draftDescription}
-              onChange={(e) => {
-                setDraftDescription(e.target.value);
-                setError("");
-              }}
-              onFocus={() => setDescriptionEditing(true)}
-              onBlur={() => {
-                setDescriptionEditing(false);
-                queueSaveDetails(draftTitle, draftDescription);
-              }}
-              rows={8}
-              placeholder="Add a more detailed description..."
-              className="min-h-40 text-base leading-[1.55] md:text-base"
+            {canEdit ? (
+              <Textarea
+                ref={descriptionRef}
+                id="card-detail-description"
+                value={draftDescription}
+                onChange={(e) => {
+                  setDraftDescription(e.target.value);
+                  setError("");
+                }}
+                onFocus={() => setDescriptionEditing(true)}
+                onBlur={() => {
+                  setDescriptionEditing(false);
+                  queueSaveDetails(draftTitle, draftDescription);
+                }}
+                rows={8}
+                placeholder="Add a more detailed description..."
+                className="min-h-40 text-base leading-[1.55] md:text-base"
+              />
+            ) : (
+              <div className="min-h-[3rem] whitespace-pre-wrap text-base leading-[1.55]">
+                {card.description || (
+                  <span className="text-muted-foreground">No description yet.</span>
+                )}
+              </div>
+            )}
+          </section>
+        ) : null}
+
+        {checklistOpen ? (
+          <div id="card-section-checklist" className="mt-6 border-t border-border pt-6">
+            <CardChecklistsSection
+              cardId={card.id}
+              checklists={checklists}
+              canEdit={canEdit}
             />
-          ) : (
-            <div className="min-h-[3rem] whitespace-pre-wrap text-base leading-[1.55]">
-              {card.description || (
-                <span className="text-muted-foreground">No description yet.</span>
-              )}
-            </div>
-          )}
-        </section>
-
-        <div id="card-section-checklist" className="mt-6 border-t border-border pt-6">
-          <CardChecklistsSection
-            cardId={card.id}
-            checklists={checklists}
-            canEdit={canEdit}
-          />
-        </div>
+          </div>
+        ) : null}
 
         <section className="mt-6 space-y-4 border-t border-border pt-6">
           <h3 className="text-base font-semibold">Comments and activity</h3>
@@ -1469,13 +1466,15 @@ function CardDetailDialogBody({
           )}
         </section>
 
-        <div id="card-section-attachments" className="mt-6 border-t border-border pt-6">
-          <CardAttachments
-            cardId={card.id}
-            attachments={attachments}
-            canEdit={canEdit}
-          />
-        </div>
+        {attachmentsOpen ? (
+          <div id="card-section-attachments" className="mt-6 border-t border-border pt-6">
+            <CardAttachments
+              cardId={card.id}
+              attachments={attachments}
+              canEdit={canEdit}
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -129,6 +129,11 @@ function renderSheet(props: Partial<Parameters<typeof CardDetailSheet>[0]> = {})
 
 const user = userEvent.setup({ pointerEventsCheck: 0 });
 
+async function openDescriptionEditor() {
+  await user.click(screen.getByRole("button", { name: "Description" }));
+  return screen.findByPlaceholderText("Add a more detailed description...");
+}
+
 describe("CardDetailSheet — title autosave", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -143,6 +148,24 @@ describe("CardDetailSheet — title autosave", () => {
   it("shows the title in an editable field when the viewer can edit", () => {
     renderSheet();
     expect(screen.getByLabelText("Card title")).toHaveValue("Original title");
+  });
+
+  it("keeps optional blocks collapsed until they are added", async () => {
+    renderSheet();
+
+    expect(screen.getByText("Comments and activity")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Add a more detailed description...")).not.toBeInTheDocument();
+    expect(document.getElementById("card-section-checklist")).not.toBeInTheDocument();
+    expect(document.getElementById("card-section-attachments")).not.toBeInTheDocument();
+
+    const description = await openDescriptionEditor();
+    expect(description).toHaveFocus();
+    expect(screen.queryByRole("button", { name: "Description" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Checklist" }));
+    await user.click(screen.getByRole("button", { name: "Attachment" }));
+    expect(document.getElementById("card-section-checklist")).toBeInTheDocument();
+    expect(document.getElementById("card-section-attachments")).toBeInTheDocument();
   });
 
   it("autosaves the title on blur when it changed", async () => {
@@ -202,9 +225,7 @@ describe("CardDetailSheet — title autosave", () => {
     );
 
     // Description blur lands while save 1 is still in flight.
-    const description = screen.getByPlaceholderText(
-      "Add a more detailed description...",
-    );
+    const description = await openDescriptionEditor();
     await user.type(description, "More details");
     await user.tab(); // blur description → save 2 queued, not dropped
 
@@ -244,16 +265,17 @@ describe("CardDetailSheet — title autosave", () => {
 
     // The shared isPending freeze is gone: while the title save is pending,
     // the description editor and the estimate picker stay enabled.
-    const description = screen.getByPlaceholderText(
-      "Add a more detailed description...",
-    );
+    const description = await openDescriptionEditor();
     expect(description).not.toBeDisabled();
     expect(title).not.toBeDisabled();
     expect(
       screen.getByRole("combobox", { name: "Estimate" }),
     ).not.toBeDisabled();
 
-    resolveFirst!({ success: true });
+    await act(async () => {
+      resolveFirst!({ success: true });
+      await Promise.resolve();
+    });
   });
 
   it("shows a transient 'Saved' confirmation after a successful save (U3)", async () => {
@@ -854,9 +876,7 @@ describe("CardDetailSheet — autosave queue recovery (rejected save)", () => {
 
     // A description blur lands while save 1 is still in flight → queued behind
     // it in the same drain.
-    const description = screen.getByPlaceholderText(
-      "Add a more detailed description...",
-    );
+    const description = await openDescriptionEditor();
     await user.type(description, "More details");
     await user.tab();
 
@@ -895,9 +915,7 @@ describe("CardDetailSheet — autosave queue recovery (rejected save)", () => {
     );
 
     // A later blur queues a NEW save; the drain (ownership was reset) runs it.
-    const description = screen.getByPlaceholderText(
-      "Add a more detailed description...",
-    );
+    const description = await openDescriptionEditor();
     await user.type(description, "More details");
     await user.tab();
 
