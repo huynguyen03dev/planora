@@ -159,8 +159,7 @@ export function CardDetailSheet({
   const searchParams = useSearchParams();
 
   const storeSelectedCard = useBoardStore((state) => state.selectedCard);
-  const dismissedCardId = useBoardStore((state) => state.cardDetailDismissedId);
-  const dismissCardDetail = useBoardStore((state) => state.dismissCardDetail);
+  const [dismissedCardId, setDismissedCardId] = useState<string | null>(null);
 
   // The URL is the authority for whether a card is selected. The server-derived
   // `open`/`card` props can lag reality (a stale in-flight router.refresh()
@@ -168,6 +167,10 @@ export function CardDetailSheet({
   // open=true), so the urlCardId check keeps the dialog closed across that
   // remount (close-flash).
   const urlCardId = searchParams.get("cardId");
+
+  if (dismissedCardId !== null && dismissedCardId !== urlCardId) {
+    setDismissedCardId(null);
+  }
 
   const liveComments: UIComment[] =
     storeSelectedCard && card && storeSelectedCard.card.id === card.id
@@ -235,7 +238,7 @@ export function CardDetailSheet({
       : currentCard;
 
   function handleClose() {
-    dismissCardDetail(currentCard.id);
+    setDismissedCardId(currentCard.id);
 
     const params = new URLSearchParams(searchParams.toString());
     params.delete("cardId");
