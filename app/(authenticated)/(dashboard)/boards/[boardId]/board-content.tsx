@@ -82,6 +82,7 @@ export function BoardContent({
   // every drag tick from a fresh callback reference.
   const openCard = useCallback(
     (cardId: string) => {
+      useBoardStore.getState().allowCardDetailOpen(cardId);
       const params = new URLSearchParams(searchParams.toString());
       params.set("cardId", cardId);
 

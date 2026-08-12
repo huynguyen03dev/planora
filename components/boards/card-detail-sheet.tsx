@@ -159,7 +159,8 @@ export function CardDetailSheet({
   const searchParams = useSearchParams();
 
   const storeSelectedCard = useBoardStore((state) => state.selectedCard);
-  const [dismissedCardId, setDismissedCardId] = useState<string | null>(null);
+  const dismissedCardId = useBoardStore((state) => state.cardDetailDismissedId);
+  const dismissCardDetail = useBoardStore((state) => state.dismissCardDetail);
 
   // The URL is the authority for whether a card is selected. The server-derived
   // `open`/`card` props can lag reality (a stale in-flight router.refresh()
@@ -167,14 +168,6 @@ export function CardDetailSheet({
   // open=true), so the urlCardId check keeps the dialog closed across that
   // remount (close-flash).
   const urlCardId = searchParams.get("cardId");
-
-  // Clear the dismissal latch even while the server has temporarily cleared
-  // `card`. The route transition after closing normally renders this component
-  // with card=null before the same card is selected again; returning early
-  // before clearing the latch would make that intentional reopen stay closed.
-  if (dismissedCardId !== null && dismissedCardId !== urlCardId) {
-    setDismissedCardId(null);
-  }
 
   const liveComments: UIComment[] =
     storeSelectedCard && card && storeSelectedCard.card.id === card.id
@@ -242,22 +235,13 @@ export function CardDetailSheet({
       : currentCard;
 
   function handleClose() {
-    setDismissedCardId(currentCard.id);
+    dismissCardDetail(currentCard.id);
 
     const params = new URLSearchParams(searchParams.toString());
     params.delete("cardId");
 
     const query = params.toString();
-    const nextUrl = query ? `${pathname}?${query}` : pathname;
-
-    // Commit the close URL synchronously before any blur-triggered autosave can
-    // call router.refresh(). An async router.replace() leaves a short window in
-    // which refresh still sees ?cardId and can replay the selected-card payload,
-    // producing a close -> reopen flash. Next.js observes native History API
-    // writes, so useSearchParams stays in sync; refresh then reconciles the RSC
-    // payload against the already-closed URL.
-    window.history.replaceState(window.history.state, "", nextUrl);
-    router.refresh();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
   }
 
   return (

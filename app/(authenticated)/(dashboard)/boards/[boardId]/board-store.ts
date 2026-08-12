@@ -153,6 +153,7 @@ type BoardStore = {
   lists: ListWithCards[];
   selectedCardId: string | null;
   selectedCard: SelectedCardData | null;
+  cardDetailDismissedId: string | null;
   socketConnected: boolean;
   isDragging: boolean;
   pendingResync: boolean;
@@ -186,6 +187,8 @@ type BoardStore = {
   setLists: (lists: ListWithCards[]) => void;
   setSelectedCardId: (cardId: string | null) => void;
   setSelectedCard: (card: SelectedCardData | null) => void;
+  dismissCardDetail: (cardId: string) => void;
+  allowCardDetailOpen: (cardId: string) => void;
   setSocketConnected: (connected: boolean) => void;
   /** Seed presence with the current viewer to avoid an empty-avatar flash; no-op if already populated. */
   seedWatchers: (watchers: Watcher[]) => void;
@@ -225,6 +228,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
   lists: [],
   selectedCardId: null,
   selectedCard: null,
+  cardDetailDismissedId: null,
   socketConnected: false,
   isDragging: false,
   pendingResync: false,
@@ -249,6 +253,19 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
   setSelectedCardId: (cardId) => set({ selectedCardId: cardId }),
 
   setSelectedCard: (card) => set({ selectedCard: card }),
+
+  dismissCardDetail: (cardId) => set({ cardDetailDismissedId: cardId }),
+
+  // Only an explicit card click may release the close latch. Server refreshes
+  // and URL transitions must not do this, or a stale selected-card payload can
+  // flash the dialog open again after dismissal.
+  allowCardDetailOpen: (cardId) =>
+    set((state) => ({
+      cardDetailDismissedId:
+        state.cardDetailDismissedId === cardId
+          ? null
+          : state.cardDetailDismissedId,
+    })),
 
   setSocketConnected: (connected) => set({ socketConnected: connected }),
 
@@ -329,6 +346,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     lists: [],
     selectedCardId: null,
     selectedCard: null,
+    cardDetailDismissedId: null,
     socketConnected: false,
     isDragging: false,
     pendingResync: false,
