@@ -159,6 +159,14 @@ export function CardDetailSheet({
   // remount (close-flash).
   const urlCardId = searchParams.get("cardId");
 
+  // Clear the dismissal latch even while the server has temporarily cleared
+  // `card`. The route transition after closing normally renders this component
+  // with card=null before the same card is selected again; returning early
+  // before clearing the latch would make that intentional reopen stay closed.
+  if (dismissedCardId !== null && dismissedCardId !== urlCardId) {
+    setDismissedCardId(null);
+  }
+
   const liveComments: UIComment[] =
     storeSelectedCard && card && storeSelectedCard.card.id === card.id
       ? storeSelectedCard.comments
@@ -208,14 +216,6 @@ export function CardDetailSheet({
     open &&
     urlCardId === currentCard.id &&
     dismissedCardId !== currentCard.id;
-
-  // Once the URL drops this card the dismissal latch is obsolete (the
-  // router.replace committed) — forget it so a later reopen isn't swallowed;
-  // the urlCardId check keeps the dialog closed regardless. Guarded "adjust
-  // state during render" pattern (can't loop).
-  if (dismissedCardId === currentCard.id && urlCardId !== currentCard.id) {
-    setDismissedCardId(null);
-  }
 
   // Bind title/description drafts to the live store value so a remote edit
   // isn't clobbered on blur (US-043); due date/priority/estimate merge the same

@@ -1062,6 +1062,33 @@ function keyedSheet(
   );
 }
 
+function unkeyedSheet(
+  card: CardDetailRecord | null,
+  overrides: Partial<Parameters<typeof CardDetailSheet>[0]> = {},
+) {
+  return (
+    <CardDetailSheet
+      open={Boolean(card)}
+      card={card}
+      comments={[]}
+      commentsHasMore={false}
+      activity={[]}
+      activityHasMore={false}
+      attachments={[]}
+      assignees={[]}
+      assignableMembers={[]}
+      boardId="board-1"
+      boardLabels={[]}
+      cardLabelIds={[]}
+      checklists={[]}
+      canEdit
+      canArchive={false}
+      canComment
+      {...overrides}
+    />
+  );
+}
+
 describe("CardDetailSheet — close/reopen lifecycle (close-flash regression)", () => {
   const card = makeCard();
 
@@ -1150,6 +1177,27 @@ describe("CardDetailSheet — close/reopen lifecycle (close-flash regression)", 
     urlParams.delete("cardId");
     rerender(keyedSheet(null));
     expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
+  });
+
+  it("reopens the same card after the selected card briefly becomes null", async () => {
+    const { rerender } = render(unkeyedSheet(card));
+    expect(screen.getByLabelText("Card title")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Close card" }));
+    expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
+      scroll: false,
+    });
+
+    // This mirrors production keeping CardDetailSheet mounted while the
+    // server payload briefly has no selected card.
+    urlParams.delete("cardId");
+    rerender(unkeyedSheet(null));
+    expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
+
+    // Opening the same card again must not inherit the previous close latch.
+    urlParams.set("cardId", "card-1");
+    rerender(unkeyedSheet(card));
+    expect(await screen.findByLabelText("Card title")).toBeInTheDocument();
   });
 
   it("closes from an outside click without reopening during the route update", async () => {
