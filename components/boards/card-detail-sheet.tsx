@@ -248,7 +248,16 @@ export function CardDetailSheet({
     params.delete("cardId");
 
     const query = params.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    const nextUrl = query ? `${pathname}?${query}` : pathname;
+
+    // Commit the close URL synchronously before any blur-triggered autosave can
+    // call router.refresh(). An async router.replace() leaves a short window in
+    // which refresh still sees ?cardId and can replay the selected-card payload,
+    // producing a close -> reopen flash. Next.js observes native History API
+    // writes, so useSearchParams stays in sync; refresh then reconciles the RSC
+    // payload against the already-closed URL.
+    window.history.replaceState(window.history.state, "", nextUrl);
+    router.refresh();
   }
 
   return (

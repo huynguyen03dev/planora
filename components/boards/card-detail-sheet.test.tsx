@@ -1179,6 +1179,7 @@ describe("CardDetailSheet — close/reopen lifecycle (close-flash regression)", 
     vi.clearAllMocks();
     useBoardStore.getState().reset();
     urlParams.set("cardId", "card-1");
+    window.history.replaceState({}, "", "/boards/board-1?cardId=card-1");
   });
 
   it("stays closed when a stale RSC payload remounts the sheet after close (the close-flash bug)", async () => {
@@ -1188,9 +1189,9 @@ describe("CardDetailSheet — close/reopen lifecycle (close-flash regression)", 
     // User closes (outside click / X / Escape all funnel through
     // onOpenChange(false)) → handleClose: latch the dismissal and strip ?cardId.
     await user.click(screen.getByRole("button", { name: "Close card" }));
-    expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
-      scroll: false,
-    });
+      expect(window.location.pathname).toBe("/boards/board-1");
+      expect(window.location.search).toBe("");
+      expect(routerMock.refresh).toHaveBeenCalledTimes(1);
 
     // The close navigation lands: server renders with no selected card → the
     // key flips to the closed marker → the sheet unmounts (latch destroyed).
@@ -1228,9 +1229,9 @@ describe("CardDetailSheet — close/reopen lifecycle (close-flash regression)", 
     expect(screen.getByLabelText("Card title")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Close card" }));
-    expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
-      scroll: false,
-    });
+      expect(window.location.pathname).toBe("/boards/board-1");
+      expect(window.location.search).toBe("");
+      expect(routerMock.refresh).toHaveBeenCalledTimes(1);
 
     // The replace commits (URL loses cardId) but a stale payload keeps the
     // sheet MOUNTED with the same key — no remount, so the dismissal latch
@@ -1253,9 +1254,9 @@ describe("CardDetailSheet — close/reopen lifecycle (close-flash regression)", 
     expect(screen.getByLabelText("Card title")).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
-    expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
-      scroll: false,
-    });
+      expect(window.location.pathname).toBe("/boards/board-1");
+      expect(window.location.search).toBe("");
+      expect(routerMock.refresh).toHaveBeenCalledTimes(1);
 
     urlParams.delete("cardId");
     rerender(keyedSheet(null));
@@ -1267,9 +1268,9 @@ describe("CardDetailSheet — close/reopen lifecycle (close-flash regression)", 
     expect(screen.getByLabelText("Card title")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Close card" }));
-    expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
-      scroll: false,
-    });
+      expect(window.location.pathname).toBe("/boards/board-1");
+      expect(window.location.search).toBe("");
+      expect(routerMock.refresh).toHaveBeenCalledTimes(1);
 
     // This mirrors production keeping CardDetailSheet mounted while the
     // server payload briefly has no selected card.
@@ -1283,18 +1284,53 @@ describe("CardDetailSheet — close/reopen lifecycle (close-flash regression)", 
     expect(await screen.findByLabelText("Card title")).toBeInTheDocument();
   });
 
-  it("closes from an outside click without reopening during the route update", async () => {
-    const { rerender } = render(keyedSheet(card));
-    const overlay = document.querySelector('[data-slot="dialog-overlay"]');
+    it("closes from an outside click without reopening during the route update", async () => {
+      const { rerender } = render(keyedSheet(card));
+      const overlay = document.querySelector('[data-slot="dialog-overlay"]');
 
     expect(overlay).toBeInTheDocument();
     await user.click(overlay!);
-    expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
-      scroll: false,
-    });
+      expect(window.location.pathname).toBe("/boards/board-1");
+      expect(window.location.search).toBe("");
+      expect(routerMock.refresh).toHaveBeenCalledTimes(1);
 
     urlParams.delete("cardId");
-    rerender(keyedSheet(card));
-    expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
+      rerender(keyedSheet(card));
+      expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
+    });
+
+    it("commits the close URL before an in-flight field save refresh completes", async () => {
+      let resolveSave: ((value: { success: true }) => void) | null = null;
+      actions.updateCardEstimateAction.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveSave = resolve;
+          }),
+      );
+      const { rerender } = render(keyedSheet(card));
+
+      await user.click(screen.getByRole("combobox", { name: "Estimate" }));
+      await user.click(screen.getByRole("option", { name: /4h/ }));
+      await waitFor(() =>
+        expect(actions.updateCardEstimateAction).toHaveBeenCalledTimes(1),
+      );
+
+      const overlay = document.querySelector('[data-slot="dialog-overlay"]');
+      await user.click(overlay!);
+
+      // Closing is synchronous: a save that resolves immediately afterward can
+      // only refresh the no-card URL, never the stale selected-card URL.
+      expect(window.location.search).toBe("");
+      expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
+
+      await act(async () => {
+        resolveSave!({ success: true });
+        await Promise.resolve();
+      });
+      await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(2));
+
+      urlParams.delete("cardId");
+      rerender(keyedSheet(card));
+      expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
+    });
   });
-});
