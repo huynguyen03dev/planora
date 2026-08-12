@@ -1126,25 +1126,27 @@ function CardDetailDialogBody({
               </PopoverContent>
             </Popover>
 
-            <CreateCardSectionDialog
-              section={creatorSection}
-              cardId={card.id}
-              cardTitle={draftTitle}
-              onOpenChange={(open) => {
-                if (!open) setCreatorSection(null);
-              }}
-              onDescriptionCreated={(description) => {
-                setDraftDescription(description);
-                lastSavedDetailsRef.current = {
-                  title: draftTitle.trim(),
-                  description,
-                };
-                setDescriptionOpen(true);
-              }}
-              onChecklistCreated={(checklist) => {
-                setCreatedChecklists((current) => [...current, checklist]);
-              }}
-            />
+            {creatorSection ? (
+              <CreateCardSectionDialog
+                section={creatorSection}
+                cardId={card.id}
+                cardTitle={draftTitle}
+                onOpenChange={(open) => {
+                  if (!open) setCreatorSection(null);
+                }}
+                onDescriptionCreated={(description) => {
+                  setDraftDescription(description);
+                  lastSavedDetailsRef.current = {
+                    title: draftTitle.trim(),
+                    description,
+                  };
+                  setDescriptionOpen(true);
+                }}
+                onChecklistCreated={(checklist) => {
+                  setCreatedChecklists((current) => [...current, checklist]);
+                }}
+              />
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -1506,7 +1508,7 @@ function CardDetailDialogBody({
 }
 
 type CreateCardSectionDialogProps = {
-  section: OptionalCardSection | null;
+  section: OptionalCardSection;
   cardId: string;
   cardTitle: string;
   onOpenChange: (open: boolean) => void;
@@ -1539,7 +1541,7 @@ function CreateCardSectionDialog({
 
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!section || isPending) return;
+    if (isPending) return;
 
     const trimmedDescription = description.trim();
     const trimmedChecklistTitle = checklistTitle.trim();
@@ -1608,12 +1610,10 @@ function CreateCardSectionDialog({
 
   return (
     <Dialog
-      open={section !== null}
+      open
       onOpenChange={(open) => {
         if (isPending) return;
-        if (open) {
-          onOpenChange(true);
-        } else {
+        if (!open) {
           close();
         }
       }}
