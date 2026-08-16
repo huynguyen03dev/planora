@@ -373,15 +373,20 @@ function CardDetailDialogBody({
   const [creatorSection, setCreatorSection] = useState<OptionalCardSection | null>(null);
   const [memberSearch, setMemberSearch] = useState("");
   const [createdChecklists, setCreatedChecklists] = useState<ChecklistData[]>([]);
+  const [deletedChecklistIds, setDeletedChecklistIds] = useState<string[]>([]);
   const [descriptionOpen, setDescriptionOpen] = useState(Boolean(card.description?.trim()));
   const [attachmentsOpen, setAttachmentsOpen] = useState(attachments.length > 0);
   const displayedChecklists = useMemo(() => {
     const serverIds = new Set(checklists.map((checklist) => checklist.id));
+    const hiddenChecklistIds = new Set(deletedChecklistIds);
     return [
-      ...checklists,
-      ...createdChecklists.filter((checklist) => !serverIds.has(checklist.id)),
+      ...checklists.filter((checklist) => !hiddenChecklistIds.has(checklist.id)),
+      ...createdChecklists.filter(
+        (checklist) =>
+          !serverIds.has(checklist.id) && !hiddenChecklistIds.has(checklist.id),
+      ),
     ];
-  }, [checklists, createdChecklists]);
+  }, [checklists, createdChecklists, deletedChecklistIds]);
   const checklistOpen = displayedChecklists.length > 0;
   const hasMissingOptionalSection =
     !descriptionOpen || !checklistOpen || !attachmentsOpen;
@@ -1518,13 +1523,21 @@ function CardDetailDialogBody({
 
         {checklistOpen ? (
           <div id="card-section-checklist" className="mt-6 border-t border-border pt-6">
-            <CardChecklistsSection
-              cardId={card.id}
-              checklists={displayedChecklists}
-              canEdit={canEdit}
-            />
-          </div>
-        ) : null}
+              <CardChecklistsSection
+                cardId={card.id}
+                checklists={displayedChecklists}
+                canEdit={canEdit}
+                onChecklistDeleted={(checklistId) => {
+                  setDeletedChecklistIds((current) =>
+                    current.includes(checklistId) ? current : [...current, checklistId],
+                  );
+                  setCreatedChecklists((current) =>
+                    current.filter((checklist) => checklist.id !== checklistId),
+                  );
+                }}
+              />
+            </div>
+          ) : null}
 
         <section className="mt-6 space-y-4 border-t border-border pt-6">
           <h3 className="text-base font-semibold">Comments and activity</h3>

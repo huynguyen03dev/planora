@@ -61,6 +61,7 @@ const h = vi.hoisted(() => {
       $transaction: vi.fn(),
       user: { findUnique: vi.fn() },
       board: { findUnique: vi.fn() },
+      workspaceMember: { findFirst: vi.fn() },
     },
     emit: {
       emitAnalyticsRefresh: fn(),
@@ -152,6 +153,16 @@ beforeEach(() => {
   h.state.callerId = null;
   h.state.authed = true;
   h.state.membership.clear();
+  h.db.workspaceMember.findFirst.mockImplementation(
+    async ({
+      where,
+    }: {
+      where: { organizationId: string; userId: string };
+    }) => {
+      const role = h.state.membership.get(`${where.userId}:${where.organizationId}`);
+      return role ? { id: `${where.userId}:${where.organizationId}` } : null;
+    },
+  );
 });
 
 describe("createChecklistAction (card:update)", () => {
@@ -205,7 +216,10 @@ describe("deleteChecklistAction (card:update)", () => {
     signInAs("u", WS_A, "viewer");
     h.getChecklistWithCard.mockResolvedValue(checklistScope(WS_A));
     const r = await deleteChecklistAction(form());
-    expect(r).toEqual({ success: false, error: "Checklist not found" });
+    expect(r).toEqual({
+      success: false,
+      error: "You do not have permission to delete checklists on this card.",
+    });
     expectNoWrites(...writeSeams);
   });
 
@@ -214,9 +228,12 @@ describe("deleteChecklistAction (card:update)", () => {
     h.getChecklistWithCard.mockResolvedValue(checklistScope(WS_A));
     const r = await deleteChecklistAction(form());
     expect(r).toEqual({ success: false, error: "Checklist not found" });
-    expect(h.hasPermission).toHaveBeenCalledWith(
-      expect.objectContaining({ body: expect.objectContaining({ organizationId: WS_A }) }),
+    expect(h.db.workspaceMember.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ organizationId: WS_A, userId: "u" }),
+      }),
     );
+    expect(h.hasPermission).not.toHaveBeenCalled();
     expectNoWrites(...writeSeams);
   });
 
@@ -226,6 +243,14 @@ describe("deleteChecklistAction (card:update)", () => {
     const r = await deleteChecklistAction(form());
     expect(r).toEqual({ success: true });
     expect(h.deleteChecklist).toHaveBeenCalledWith(CHECKLIST_ID);
+  });
+
+  it("treats an already-deleted checklist as a successful no-op", async () => {
+    signInAs("u", WS_A, "editor");
+    h.getChecklistWithCard.mockResolvedValue(null);
+    const r = await deleteChecklistAction(form());
+    expect(r).toEqual({ success: true });
+    expectNoWrites(...writeSeams);
   });
 });
 

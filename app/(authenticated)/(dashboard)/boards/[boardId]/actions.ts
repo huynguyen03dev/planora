@@ -2920,7 +2920,15 @@ export async function deleteChecklistAction(
   const { checklistId } = parsed.data;
 
   const scope = await getChecklistWithCard(checklistId);
-  if (!scope || scope.board.archivedAt || scope.cardArchived || scope.listArchived) {
+  if (!scope) {
+    return { success: true };
+  }
+
+  if (scope.board.archivedAt || scope.cardArchived || scope.listArchived) {
+    return { success: false, error: "Checklist not found" };
+  }
+
+  if (!(await isWorkspaceMember(userId, scope.board.workspaceId))) {
     return { success: false, error: "Checklist not found" };
   }
 
@@ -2928,7 +2936,10 @@ export async function deleteChecklistAction(
     card: ["update"],
   });
   if (!canUpdateCard) {
-    return { success: false, error: "Checklist not found" };
+    return {
+      success: false,
+      error: "You do not have permission to delete checklists on this card.",
+    };
   }
 
   try {

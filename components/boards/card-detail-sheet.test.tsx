@@ -12,6 +12,12 @@ import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId
 const labelSectionSpy = vi.hoisted(() => ({
   latest: null as null | { cardLabelIds: string[]; boardLabels: { id: string; name: string; color: string }[] },
 }));
+const checklistSectionSpy = vi.hoisted(() => ({
+  latest: null as null | {
+    checklists: { id: string; title: string }[];
+    onChecklistDeleted?: (checklistId: string) => void;
+  },
+}));
 
 const actions = vi.hoisted(() => ({
   updateCardDetailsAction: vi.fn(),
@@ -33,9 +39,13 @@ const actions = vi.hoisted(() => ({
 // (as router.replace/push would) and assert against router.replace. The default
 // `?cardId=card-1` keeps every existing test rendering an OPEN sheet.
 const routerMock = vi.hoisted(() => ({
-  replace: vi.fn(),
+  replace: vi.fn((href: string) => {
+    window.history.replaceState({}, "", href);
+  }),
   refresh: vi.fn(),
-  push: vi.fn(),
+  push: vi.fn((href: string) => {
+    window.history.pushState({}, "", href);
+  }),
 }));
 const urlParams = vi.hoisted(() => new URLSearchParams("cardId=card-1"));
 
@@ -54,7 +64,25 @@ vi.mock("@/components/boards/card-completion-toggle", () => ({
   CardCompletionToggle: () => null,
 }));
 vi.mock("@/components/boards/card-checklists-section", () => ({
-  CardChecklistsSection: () => null,
+  CardChecklistsSection: (props: {
+    checklists: { id: string; title: string }[];
+    onChecklistDeleted?: (checklistId: string) => void;
+  }) => {
+    checklistSectionSpy.latest = props;
+    return (
+      <div>
+        {props.checklists.map((checklist) => (
+          <button
+            key={checklist.id}
+            type="button"
+            onClick={() => props.onChecklistDeleted?.(checklist.id)}
+          >
+            Remove {checklist.title}
+          </button>
+        ))}
+      </div>
+    );
+  },
 }));
 vi.mock("@/components/boards/card-labels-section", () => ({
   CardLabelsSection: (props: { cardLabelIds: string[]; boardLabels: { id: string; name: string; color: string }[] }) => {
@@ -211,6 +239,39 @@ describe("CardDetailSheet — title autosave", () => {
     // The upload action returns only an id. The section waits for the refreshed
     // server record instead of flashing a misleading empty attachment block.
     expect(document.getElementById("card-section-attachments")).not.toBeInTheDocument();
+  });
+
+  it("removes a locally-created checklist as soon as delete succeeds", async () => {
+    actions.createChecklistAction.mockResolvedValue({
+      success: true,
+      checklist: {
+        id: "checklist-new",
+        cardId: "card-1",
+        title: "Launch steps",
+        position: 1024,
+        items: [],
+      },
+    });
+    renderSheet();
+
+    await user.click(screen.getByRole("button", { name: "Add to card" }));
+    await user.click(screen.getByRole("menuitem", { name: "Checklist" }));
+    await user.type(screen.getByPlaceholderText("Checklist title"), "Launch steps");
+    await user.click(screen.getByRole("button", { name: "Create checklist" }));
+
+    await waitFor(() =>
+      expect(
+        checklistSectionSpy.latest?.checklists.map((checklist) => checklist.id),
+      ).toContain("checklist-new"),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Remove Launch steps" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Remove Launch steps" }),
+      ).not.toBeInTheDocument(),
+    );
   });
 
   it("keeps an optional block hidden when creation fails", async () => {
