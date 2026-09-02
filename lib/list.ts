@@ -5,14 +5,17 @@ import type { Prisma } from "@/app/generated/prisma/client";
 import db from "@/lib/prisma";
 import {
   MIN_POSITION_GAP,
+  OrderConflictError,
+  PlacementIntent,
   PositionSpaceExhaustedError,
-  StaleNeighborError,
+  lockBoardRowForUpdate,
+  lockListRowsForUpdate,
+  lockWorkspaceRowForUpdate,
   renumberPositions,
 } from "@/lib/ordering";
 
 const LIST_POSITION_GAP = 16384;
 const MAX_CREATE_LIST_RETRIES = 5;
-const MAX_REORDER_LIST_RETRIES = 3;
 
 function isUniqueConstraintError(error: unknown): error is { code: string } {
   if (typeof error !== "object" || error === null) {
@@ -28,10 +31,23 @@ export type ListRecord = {
   boardId: string;
   title: string;
   position: number;
+  /** Logical ordering-move revision; sibling normalization does not bump it. */
+  moveRevision: number;
   archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
+
+const LIST_RECORD_SELECT = {
+  id: true,
+  boardId: true,
+  title: true,
+  position: true,
+  moveRevision: true,
+  archivedAt: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
 
 export type CardLabelRecord = {
   id: string;
@@ -50,6 +66,8 @@ export type ListCardRecord = {
   listId: string;
   title: string;
   position: number;
+  /** Logical ordering-move revision; sibling normalization does not bump it. */
+  moveRevision: number;
   coverImage: string | null;
   priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
   dueDate: Date | null;
@@ -83,6 +101,7 @@ export async function getListsByBoardId(
       boardId: true,
       title: true,
       position: true,
+      moveRevision: true,
       archivedAt: true,
       createdAt: true,
       updatedAt: true,
@@ -100,6 +119,7 @@ export async function getListsByBoardId(
           listId: true,
           title: true,
           position: true,
+          moveRevision: true,
           coverImage: true,
           priority: true,
           dueDate: true,
@@ -149,6 +169,7 @@ export async function getListsByBoardId(
         listId: card.listId,
         title: card.title,
         position: card.position,
+        moveRevision: card.moveRevision,
         coverImage: card.coverImage,
         priority: card.priority,
         dueDate: card.dueDate,
@@ -168,34 +189,44 @@ export async function getListsByBoardId(
 export async function createList(data: {
   boardId: string;
   title: string;
+  workspaceId: string;
 }): Promise<ListRecord> {
   for (let attempt = 0; attempt < MAX_CREATE_LIST_RETRIES; attempt += 1) {
-    const lastList = await db.list.findFirst({
-      where: { boardId: data.boardId, archivedAt: null },
-      orderBy: { position: "desc" },
-      select: { position: true },
-    });
-
-    const position = lastList ? lastList.position + LIST_POSITION_GAP : LIST_POSITION_GAP;
-
     try {
-      return await db.list.create({
-        data: {
-          boardId: data.boardId,
-          title: data.title,
-          position,
-        },
-        select: {
-          id: true,
-          boardId: true,
-          title: true,
-          position: true,
-          archivedAt: true,
-          createdAt: true,
-          updatedAt: true,
-        },
+      return await db.$transaction(async (tx) => {
+        // Global ordering gate, then parent-to-child board lock. The workspace
+        // row is re-entrant inside a recursive automation transaction and
+        // prevents cross-board cascades from forming a lock cycle.
+        await lockWorkspaceRowForUpdate(tx, data.workspaceId);
+        const board = await lockBoardRowForUpdate(tx, data.boardId);
+        if (!board) {
+          throw new Error("BOARD_NOT_FOUND");
+        }
+
+        const lastList = await tx.list.findFirst({
+          where: { boardId: data.boardId, archivedAt: null },
+          orderBy: { position: "desc" },
+          select: { position: true },
+        });
+
+        const position = lastList ? lastList.position + LIST_POSITION_GAP : LIST_POSITION_GAP;
+
+        return await tx.list.create({
+          data: {
+            boardId: data.boardId,
+            title: data.title,
+            position,
+          },
+          select: LIST_RECORD_SELECT,
+        });
       });
     } catch (error) {
+      if (error instanceof Error && error.message === "BOARD_NOT_FOUND") {
+        throw error;
+      }
+
+      // Unique-index canary only: under the board lock a P2002 means a real bug;
+      // retry bounds the damage rather than recovering from legit contention.
       if (isUniqueConstraintError(error) && attempt < MAX_CREATE_LIST_RETRIES - 1) {
         continue;
       }
@@ -211,41 +242,25 @@ export async function updateListTitle(listId: string, title: string): Promise<Li
   return db.list.update({
     where: { id: listId, archivedAt: null },
     data: { title },
-    select: {
-      id: true,
-      boardId: true,
-      title: true,
-      position: true,
-      archivedAt: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+    select: LIST_RECORD_SELECT,
   });
 }
 
-async function normalizeListPositions(boardId: string): Promise<void> {
+async function normalizeListPositions(tx: Prisma.TransactionClient, boardId: string): Promise<void> {
   // Collision-safe under the live `list_boardId_position_live_key` unique index: an
   // in-place renumber can transiently assign a position another list still
   // holds and abort mid-transaction, so renumber via a disjoint staging band.
-  await db.$transaction(async (tx) => {
-    const lists = await tx.list.findMany({
-      where: { boardId, archivedAt: null },
-      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
-      select: { id: true, position: true },
-    });
-
-    await renumberPositions(lists, LIST_POSITION_GAP, (id, position) =>
-      tx.list.update({ where: { id }, data: { position } }),
-    );
+  // This maintenance rewrite preserves sibling order and changes no revisions.
+  const lists = await tx.list.findMany({
+    where: { boardId, archivedAt: null },
+    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+    select: { id: true, position: true },
   });
-}
 
-type PositionContext = {
-  boardId: string;
-  prevListId?: string | null;
-  nextListId?: string | null;
-  excludeListId?: string | null;
-};
+  await renumberPositions(lists, LIST_POSITION_GAP, (id, position) =>
+    tx.list.update({ where: { id }, data: { position } }),
+  );
+}
 
 /** Midpoint of two list positions, or throw if too close to split cleanly. */
 function bisectListPosition(a: number, b: number): number {
@@ -258,198 +273,191 @@ function bisectListPosition(a: number, b: number): number {
 }
 
 /**
- * Compute the position for a list dropped between `prevListId` and `nextListId`
- * on `boardId`, collision-safe under concurrency — the list analogue of
- * {@link resolveCardPosition} (US-062 MJ3).
+ * Compute the position for a list placed on `boardId` according to an EXPLICIT
+ * {@link PlacementIntent} (decision 0032) — the list analogue of
+ * {@link resolveCardPositionIntent}. Runs on the caller's transaction client,
+ * which MUST already hold the board `FOR UPDATE` scope lock.
  *
- * The client's prev/next hints describe the *intended* neighbours, but a rival
- * reorder committing between read and write can make them stale, so we never
- * trust `prev.position ± GAP` blindly. We anchor on the surviving hint and
- * bisect against the list that CURRENTLY occupies the adjacent slot:
- *
- * - prev given → bisect between prev and the live list immediately after prev
- *   (or `prev + GAP` if prev is genuinely last). Fixes the concurrent end-drop
- *   that the old direct-bisect looped on.
- * - only next given → symmetric, bisecting before `next`.
- * - neither → append after the last live list.
- *
- * `excludeListId` omits the list being moved from the adjacency search so a
- * reorder never bisects against the mover's own stale slot. Throws
- * {@link StaleNeighborError} when a hint no longer names a live list on the
- * board, and {@link PositionSpaceExhaustedError} when there is no room to bisect.
+ * - `start` / `end` are absolute (relative to the current live ends; never
+ *   conflict).
+ * - `between` validates both anchors against current live lists; preserves the
+ *   prev anchor when it remains before next, rebases on one surviving anchor,
+ *   and throws {@link OrderConflictError}("ANCHORS_STALE") when both are stale
+ *   or contradictory.
  */
-export async function resolveListPosition(
+export async function resolveListPositionIntent(
   client: Prisma.TransactionClient,
-  { boardId, prevListId, nextListId, excludeListId }: PositionContext,
+  data: {
+    boardId: string;
+    intent: PlacementIntent;
+    prevListId?: string | null;
+    nextListId?: string | null;
+    excludeListId?: string | null;
+  },
 ): Promise<number> {
-  const prevList = prevListId
-    ? await client.list.findUnique({
-        where: { id: prevListId },
-        select: { id: true, boardId: true, position: true, archivedAt: true },
-      })
-    : null;
-  const nextList = nextListId
-    ? await client.list.findUnique({
-        where: { id: nextListId },
-        select: { id: true, boardId: true, position: true, archivedAt: true },
-      })
-    : null;
-
-  if (prevListId && (!prevList || prevList.boardId !== boardId || Boolean(prevList.archivedAt))) {
-    throw new StaleNeighborError("prev");
-  }
-
-  if (nextListId && (!nextList || nextList.boardId !== boardId || Boolean(nextList.archivedAt))) {
-    throw new StaleNeighborError("next");
-  }
-
+  const { boardId, intent, excludeListId } = data;
+  const prevListId = data.prevListId ?? null;
+  const nextListId = data.nextListId ?? null;
   const notMoved = excludeListId ? { id: { not: excludeListId } } : {};
   const activeScope = { boardId, archivedAt: null, ...notMoved };
 
-  if (prevList) {
+  if (intent === "start") {
+    const first = await client.list.findFirst({
+      where: activeScope,
+      orderBy: { position: "asc" },
+      select: { position: true },
+    });
+    return first ? first.position - LIST_POSITION_GAP : LIST_POSITION_GAP;
+  }
+
+  if (intent === "end") {
+    const last = await client.list.findFirst({
+      where: activeScope,
+      orderBy: { position: "desc" },
+      select: { position: true },
+    });
+    return last ? last.position + LIST_POSITION_GAP : LIST_POSITION_GAP;
+  }
+
+  let prev: { position: number } | null = null;
+  let next: { position: number } | null = null;
+  if (prevListId) {
+    const p = await client.list.findUnique({
+      where: { id: prevListId },
+      select: { id: true, boardId: true, position: true, archivedAt: true },
+    });
+    if (p && p.boardId === boardId && !Boolean(p.archivedAt)) {
+      prev = p;
+    }
+  }
+  if (nextListId) {
+    const n = await client.list.findUnique({
+      where: { id: nextListId },
+      select: { id: true, boardId: true, position: true, archivedAt: true },
+    });
+    if (n && n.boardId === boardId && !Boolean(n.archivedAt)) {
+      next = n;
+    }
+  }
+
+  if (!prev && !next) {
+    throw new OrderConflictError("ANCHORS_STALE");
+  }
+
+  if (prev && next && prev.position >= next.position) {
+    throw new OrderConflictError("ANCHORS_STALE");
+  }
+
+  if (prev) {
     const following = await client.list.findFirst({
-      where: {
-        ...activeScope,
-        position: { gt: prevList.position },
-      },
+      where: { ...activeScope, position: { gt: prev.position } },
       orderBy: { position: "asc" },
       select: { position: true },
     });
 
     if (!following) {
-      return prevList.position + LIST_POSITION_GAP;
+      return prev.position + LIST_POSITION_GAP;
     }
-    return bisectListPosition(prevList.position, following.position);
+    return bisectListPosition(prev.position, following.position);
   }
 
-  if (nextList) {
-    const preceding = await client.list.findFirst({
-      where: {
-        ...activeScope,
-        position: { lt: nextList.position },
-      },
-      orderBy: { position: "desc" },
-      select: { position: true },
-    });
-
-    if (!preceding) {
-      return nextList.position - LIST_POSITION_GAP;
-    }
-    return bisectListPosition(preceding.position, nextList.position);
-  }
-
-  const lastList = await client.list.findFirst({
-    where: activeScope,
+  const nextList = next as { position: number };
+  const preceding = await client.list.findFirst({
+    where: { ...activeScope, position: { lt: nextList.position } },
     orderBy: { position: "desc" },
     select: { position: true },
   });
 
-  return lastList ? lastList.position + LIST_POSITION_GAP : LIST_POSITION_GAP;
+  if (!preceding) {
+    return nextList.position - LIST_POSITION_GAP;
+  }
+  return bisectListPosition(preceding.position, nextList.position);
 }
 
 export async function reorderListByNeighbors(data: {
   listId: string;
+  workspaceId: string;
+  intent: PlacementIntent;
   prevListId?: string | null;
   nextListId?: string | null;
+  expectedMoveRevision: number;
 }): Promise<ListRecord> {
-  // Hints are mutable across retries: a StaleNeighborError drops the offending
-  // side so the next attempt re-anchors on the surviving neighbour (or appends),
-  // parity with the card reorder path (US-062 mn2).
-  let prevHint = data.prevListId ?? null;
-  let nextHint = data.nextListId ?? null;
+  return await db.$transaction(async (tx) => {
+    // Non-lock pre-read: identifies the board scope the moved list lives on.
+    const currentList = await tx.list.findUnique({
+      where: { id: data.listId },
+      select: { id: true, boardId: true, position: true, moveRevision: true, archivedAt: true },
+    });
 
-  for (let attempt = 0; attempt < MAX_REORDER_LIST_RETRIES; attempt += 1) {
-    // boardId of the list being moved, captured inside the tx so a too-tight gap
-    // can renumber the right board before the next attempt.
-    let boardIdForRetry: string | null = null;
+    if (!currentList || Boolean(currentList.archivedAt)) {
+      throw new Error("List not found");
+    }
 
+    // Global workspace gate, then parent-to-child board → list locks. The
+    // workspace gate is essential for recursive automation that may target a
+    // different board in the same transaction.
+    await lockWorkspaceRowForUpdate(tx, data.workspaceId);
+    const board = await lockBoardRowForUpdate(tx, currentList.boardId);
+    if (!board) {
+      throw new Error("List not found");
+    }
+    const locked = await lockListRowsForUpdate(tx, [data.listId]);
+    if (locked.length === 0) {
+      throw new Error("List not found");
+    }
+
+    const list = locked[0];
+    if (list.moveRevision !== data.expectedMoveRevision) {
+      throw new OrderConflictError("MOVE_REVISION");
+    }
+
+    let nextPosition: number;
     try {
-      // Read-check-write in one transaction (ARCHITECTURE: "transaction for
-      // multi-row position writes") so the position decision and the update see
-      // a consistent snapshot, matching the card reorder path.
-      return await db.$transaction(async (tx) => {
-        const currentList = await tx.list.findUnique({
-          where: { id: data.listId },
-          select: {
-            id: true,
-            boardId: true,
-            position: true,
-            archivedAt: true,
-          },
-        });
-
-        if (!currentList || Boolean(currentList.archivedAt)) {
-          throw new Error("List not found");
-        }
-
-        boardIdForRetry = currentList.boardId;
-
-        // Exclude the list being moved so the adjacency search bisects against
-        // the real occupants, not the mover's own (stale) slot.
-        const nextPosition = await resolveListPosition(tx, {
-          boardId: currentList.boardId,
-          prevListId: prevHint,
-          nextListId: nextHint,
-          excludeListId: data.listId,
-        });
-
-        return await tx.list.update({
-          where: { id: data.listId },
-          data: { position: nextPosition },
-          select: {
-            id: true,
-            boardId: true,
-            title: true,
-            position: true,
-            archivedAt: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-        });
+      nextPosition = await resolveListPositionIntent(tx, {
+        boardId: currentList.boardId,
+        intent: data.intent,
+        prevListId: data.prevListId ?? null,
+        nextListId: data.nextListId ?? null,
+        excludeListId: data.listId,
       });
     } catch (error) {
-      // A stale neighbour hint is recoverable without a renumber: drop that side
-      // and retry so the move re-anchors on the surviving neighbour / appends.
-      if (error instanceof StaleNeighborError && attempt < MAX_REORDER_LIST_RETRIES - 1) {
-        if (error.side === "prev") {
-          prevHint = null;
-        } else {
-          nextHint = null;
-        }
-        continue;
+      // Gap exhausted: renumber IN THE SAME transaction (board lock still held),
+      // then re-resolve against the fresh layout — no separate-transaction retry.
+      if (error instanceof PositionSpaceExhaustedError) {
+        await normalizeListPositions(tx, currentList.boardId);
+        nextPosition = await resolveListPositionIntent(tx, {
+          boardId: currentList.boardId,
+          intent: data.intent,
+          prevListId: data.prevListId ?? null,
+          nextListId: data.nextListId ?? null,
+          excludeListId: data.listId,
+        });
+      } else {
+        throw error;
       }
-
-      // P2002 (a rival grabbed the slot) or PositionSpaceExhaustedError (no gap
-      // left to bisect) both mean: renumber the board, then retry.
-      if (
-        (isUniqueConstraintError(error) || error instanceof PositionSpaceExhaustedError) &&
-        attempt < MAX_REORDER_LIST_RETRIES - 1 &&
-        boardIdForRetry
-      ) {
-        await normalizeListPositions(boardIdForRetry);
-        continue;
-      }
-
-      throw error;
     }
-  }
 
-  throw new Error("Failed to reorder list after retries");
+    // Compare-and-set on the revision read under the lock: bump it atomically.
+    const { count } = await tx.list.updateMany({
+      where: { id: data.listId, moveRevision: list.moveRevision },
+      data: { position: nextPosition, moveRevision: list.moveRevision + 1 },
+    });
+    if (count === 0) {
+      throw new OrderConflictError("MOVE_REVISION");
+    }
+
+    return await tx.list.findUniqueOrThrow({
+      where: { id: data.listId },
+      select: LIST_RECORD_SELECT,
+    });
+  });
 }
 
 export async function archiveList(listId: string): Promise<ListRecord> {
   return db.list.update({
     where: { id: listId },
     data: { archivedAt: new Date() },
-    select: {
-      id: true,
-      boardId: true,
-      title: true,
-      position: true,
-      archivedAt: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+    select: LIST_RECORD_SELECT,
   });
 }
 
@@ -465,13 +473,7 @@ export async function getListWithBoard(listId: string): Promise<{
   const list = await db.list.findUnique({
     where: { id: listId, archivedAt: null },
     select: {
-      id: true,
-      boardId: true,
-      title: true,
-      position: true,
-      archivedAt: true,
-      createdAt: true,
-      updatedAt: true,
+      ...LIST_RECORD_SELECT,
       board: {
         select: {
           id: true,
@@ -546,13 +548,7 @@ export async function getArchivedListWithBoard(listId: string): Promise<{
       board: { archivedAt: null },
     },
     select: {
-      id: true,
-      boardId: true,
-      title: true,
-      position: true,
-      archivedAt: true,
-      createdAt: true,
-      updatedAt: true,
+      ...LIST_RECORD_SELECT,
       board: {
         select: {
           id: true,
@@ -571,88 +567,78 @@ export async function getArchivedListWithBoard(listId: string): Promise<{
   return { list: listData, board };
 }
 
-const MAX_RESTORE_LIST_RETRIES = 5;
+export async function restoreList(listId: string, workspaceId: string): Promise<ListRecord> {
+  return await db.$transaction(async (tx) => {
+    // Non-lock pre-read: which board does the archived list belong to?
+    const targetList = await tx.list.findFirst({
+      where: {
+        id: listId,
+        archivedAt: { not: null },
+        board: { archivedAt: null },
+      },
+      select: { id: true, boardId: true, position: true },
+    });
 
-export async function restoreList(listId: string): Promise<ListRecord> {
-  for (let attempt = 0; attempt < MAX_RESTORE_LIST_RETRIES; attempt += 1) {
-    try {
-      return await db.$transaction(async (tx) => {
-        const targetList = await tx.list.findFirst({
-          where: {
-            id: listId,
-            archivedAt: { not: null },
-            board: { archivedAt: null },
-          },
-          select: { id: true, boardId: true, position: true },
-        });
-
-        if (!targetList) {
-          throw new Error("LIST_NOT_FOUND");
-        }
-
-        const occupied = await tx.list.findFirst({
-          where: {
-            boardId: targetList.boardId,
-            archivedAt: null,
-            position: targetList.position,
-          },
-          select: { id: true },
-        });
-
-        let newPosition = targetList.position;
-        if (occupied) {
-          const lastActive = await tx.list.findFirst({
-            where: { boardId: targetList.boardId, archivedAt: null },
-            orderBy: { position: "desc" },
-            select: { position: true },
-          });
-
-          newPosition = lastActive ? lastActive.position + LIST_POSITION_GAP : LIST_POSITION_GAP;
-        }
-
-        const updateResult = await tx.list.updateMany({
-          where: {
-            id: listId,
-            archivedAt: { not: null },
-          },
-          data: {
-            archivedAt: null,
-            position: newPosition,
-          },
-        });
-
-        if (updateResult.count === 0) {
-          throw new Error("LIST_NOT_FOUND");
-        }
-
-        return tx.list.findUniqueOrThrow({
-          where: { id: listId },
-          select: {
-            id: true,
-            boardId: true,
-            title: true,
-            position: true,
-            archivedAt: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-        });
-      });
-    } catch (error) {
-      if (error instanceof Error && error.message === "LIST_NOT_FOUND") {
-        throw error;
-      }
-
-      if (isUniqueConstraintError(error)) {
-        if (attempt < MAX_RESTORE_LIST_RETRIES - 1) {
-          continue;
-        }
-        throw new Error("Failed to restore list after retrying position conflicts");
-      }
-
-      throw error;
+    if (!targetList) {
+      throw new Error("LIST_NOT_FOUND");
     }
-  }
 
-  throw new Error("Failed to restore list after retrying position conflicts");
+    // Global workspace gate, then board and archived-list locks (the list
+    // re-enters ordering space on restore).
+    await lockWorkspaceRowForUpdate(tx, workspaceId);
+    const board = await lockBoardRowForUpdate(tx, targetList.boardId);
+    if (!board) {
+      throw new Error("LIST_NOT_FOUND");
+    }
+    const locked = await tx.$queryRaw<
+      Array<{ id: string; boardId: string; position: number }>
+    >`SELECT id, "boardId", position FROM "list" WHERE id = ${listId} AND "archivedAt" IS NOT NULL FOR UPDATE`;
+    if (locked.length === 0) {
+      // Restored (or purged) concurrently since the pre-read.
+      throw new Error("LIST_NOT_FOUND");
+    }
+
+    // Keep the original position when it is still free; otherwise append after
+    // the last active list (US-074 semantics, now race-free under the lock).
+    const occupied = await tx.list.findFirst({
+      where: {
+        boardId: targetList.boardId,
+        archivedAt: null,
+        position: targetList.position,
+      },
+      select: { id: true },
+    });
+
+    let newPosition = targetList.position;
+    if (occupied) {
+      const lastActive = await tx.list.findFirst({
+        where: { boardId: targetList.boardId, archivedAt: null },
+        orderBy: { position: "desc" },
+        select: { position: true },
+      });
+
+      newPosition = lastActive ? lastActive.position + LIST_POSITION_GAP : LIST_POSITION_GAP;
+    }
+
+    const updateResult = await tx.list.updateMany({
+      where: {
+        id: listId,
+        archivedAt: { not: null },
+      },
+      data: {
+        archivedAt: null,
+        position: newPosition,
+        moveRevision: { increment: 1 },
+      },
+    });
+
+    if (updateResult.count === 0) {
+      throw new Error("LIST_NOT_FOUND");
+    }
+
+    return tx.list.findUniqueOrThrow({
+      where: { id: listId },
+      select: LIST_RECORD_SELECT,
+    });
+  });
 }

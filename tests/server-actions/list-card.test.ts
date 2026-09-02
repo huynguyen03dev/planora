@@ -19,6 +19,8 @@
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { OrderConflictError } from "@/lib/ordering";
+
 import {
   cardWithListAndBoardFixture,
   cardWithListAndMembersFixture,
@@ -73,8 +75,10 @@ const h = vi.hoisted(() => {
     updateListTitle: fn(),
     reorderListByNeighbors: fn(),
     updateCardDetails: fn(),
+    lockCardOrderingScopeForUpdate: fn(),
     setCardCompletion: fn(),
     reorderCardWithinListByNeighbors: fn(),
+    moveCardInTransaction: fn(),
     createComment: fn(),
     createAttachment: fn(),
     createActivityEntry: fn(),
@@ -115,6 +119,7 @@ const h = vi.hoisted(() => {
       emitCardCompletionUpdated: fn(),
       emitCardLabelsUpdated: fn(),
       emitCardMembersUpdated: fn(),
+      emitCardMetaUpdated: fn(),
       emitCommentCreated: fn(),
     },
   };
@@ -135,8 +140,10 @@ vi.mock("@/lib/card", () => ({
   getArchivedCardWithListAndBoard: h.getArchivedCardWithListAndBoard,
   getCardWithListAndMembers: h.getCardWithListAndMembers,
   updateCardDetails: h.updateCardDetails,
+  lockCardOrderingScopeForUpdate: h.lockCardOrderingScopeForUpdate,
   setCardCompletion: h.setCardCompletion,
   reorderCardWithinListByNeighbors: h.reorderCardWithinListByNeighbors,
+  moveCardInTransaction: h.moveCardInTransaction,
 }));
 vi.mock("@/lib/label", () => ({
   getLabelWithBoard: h.getLabelWithBoard,
@@ -199,7 +206,9 @@ import {
 // Every mutation/emit seam. A denied path must touch NONE of these.
 const writeSeams = [
   h.createList, h.updateListTitle, h.reorderListByNeighbors,
-  h.updateCardDetails, h.setCardCompletion, h.reorderCardWithinListByNeighbors, h.createComment,
+  h.updateCardDetails, h.setCardCompletion, h.reorderCardWithinListByNeighbors,
+  h.lockCardOrderingScopeForUpdate,
+  h.moveCardInTransaction, h.createComment,
   h.createAttachment, h.createActivityEntry, h.createLabel, h.updateLabel,
   h.deleteLabel, h.addCardLabel, h.removeCardLabel,
   h.db.$transaction, h.db.card.update,
@@ -214,6 +223,26 @@ const writeSeams = [
  */
 function makeTx() {
   return {
+    $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      // decision 0032 lock helpers: route the raw FOR UPDATE queries by SQL
+      // text. Workspace/board/list scope locks return a row for the known ids;
+      // the moved-card lock returns a locked card row at revision 0.
+      const sql = strings[0] ?? "";
+      const id = String(values[0] ?? "");
+      if (sql.includes('FROM "board"')) {
+        return [{ id }];
+      }
+      if (sql.includes('FROM "list"')) {
+        if (id === LIST_ID || id === TARGET_LIST) {
+          return [{ id, boardId: BOARD_A, position: 16384, moveRevision: 0 }];
+        }
+        return [];
+      }
+      if (sql.includes('FROM "card"')) {
+        return [{ id, listId: LIST_ID, position: 16384, moveRevision: 0 }];
+      }
+      return [];
+    }),
     card: {
       findMany: vi.fn(async () => [] as unknown[]),
       findFirst: vi.fn(async () => null),
@@ -223,6 +252,7 @@ function makeTx() {
         listId: data.listId,
         title: data.title,
         position: data.position,
+        moveRevision: 0,
         estimateHours: null,
         dueDate: null,
         completedAt: data.completedAt ?? null,
@@ -236,6 +266,16 @@ function makeTx() {
         estimateHours: data.estimateHours ?? null,
         dueDate: data.dueDate ?? null,
         completedAt: data.completedAt ?? null,
+      })),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+      findUniqueOrThrow: vi.fn(async () => ({
+        id: CARD_ID,
+        listId: TARGET_LIST,
+        position: 16384,
+        moveRevision: 1,
+        estimateHours: null,
+        dueDate: null,
+        completedAt: null,
       })),
     },
     list: {
@@ -254,9 +294,8 @@ function makeTx() {
     user: { findUnique: vi.fn(async () => ({ name: "Target" })) },
     activity: { create: vi.fn(async () => ({ id: "act" })) },
     cardHistoryEvent: { createMany: vi.fn(async () => ({ count: 0 })) },
-    // Automation (US-066): the trigger tx bodies now evaluate rules. With no
-    // enabled rules the evaluator is a no-op, so these positive controls still
-    // assert only the pre-automation transaction seams.
+    // Automation (US-066): with no enabled rules the evaluator is a no-op, so
+    // these positive controls assert only the pre-automation transaction seams.
     rule: { findMany: vi.fn(async () => [] as unknown[]) },
     ruleExecutionLog: { create: vi.fn(async () => ({ id: "log" })) },
   };
@@ -403,10 +442,17 @@ describe("toggleCardCompletionAction (card-owned completion — US-045)", () => 
     const r = await toggleCardCompletionAction(form("true"));
 
     expect(r.success).toBe(true);
+    expect(h.lockCardOrderingScopeForUpdate).toHaveBeenCalledWith(
+      tx,
+      WS_A,
+      CARD_ID,
+    );
+    expect(vi.mocked(h.lockCardOrderingScopeForUpdate).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(h.setCardCompletion).mock.invocationCallOrder[0],
+    );
     expect(h.setCardCompletion).toHaveBeenCalledWith(tx, CARD_ID, true, null);
-    // A real transition records exactly one history event...
+    // One history event; the broadcast carries completedAt, not a boolean.
     expect(tx.cardHistoryEvent.createMany).toHaveBeenCalledTimes(1);
-    // ...and broadcasts the completion flip (carrying completedAt, not a boolean).
     expect(h.emit.emitCardCompletionUpdated).toHaveBeenCalledWith(
       "board-1",
       { cardId: CARD_ID, completedAt: completedAt.toISOString() },
@@ -500,7 +546,6 @@ describe("deleteListAction (delete is editor+admin)", () => {
     const tx = makeTx();
     h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
     expect(await deleteListAction(form())).toEqual({ success: true });
-    // The body ran end-to-end and issued the archive (soft delete) on the right list.
     expect(tx.list.update).toHaveBeenCalledWith({
       where: { id: LIST_ID },
       data: { archivedAt: expect.any(Date) },
@@ -536,13 +581,11 @@ describe("createCardAction", () => {
     h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
     const r = await createCardAction(form());
     expect(r).toEqual({ success: true, cardId: "new-card" });
-    // The body ran: it read the last card (none) and inserted at the first gap.
     expect(tx.card.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ listId: LIST_ID, title: "Card", position: 16384 }),
       }),
     );
-    // Creation history was captured in the same transaction.
     expect(tx.cardHistoryEvent.createMany).toHaveBeenCalled();
   });
 });
@@ -620,7 +663,7 @@ describe("restoreCardAction (card:delete)", () => {
 });
 
 describe("reorderListAction", () => {
-  const form = () => formData({ listId: LIST_ID });
+  const form = () => formData({ listId: LIST_ID, intent: "end" });
   it("A1 auth", async () => {
     signOut();
     await expect(reorderListAction(form())).rejects.toThrow();
@@ -641,14 +684,25 @@ describe("reorderListAction", () => {
   it("allow", async () => {
     signInAs("u", WS_A, "editor");
     h.getListWithBoard.mockResolvedValue(listWithBoardFixture(WS_A));
-    h.reorderListByNeighbors.mockResolvedValue({ id: LIST_ID, position: 1 });
+    h.reorderListByNeighbors.mockResolvedValue({ id: LIST_ID, position: 1, moveRevision: 1 });
     expect(await reorderListAction(form())).toEqual({ success: true });
     expect(h.reorderListByNeighbors).toHaveBeenCalled();
+  });
+
+  it("decision 0032: OrderConflictError from the lib seam maps to a typed ORDER_CONFLICT result", async () => {
+    signInAs("u", WS_A, "editor");
+    h.getListWithBoard.mockResolvedValue(listWithBoardFixture(WS_A));
+    h.reorderListByNeighbors.mockRejectedValue(new OrderConflictError("MOVE_REVISION"));
+    expect(await reorderListAction(form())).toEqual({
+      success: false,
+      code: "ORDER_CONFLICT",
+      error: "List was reordered by someone else. Refreshing…",
+    });
   });
 });
 
 describe("reorderCardAction", () => {
-  const form = () => formData({ cardId: CARD_ID });
+  const form = () => formData({ cardId: CARD_ID, intent: "end" });
   it("A1 auth", async () => {
     signOut();
     await expect(reorderCardAction(form())).rejects.toThrow();
@@ -669,9 +723,25 @@ describe("reorderCardAction", () => {
   it("allow", async () => {
     signInAs("u", WS_A, "editor");
     h.getCardWithListAndBoard.mockResolvedValue(cardWithListAndBoardFixture(WS_A));
-    h.reorderCardWithinListByNeighbors.mockResolvedValue({ id: CARD_ID, listId: LIST_ID, position: 1 });
+    h.reorderCardWithinListByNeighbors.mockResolvedValue({
+      id: CARD_ID,
+      listId: LIST_ID,
+      position: 1,
+      moveRevision: 1,
+    });
     expect(await reorderCardAction(form())).toEqual({ success: true });
     expect(h.reorderCardWithinListByNeighbors).toHaveBeenCalled();
+  });
+
+  it("decision 0032: OrderConflictError from the lib seam maps to a typed ORDER_CONFLICT result", async () => {
+    signInAs("u", WS_A, "editor");
+    h.getCardWithListAndBoard.mockResolvedValue(cardWithListAndBoardFixture(WS_A));
+    h.reorderCardWithinListByNeighbors.mockRejectedValue(new OrderConflictError("MOVE_REVISION"));
+    expect(await reorderCardAction(form())).toEqual({
+      success: false,
+      code: "ORDER_CONFLICT",
+      error: "Card was moved by someone else. Refreshing…",
+    });
   });
 });
 
@@ -727,10 +797,147 @@ describe("updateCardDueDateAction", () => {
     await updateCardDueDateAction(form());
     expect(h.db.$transaction).toHaveBeenCalled();
   });
+
+  // ── HIGH-1 (US-020): a dueDate change invalidates stale CardReminder rows ──
+  // Stale rows keyed to the old milestone would P2002-skip the fresh DUE_SOON
+  // claim, so reminders are deleted in the SAME transaction as the date write.
+  // (The matrix previously cited validation.md — prose, not a test.)
+
+  it("HIGH-1 push-out: dueDate moved beyond the approach window deletes stale reminders in the same tx as the date write", async () => {
+    signInAs("u", WS_A, "editor");
+    const fx = cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID });
+    // A stale DUE_SOON row for the old milestone exists; the new date is far
+    // outside the 24h approach window.
+    fx.card.dueDate = new Date("2025-12-20T00:00:00.000Z");
+    h.getCardWithListAndMembers.mockResolvedValue(fx);
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+
+    const r = await updateCardDueDateAction(formData({ cardId: CARD_ID, dueDate: "2026-06-01" }));
+
+    expect(r).toEqual({ success: true });
+    // Every stale row for the card is removed — not just the old milestone's.
+    expect(tx.cardReminder.deleteMany).toHaveBeenCalledWith({ where: { cardId: CARD_ID } });
+    expect(tx.card.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: CARD_ID }),
+        data: expect.objectContaining({ dueDate: new Date("2026-06-01T00:00:00.000Z") }),
+      }),
+    );
+    // Ordering matters: stale rows must be gone before the new date is visible
+    // to the next cron tick.
+    expect(tx.cardReminder.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.card.update.mock.invocationCallOrder[0],
+    );
+    // The plain (non-tx) card.update must NOT fire — the write went through the tx.
+    expect(h.db.card.update).not.toHaveBeenCalled();
+    expect(tx.cardHistoryEvent.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          eventType: "DUE_DATE_CHANGED",
+          cardId: CARD_ID,
+          metadata: expect.objectContaining({
+            previousDueDate: "2025-12-20T00:00:00.000Z",
+            nextDueDate: "2026-06-01T00:00:00.000Z",
+          }),
+        }),
+      ],
+      skipDuplicates: false,
+    });
+  });
+
+  it("HIGH-1 clear: dueDate cleared removes stale reminders and nulls the card date", async () => {
+    signInAs("u", WS_A, "editor");
+    const fx = cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID });
+    fx.card.dueDate = new Date("2026-01-01T00:00:00.000Z");
+    h.getCardWithListAndMembers.mockResolvedValue(fx);
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+
+    // The client omits the dueDate field to clear (see card-detail-sheet).
+    const r = await updateCardDueDateAction(formData({ cardId: CARD_ID }));
+
+    expect(r).toEqual({ success: true });
+    // Cancelling the date cancels the unsent reminders — the old milestone can
+    // never fire.
+    expect(tx.cardReminder.deleteMany).toHaveBeenCalledWith({ where: { cardId: CARD_ID } });
+    expect(tx.card.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: CARD_ID }),
+        data: expect.objectContaining({ dueDate: null }),
+      }),
+    );
+    expect(tx.cardHistoryEvent.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          eventType: "DUE_DATE_CLEARED",
+          cardId: CARD_ID,
+          metadata: expect.objectContaining({
+            previousDueDate: "2026-01-01T00:00:00.000Z",
+            nextDueDate: null,
+          }),
+        }),
+      ],
+      skipDuplicates: false,
+    });
+  });
+
+  it("HIGH-1 set: assigning a dueDate to a never-dated card clears any stale rows so a fresh DUE_SOON is claimable", async () => {
+    signInAs("u", WS_A, "editor");
+    const fx = cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID });
+    fx.card.dueDate = null;
+    h.getCardWithListAndMembers.mockResolvedValue(fx);
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+
+    const r = await updateCardDueDateAction(formData({ cardId: CARD_ID, dueDate: "2026-06-01" }));
+
+    expect(r).toEqual({ success: true });
+    // Defensive deleteMany (no-op here) keeps the fresh claim from colliding
+    // with a leftover row.
+    expect(tx.cardReminder.deleteMany).toHaveBeenCalledWith({ where: { cardId: CARD_ID } });
+    expect(tx.cardHistoryEvent.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          eventType: "DUE_DATE_SET",
+          cardId: CARD_ID,
+          metadata: expect.objectContaining({
+            previousDueDate: null,
+            nextDueDate: "2026-06-01T00:00:00.000Z",
+          }),
+        }),
+      ],
+      skipDuplicates: false,
+    });
+  });
+
+  it("dedup invariant: re-submitting the SAME dueDate leaves CardReminder rows untouched", async () => {
+    signInAs("u", WS_A, "editor");
+    const fx = cardWithListAndMembersFixture(WS_A, { cardId: CARD_ID });
+    fx.card.dueDate = new Date("2026-01-01T00:00:00.000Z");
+    h.getCardWithListAndMembers.mockResolvedValue(fx);
+    const tx = makeTx();
+    h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+
+    const r = await updateCardDueDateAction(formData({ cardId: CARD_ID, dueDate: "2026-01-01" }));
+
+    expect(r).toEqual({ success: true });
+    // No date change → no transaction, no reminder wipe: the cron route's
+    // claim-first P2002 dedup for already-sent milestones stays intact.
+    expect(h.db.$transaction).not.toHaveBeenCalled();
+    expect(tx.cardReminder.deleteMany).not.toHaveBeenCalled();
+    expect(h.db.card.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: CARD_ID }),
+        data: expect.objectContaining({ dueDate: new Date("2026-01-01T00:00:00.000Z") }),
+      }),
+    );
+    expect(tx.cardHistoryEvent.createMany).not.toHaveBeenCalled();
+  });
 });
 
 describe("moveCardAction (two-workspace — the sharpest case)", () => {
-  const form = () => formData({ cardId: CARD_ID, targetListId: TARGET_LIST });
+  const form = () => formData({ cardId: CARD_ID, targetListId: TARGET_LIST, intent: "end" });
 
   // Source card + target list both on the SAME board (BOARD_A / WS_A).
   function sameBoardSetup() {
@@ -741,7 +948,7 @@ describe("moveCardAction (two-workspace — the sharpest case)", () => {
       listWithBoardFixture(WS_A, { boardId: BOARD_A, listId: TARGET_LIST }),
     );
     h.getCardWithListAndMembers.mockResolvedValue(
-      cardWithListAndMembersFixture(WS_A, { boardId: BOARD_A, cardId: CARD_ID }),
+      cardWithListAndMembersFixture(WS_A, { boardId: BOARD_A, cardId: CARD_ID, listId: LIST_ID }),
     );
     h.db.workspace.findUnique.mockResolvedValue({ requireEstimateBeforeDone: false });
   }
@@ -767,9 +974,9 @@ describe("moveCardAction (two-workspace — the sharpest case)", () => {
   });
 
   it("cross-workspace: target list on a DIFFERENT board is rejected before any write — even for a WS-A admin", async () => {
-    // The same-board guard (target.list.boardId !== card.list.boardId) blocks a
-    // cross-board (hence cross-workspace) relocation. Caller is fully privileged
-    // in WS_A to prove the rejection is structural, not a permission artifact.
+    // The same-board guard blocks a cross-board (hence cross-workspace)
+    // relocation; caller is fully privileged in WS_A to prove the rejection is
+    // structural, not a permission artifact.
     signInAs("u", WS_A, "admin");
     h.getCardWithListAndBoard.mockResolvedValue(
       cardWithListAndBoardFixture(WS_A, { boardId: BOARD_A, cardId: CARD_ID, listId: LIST_ID }),
@@ -781,21 +988,65 @@ describe("moveCardAction (two-workspace — the sharpest case)", () => {
     expectNoWrites(...writeSeams);
   });
 
+  it("same-workspace cross-board: a target list on ANOTHER board of the same workspace is rejected before any write", async () => {
+    // Same-board invariant (product decision): the target list resolves inside
+    // WS_A but on a different board — the move must stay within one board. The
+    // caller is a fully privileged WS-A admin to prove the rejection is
+    // structural (same-board), not a permission artifact.
+    signInAs("u", WS_A, "admin");
+    h.getCardWithListAndBoard.mockResolvedValue(
+      cardWithListAndBoardFixture(WS_A, { boardId: BOARD_A, cardId: CARD_ID, listId: LIST_ID }),
+    );
+    h.getListWithBoard.mockResolvedValue(
+      listWithBoardFixture(WS_A, { boardId: BOARD_B, listId: TARGET_LIST }),
+    );
+    expect(await moveCardAction(form())).toEqual({ success: false, error: "List not found" });
+    expectNoWrites(...writeSeams);
+  });
+
   it("allow: WS-A editor, same board → transaction body relocates the card to the target list", async () => {
     signInAs("u", WS_A, "editor");
     sameBoardSetup();
+    h.moveCardInTransaction.mockResolvedValue({
+      card: {
+        id: CARD_ID,
+        listId: TARGET_LIST,
+        position: 16384,
+        moveRevision: 1,
+        estimateHours: null,
+      },
+      fromListId: LIST_ID,
+      fromBoardId: BOARD_A,
+      targetBoardId: BOARD_A,
+    });
     const tx = makeTx();
     h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
     expect(await moveCardAction(form())).toEqual({ success: true });
-    // The body ran the real position resolver (no neighbours → append) and wrote
-    // the card into the target list at a concrete numeric position.
-    expect(tx.card.update).toHaveBeenCalledWith(
+    // The action routes through the shared human/automation move helper and
+    // emits the canonical revision returned by that helper.
+    expect(h.moveCardInTransaction).toHaveBeenCalledWith(
+      tx,
       expect.objectContaining({
-        where: expect.objectContaining({ id: CARD_ID }),
-        data: expect.objectContaining({ listId: TARGET_LIST, position: 16384 }),
+        workspaceId: WS_A,
+        cardId: CARD_ID,
+        targetListId: TARGET_LIST,
+        intent: "end",
       }),
     );
     expect(tx.cardHistoryEvent.createMany).toHaveBeenCalled();
+  });
+
+  it("decision 0032: a stale OCC anchor inside the transaction maps to ORDER_CONFLICT (no write, client resyncs)", async () => {
+    signInAs("u", WS_A, "editor");
+    sameBoardSetup();
+    h.db.$transaction.mockRejectedValue(new OrderConflictError("MOVE_REVISION"));
+    expect(await moveCardAction(form())).toEqual({
+      success: false,
+      code: "ORDER_CONFLICT",
+      error: "Card was moved by someone else. Refreshing…",
+    });
+    // Typed conflict is not a generic failure, and nothing was emitted.
+    expect(h.emit.emitCardMoved).not.toHaveBeenCalled();
   });
 });
 
@@ -836,8 +1087,8 @@ describe("createCommentAction (viewer IS allowed to comment)", () => {
     expectNoWrites(...writeSeams);
   });
   it("A3 isolation: WS-B viewer cannot comment on a WS-A card", async () => {
-    // No A2 here — viewer is a *legitimate* commenter; the boundary that matters
-    // for comments is workspace isolation, exercised by a non-member.
+    // No A2 here — viewer is a *legitimate* commenter; the boundary that
+    // matters for comments is workspace isolation, exercised by a non-member.
     signInAs("u", WS_B, "viewer");
     h.getCardWithListAndBoard.mockResolvedValue(cardWithListAndBoardFixture(WS_A));
     expect(await createCommentAction(form())).toEqual({ success: false, error: "Card not found" });
@@ -919,9 +1170,8 @@ describe("uploadAttachmentAction (card:update)", () => {
     h.uploadToCloudinary.mockResolvedValue({ secureUrl: "u", publicId: "p", resourceType: "image" });
     h.createAttachment.mockResolvedValue({ id: "att" });
     h.createActivityEntry.mockResolvedValue({ id: "a" });
-    // Mock $transaction to execute the callback with a minimal tx that
-    // has $queryRaw (FOR UPDATE) and delegates attachment/activity to the
-    // existing lib mocks (h.createAttachment, h.createActivityEntry).
+    // $transaction mock: minimal tx with $queryRaw (FOR UPDATE), delegating
+    // attachment/activity writes to the existing lib mocks.
     const tx = {
       $queryRaw: vi.fn(async () => [{ id: cardResult.list.id, archivedAt: null }]),
       attachment: { create: (...args: unknown[]) => h.createAttachment(...args) },
@@ -959,7 +1209,6 @@ describe("uploadAttachmentAction (card:update)", () => {
     // Must fail with "Card not found" (existing card-layer posture)
     expect(result).toEqual({ success: false, error: "Card not found" });
 
-    // No attachment or activity writes
     expect(h.createAttachment).not.toHaveBeenCalled();
     expect(h.createActivityEntry).not.toHaveBeenCalled();
 
@@ -1244,7 +1493,7 @@ describe("US-074 Slice B2 — archived list rejection", () => {
         h.getCardWithListAndBoard.mockResolvedValue(null);
       });
 
-      // Each action that uses getCardWithListAndBoard should reject when it returns null
+      // Each action using getCardWithListAndBoard must reject on a null result
       it("archiveCardAction → Card not found", async () => {
         const r = await archiveCardAction(formCard());
         expect(r).toEqual({ success: false, error: "Card not found" });
@@ -1306,7 +1555,7 @@ describe("US-074 Slice B2 — archived list rejection", () => {
   describe("moveCardAction — source or target archived", () => {
     const TARGET_LIST_UUID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
     const moveForm = (overrides: Record<string, string> = {}) =>
-      formData({ cardId: CARD_ID, targetListId: TARGET_LIST_UUID, ...overrides });
+      formData({ cardId: CARD_ID, targetListId: TARGET_LIST_UUID, intent: "end", ...overrides });
 
     it("rejects source card when its parent list is archived (getCardWithListAndBoard → null)", async () => {
       h.getCardWithListAndBoard.mockResolvedValue(null);
@@ -1324,10 +1573,9 @@ describe("US-074 Slice B2 — archived list rejection", () => {
     });
   });
 
-  // US-083 W8: the resolver no longer nulls the archived-parent case — it
-  // flags it (see undo-restore.test.ts for the dedicated outcome). A NULL
-  // resolver now means missing/foreign/already-restored: the action must keep
-  // the generic not-found contract for those (no existence leak).
+  // US-083 W8: the resolver no longer nulls the archived-parent case (see
+  // undo-restore.test.ts); a NULL resolver means missing/foreign/already-
+  // restored, so these keep the generic not-found contract (no existence leak).
   describe("restoreCardAction — null resolver (missing/foreign/already-restored) keeps generic not-found",
     () => {
       it("rejects restore when the resolver finds nothing", async () => {

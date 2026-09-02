@@ -82,3 +82,60 @@ describe("loadAutomationView — board scope", () => {
     }
   });
 });
+
+describe("loadAutomationView — log pagination options (US-066)", () => {
+  it("accepts cursor + take and passes them to the log query (skip:1, take+1 probe, deterministic id tiebreak)", async () => {
+    const { loadAutomationView } = await import("./view");
+    await loadAutomationView(WS, { cursor: "log-9", take: 25 });
+
+    const pagedLogQuery = mockDb.ruleExecutionLog.findMany.mock.calls[0][0];
+    expect(pagedLogQuery).toMatchObject({
+      where: { workspaceId: WS },
+      cursor: { id: "log-9" },
+      skip: 1,
+      take: 26, // take+1 so logsHasMore needs no extra count query
+      orderBy: [{ executedAt: "desc" }, { id: "desc" }],
+    });
+  });
+
+  it("defaults to the legacy take-100 with no cursor (take+1 probe only)", async () => {
+    const { loadAutomationView } = await import("./view");
+    await loadAutomationView(WS);
+
+    const pagedLogQuery = mockDb.ruleExecutionLog.findMany.mock.calls[0][0];
+    expect(pagedLogQuery.take).toBe(101);
+    expect(pagedLogQuery.cursor).toBeUndefined();
+    expect(pagedLogQuery.skip).toBeUndefined();
+  });
+
+  it("reports logsHasMore exactly: a full extra row means another page exists", async () => {
+    const row = (id: string) => ({
+      id,
+      ruleId: "r1",
+      ruleName: "R",
+      chainDepth: 0,
+      actionType: "set-priority",
+      triggerType: "card-created",
+      status: "success",
+      error: null,
+      executedAt: new Date("2026-07-06T01:00:00Z"),
+    });
+
+    // pageSize+1 rows returned → the page is full and more may exist.
+    mockDb.ruleExecutionLog.findMany.mockResolvedValue(
+      Array.from({ length: 101 }, (_, i) => row(`log-${i}`)),
+    );
+    const { loadAutomationView } = await import("./view");
+    const full = await loadAutomationView(WS);
+    expect(full.logs).toHaveLength(100);
+    expect(full.logsHasMore).toBe(true);
+
+    // Exactly pageSize rows returned → the end of the feed.
+    mockDb.ruleExecutionLog.findMany.mockResolvedValue(
+      Array.from({ length: 100 }, (_, i) => row(`log-${i}`)),
+    );
+    const exact = await loadAutomationView(WS);
+    expect(exact.logs).toHaveLength(100);
+    expect(exact.logsHasMore).toBe(false);
+  });
+});

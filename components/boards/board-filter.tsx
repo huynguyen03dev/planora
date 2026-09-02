@@ -113,9 +113,9 @@ export function BoardFilter() {
   const toggleActivityWindow = useBoardStore((s) => s.toggleActivityWindow)
   const clearFilters = useBoardStore((s) => s.clearFilters)
 
-  // The input reflects keystrokes immediately (feels responsive), but the store
-  // query — which drives the board-wide re-filter — is only updated after the
-  // user pauses, so we don't re-filter every list on every character.
+  // The input reflects keystrokes immediately, but the store query — which
+  // drives the board-wide re-filter — updates only after the user pauses, so we
+  // don't re-filter every list on every character.
   const [draftQuery, setDraftQuery] = useState(searchQuery)
 
   // Sync the draft when the store query changes from elsewhere (e.g. "Clear
@@ -151,10 +151,10 @@ export function BoardFilter() {
   // the badge reflects that single constraint. Otherwise count the dimensions.
   const displayCount = searchActive ? 1 : activeFilterCount(filter)
 
-  // Dimension option sets, derived from the store (no fetch). The current viewer
-  // is dropped from Members — the "Assigned to me" quick option covers them.
+  // Dimension option sets, derived from the store (no fetch); the current
+  // viewer is dropped from Members — the "Assigned to me" quick option covers
+  // them.
   const labels = availableLabels(lists)
-  // Exclude the current viewer — the "Assigned to me" quick option covers them.
   const members = availableMembers(lists, currentUserId)
 
   // A keyword suspends the dimensions, so when one is active we show only whether
@@ -175,12 +175,22 @@ export function BoardFilter() {
             boardHeaderControlClass,
             active && boardHeaderControlActiveClass,
           )}
-          aria-label="Filter cards"
+          aria-label={
+            displayCount > 0
+              ? `Filter cards (${displayCount} active)`
+              : "Filter cards"
+          }
+          // Pairs with the active fill (boardHeaderControlActiveClass) so the
+          // applied state is never conveyed by fill alone (see
+          // board-header-controls.ts contract). Radix injects aria-expanded.
+          aria-pressed={active}
         >
-          <HugeiconsIcon icon={FilterIcon} size={16} />
-          Filter
+          <HugeiconsIcon icon={FilterIcon} size={16} aria-hidden="true" />
+          {/* Label hides below md so the toolbar stays a single icon row on
+              narrow screens; aria-label keeps the accessible name. */}
+          <span className="hidden md:inline">Filter</span>
           {displayCount > 0 ? (
-            <Badge className="ml-0.5 h-5 min-w-5 rounded-full px-1.5 font-semibold text-[10px] bg-primary text-primary-foreground hover:bg-primary">
+            <Badge className="ml-0.5 h-5 min-w-5 rounded-full px-1.5 font-semibold text-xs bg-primary text-primary-foreground hover:bg-primary">
               {displayCount}
             </Badge>
           ) : null}

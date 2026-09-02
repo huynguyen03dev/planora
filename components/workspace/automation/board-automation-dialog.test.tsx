@@ -56,6 +56,7 @@ const SUCCESS_RESPONSE = {
     },
   ],
   logs: [],
+  logsHasMore: false,
   lastRunByRule: {} as Record<string, string>,
 };
 
@@ -74,9 +75,16 @@ describe("BoardAutomationDialog", () => {
 
   it("renders the Automation trigger button", () => {
     renderDialog();
-    expect(
-      screen.getByRole("button", { name: "Automation" }),
-    ).toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: "Automation" });
+    expect(trigger).toBeInTheDocument();
+    // Narrow-screen toolbar: the label span hides below md (single icon row)
+    // while the aria-label keeps the accessible name stable.
+    expect(trigger).toHaveAttribute("aria-label", "Automation");
+    const label = Array.from(trigger.querySelectorAll("span")).find(
+      (span) => span.textContent === "Automation",
+    );
+    expect(label).toBeDefined();
+    expect(label).toHaveClass("hidden", "md:inline");
   });
 
   it("opens the dialog on trigger click and fetches data lazily", async () => {
@@ -87,17 +95,14 @@ describe("BoardAutomationDialog", () => {
     renderDialog();
 
     expect(screen.queryByText("Automation")).toBeInTheDocument();
-    // Dialog title not yet visible
     expect(screen.queryByRole("heading", { name: "Automation" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Automation" }));
 
-    // The dialog title appears
     expect(
       screen.getByRole("heading", { name: "Automation" }),
     ).toBeInTheDocument();
 
-    // The lazy fetch was triggered
     expect(getBoardAutomationDataAction).toHaveBeenCalledWith({
       boardId: "board-1",
     });
@@ -113,7 +118,6 @@ describe("BoardAutomationDialog", () => {
 
     // The skeleton is marked aria-busy
     expect(screen.getByLabelText("Loading automation")).toBeInTheDocument();
-    // Content not yet present
     expect(
       screen.queryByTestId("automation-content"),
     ).not.toBeInTheDocument();
@@ -162,11 +166,9 @@ describe("BoardAutomationDialog", () => {
     const retryButton = screen.getByRole("button", { name: "Try again" });
     expect(retryButton).toBeInTheDocument();
 
-    // Prepare for retry
     getBoardAutomationDataAction.mockResolvedValue(SUCCESS_RESPONSE);
     await user.click(retryButton);
 
-    // The action is called again
     expect(getBoardAutomationDataAction).toHaveBeenCalledTimes(2);
 
     await waitFor(() => {

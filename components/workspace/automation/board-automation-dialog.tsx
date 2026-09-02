@@ -90,6 +90,7 @@ export function BoardAutomationDialog({ boardId, boardTitle }: BoardAutomationDi
             options: res.options,
             rules: res.rules,
             logs: res.logs,
+            logsHasMore: res.logsHasMore,
             lastRunByRule: res.lastRunByRule,
           });
         } else {
@@ -113,10 +114,13 @@ export function BoardAutomationDialog({ boardId, boardTitle }: BoardAutomationDi
           type="button"
           variant="outline"
           size="sm"
+          aria-label="Automation"
           className={cn("gap-1.5", boardHeaderControlClass)}
         >
           <HugeiconsIcon icon={AiMagicIcon} size={16} aria-hidden="true" />
-          Automation
+          {/* Label hides below md so the toolbar stays a single icon row on
+              narrow screens; aria-label keeps the accessible name. */}
+          <span className="hidden md:inline">Automation</span>
         </Button>
       </DialogTrigger>
 
@@ -150,6 +154,7 @@ export function BoardAutomationDialog({ boardId, boardTitle }: BoardAutomationDi
                 rules={data.rules}
                 options={data.options}
                 logs={data.logs}
+                logsHasMore={data.logsHasMore}
                 lastRunByRule={data.lastRunByRule}
                 defaultBoardId={boardId}
                 onMutated={load}

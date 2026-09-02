@@ -55,6 +55,7 @@ import {
   getCardIdByTitle,
   setCardDueDate,
   assignCardMember,
+  getBoardArchivedAt,
   cleanup,
   disconnect,
 } from "./helpers/db";
@@ -94,7 +95,7 @@ test("assigned cards across workspaces land in the four buckets; deep links and 
   await signUp(page, bob);
   const bobUserId = await getUserIdByEmail(bob.email);
 
-  // ── Workspace A: the primary board with one card per bucket ─────────────
+  // Workspace A: the primary board with one card per bucket
   const acmeWsId = await createWorkspace(page, "Acme");
   created.push({ workspaceId: acmeWsId, emails: [bob.email] });
   const roadmapId = await createBoard(page, "Product Roadmap");
@@ -153,7 +154,7 @@ test("assigned cards across workspaces land in the four buckets; deep links and 
     await assignCardMember(await getCardIdByTitle(roadmapId, title), bobUserId);
   }
 
-  // ── Workspace B: one cross-workspace card due today ─────────────────────
+  // Workspace B: one cross-workspace card due today
   const globexWsId = await createWorkspace(page, "Globex");
   created.push({ workspaceId: globexWsId, emails: [bob.email] });
   const sprintId = await createBoard(page, "Sprint");
@@ -165,12 +166,12 @@ test("assigned cards across workspaces land in the four buckets; deep links and 
   await setCardDueDate(await getCardIdByTitle(sprintId, crossTitle), daysFromNow(0));
   await assignCardMember(await getCardIdByTitle(sprintId, crossTitle), bobUserId);
 
-  // ── Archive "Archived card" through the real UI (AC5 setup) ─────────────
+  // Archive "Archived card" through the real UI (AC5 setup)
   const archivedCardId = await getCardIdByTitle(roadmapId, archivedTitle);
   await page.goto(`/boards/${roadmapId}`);
   await archiveCard(page, archivedCardId);
 
-  // ── /today: four buckets, cross-workspace, unassigned/archived excluded ──
+  // /today: four buckets, cross-workspace, unassigned/archived excluded
   await page.goto("/today");
   await expect(page.getByRole("heading", { name: "Today", exact: true })).toBeVisible();
 
@@ -220,12 +221,16 @@ test("assigned cards across workspaces land in the four buckets; deep links and 
     later.getByRole("link", { name: "Open card No due date card" }),
   ).toBeVisible();
 
-  // ── AC3: tile → real board/card deep link, detail sheet opens ──────────
+  // The 8-card fixture fits one page (< TODAY_PAGE_SIZE = 30), so the
+  // infinite-scroll loop reports completion instead of offering a CTA.
+  await expect(page.getByText("All assigned cards are shown")).toBeVisible();
+
+  // AC3: tile → real board/card deep link, detail sheet opens
   await dueToday.getByRole("link", { name: "Open card Due today card" }).click();
   await expect(page).toHaveURL(new RegExp(`/boards/${roadmapId}\\?cardId=`));
   await expect(page.locator("#card-detail-title")).toBeVisible();
 
-  // ── AC5 (board half): archive the Sprint board, refresh → card gone ─────
+  // AC5 (board half): archive the Sprint board, refresh → card gone
   await page.goto(`/boards/${sprintId}`);
   await page.getByRole("button", { name: "Board menu" }).click();
   await page.getByRole("menuitem", { name: "Archive board" }).click();
@@ -233,6 +238,10 @@ test("assigned cards across workspaces land in the four buckets; deep links and 
     .getByRole("alertdialog")
     .getByRole("button", { name: "Archive", exact: true })
     .click();
+  // Same commit barrier as the card archive above: the confirm click fires
+  // the deleteBoardAction asynchronously, and /today's read model filters
+  // board.archivedAt — the goto below must not race the commit.
+  await expect.poll(() => getBoardArchivedAt(sprintId), { timeout: 15_000 }).not.toBeNull();
   await page.goto("/today");
   await expect(todaySection(page, "Due Today").getByText("1", { exact: true })).toBeVisible();
   await expect(

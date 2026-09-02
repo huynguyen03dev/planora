@@ -32,7 +32,10 @@ export function WorkspaceShellSidebar({
       label: "Boards",
       href: `/boards?workspace=${workspaceId}`,
       icon: KanbanIcon,
-      active: pathname === base || pathname === `${base}/`,
+      // U8 (round-2): the workspace root now exists as a redirect to the board
+      // list; the item lights during that redirect frame (the sidebar is not
+      // otherwise rendered for /boards).
+      active: pathname === base,
     },
     {
       label: "Analytics",
@@ -78,7 +81,7 @@ export function WorkspaceShellSidebar({
             href={item.href}
             aria-current={item.active ? "page" : undefined}
             className={cn(
-              "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-sidebar-accent",
+              "flex min-h-9 pointer-coarse:min-h-11 items-center gap-2 rounded-md px-2 text-sm transition-colors hover:bg-sidebar-accent",
               item.active
                 ? "bg-sidebar-accent font-medium text-foreground"
                 : "text-muted-foreground",

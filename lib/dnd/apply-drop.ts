@@ -2,9 +2,17 @@ import type { ListWithCards } from "@/app/(authenticated)/(dashboard)/boards/[bo
 
 /**
  * Translates a @hello-pangea/dnd drop (source/destination indices) into the
- * optimistic next-lists array plus the neighbor-id fields the server actions
- * expect. Index-based: we have exact destination indices, so there is no
- * before/after placement ambiguity.
+ * optimistic next-lists array plus the placement-intent fields the server
+ * actions expect (decision 0032). Index-based: we have exact destination
+ * indices, so there is no before/after placement ambiguity.
+ *
+ * Each translation carries:
+ * - `intent`: the EXPLICIT placement ("start" | "end" | "between") derived from
+ *   the destination index — never guessed by the server from null hints.
+ * - `expectedMoveRevision`: the moved item's PRE-bump revision (the value the
+ *   server's DB should still hold). The optimistic `nextLists` bump it by one;
+ *   the server CASes on the expected value, so a stale client's reorder is
+ *   rejected with ORDER_CONFLICT instead of silently overwriting a rival's move.
  *
  * Neighbors are read AFTER insertion from the destination's final order, so the
  * moved item sits between `prev` and `next` and is never referenced by them —
@@ -15,12 +23,24 @@ export type DropTranslation =
   | {
       action: "reorderList";
       nextLists: ListWithCards[];
-      fields: { listId: string; prevListId: string | null; nextListId: string | null };
+      fields: {
+        listId: string;
+        intent: "start" | "end" | "between";
+        prevListId: string | null;
+        nextListId: string | null;
+        expectedMoveRevision: number;
+      };
     }
   | {
       action: "reorderCard";
       nextLists: ListWithCards[];
-      fields: { cardId: string; prevCardId: string | null; nextCardId: string | null };
+      fields: {
+        cardId: string;
+        intent: "start" | "end" | "between";
+        prevCardId: string | null;
+        nextCardId: string | null;
+        expectedMoveRevision: number;
+      };
     }
   | {
       action: "moveCard";
@@ -28,12 +48,28 @@ export type DropTranslation =
       fields: {
         cardId: string;
         targetListId: string;
+        intent: "start" | "end" | "between";
         prevCardId: string | null;
         nextCardId: string | null;
+        expectedMoveRevision: number;
       };
     };
 
 type DropLocation = { droppableId: string; index: number };
+
+/** Derive the explicit placement intent from a final index in an array. */
+function intentFor(index: number, length: number): "start" | "end" | "between" {
+  if (length <= 1) {
+    return "start";
+  }
+  if (index === 0) {
+    return "start";
+  }
+  if (index === length - 1) {
+    return "end";
+  }
+  return "between";
+}
 
 export function translateListDrop(
   lists: ListWithCards[],
@@ -54,7 +90,13 @@ export function translateListDrop(
   if (!moved) {
     return { action: "none" };
   }
-  next.splice(destination.index, 0, moved);
+  next.splice(destination.index, 0, {
+    ...moved,
+    // Optimistic OCC bump (decision 0032): the store now believes the list is
+    // one ordering-write ahead of the server; the action CASes on the
+    // pre-bump value captured below.
+    moveRevision: moved.moveRevision + 1,
+  });
 
   const i = destination.index;
   return {
@@ -62,8 +104,10 @@ export function translateListDrop(
     nextLists: next,
     fields: {
       listId: draggableId,
+      intent: intentFor(i, next.length),
       prevListId: i > 0 ? next[i - 1].id : null,
       nextListId: i < next.length - 1 ? next[i + 1].id : null,
+      expectedMoveRevision: moved.moveRevision,
     },
   };
 }
@@ -100,8 +144,12 @@ export function translateCardDrop(
     if (!moved) {
       return { action: "none" };
     }
-    // Same list: listId is unchanged, so preserve the moved card's reference.
-    cards.splice(destination.index, 0, moved);
+    // Same list: listId is unchanged. Clone the card so the optimistic OCC
+    // bump (decision 0032) never mutates the shared pre-move reference.
+    cards.splice(destination.index, 0, {
+      ...moved,
+      moveRevision: moved.moveRevision + 1,
+    });
     next[srcIndex] = { ...lists[srcIndex], cards };
 
     const i = destination.index;
@@ -110,7 +158,13 @@ export function translateCardDrop(
     return {
       action: "reorderCard",
       nextLists: next,
-      fields: { cardId, prevCardId, nextCardId },
+      fields: {
+        cardId,
+        intent: intentFor(i, cards.length),
+        prevCardId,
+        nextCardId,
+        expectedMoveRevision: moved.moveRevision,
+      },
     };
   }
 
@@ -120,7 +174,11 @@ export function translateCardDrop(
   if (!moved) {
     return { action: "none" };
   }
-  dstCards.splice(destination.index, 0, { ...moved, listId: lists[dstIndex].id });
+  dstCards.splice(destination.index, 0, {
+    ...moved,
+    listId: lists[dstIndex].id,
+    moveRevision: moved.moveRevision + 1,
+  });
   next[srcIndex] = { ...lists[srcIndex], cards: srcCards };
   next[dstIndex] = { ...lists[dstIndex], cards: dstCards };
 
@@ -131,6 +189,13 @@ export function translateCardDrop(
   return {
     action: "moveCard",
     nextLists: next,
-    fields: { cardId, targetListId: lists[dstIndex].id, prevCardId, nextCardId },
+    fields: {
+      cardId,
+      targetListId: lists[dstIndex].id,
+      intent: intentFor(i, dstCards.length),
+      prevCardId,
+      nextCardId,
+      expectedMoveRevision: moved.moveRevision,
+    },
   };
 }

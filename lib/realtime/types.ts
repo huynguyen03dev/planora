@@ -8,11 +8,19 @@ export interface CardMovedPayload extends BoardEventPayload {
   cardId: string;
   listId: string;
   position: number;
+  /** Canonical ordering revision after the move. Legacy emitters may omit it;
+   * the board store normalizes absence to revision 0 at ingress. */
+  moveRevision?: number;
+  /** Full canonical snapshot is present for a cross-board destination room. */
+  card?: CardSnapshot;
 }
 
 export interface ListMovedPayload extends BoardEventPayload {
   listId: string;
   position: number;
+  /** Canonical ordering revision after the move. Legacy emitters may omit it;
+   * the board store normalizes absence to revision 0 at ingress. */
+  moveRevision?: number;
 }
 
 export interface ListSnapshot {
@@ -20,6 +28,8 @@ export interface ListSnapshot {
   title: string;
   boardId: string;
   position: number;
+  /** Optional for pre-0032 list-created/restored emitters. */
+  moveRevision?: number;
 }
 
 export interface ListCreatedPayload extends BoardEventPayload {
@@ -46,6 +56,10 @@ export interface CardSnapshot {
   listId: string;
   title: string;
   position: number;
+  /** Canonical ordering revision (decision 0032); always sent by new emitters.
+   *  Optional so pre-0032 emitters/payloads stay valid — receivers fall back to
+   *  the default revision 0 when absent. */
+  moveRevision?: number;
   // US-083 W7: quick-captured cards carry due date + priority fidelity to
   // observer clients. Optional so pre-W7 emitters/payloads stay valid — the
   // receiver falls back to null when absent.
@@ -97,6 +111,35 @@ export interface CardMembersUpdatedPayload extends BoardEventPayload {
   cardId: string;
   members: CardMemberSnapshot[];
 }
+
+// A partial patch of a card's display metadata (F3): one or more of due date,
+// priority, estimate, cover changed. Travels as a partial patch so receivers
+// apply only what changed; dueDate is an ISO string (JSON-safe — the store
+// rehydrates to a Date). In-place / live (never reorders the list array),
+// mirroring card:completion-updated / card:labels-updated.
+export type CardMetaFields = {
+  estimateHours?: number | null;
+  dueDate?: string | null;
+  priority?: CardPriority | null;
+  coverImage?: string | null;
+};
+
+export interface CardMetaUpdatedPayload extends BoardEventPayload {
+  cardId: string;
+  fields: CardMetaFields;
+}
+
+// A board was soft-archived (archivedAt set) while clients were viewing it
+// (F10). Carries the archive timestamp (ISO) so a receiver can distinguish an
+// archive from a permanent deletion. Signal-only: the client leaves the room
+// and re-renders server-side (the page's getBoardById → notFound takes over).
+export interface BoardArchivedPayload extends BoardEventPayload {
+  archivedAt: string;
+}
+
+// A board was permanently deleted (F10). Signal-only: the client leaves the
+// room and redirects to /boards — the board no longer exists for anyone.
+export type BoardDeletedPayload = BoardEventPayload;
 
 export interface CommentCreatedPayload extends BoardEventPayload {
   cardId: string;
@@ -182,12 +225,16 @@ export type ServerToClientEvents = {
   "card:completion-updated": (payload: CardCompletionUpdatedPayload) => void;
   "card:labels-updated": (payload: CardLabelsUpdatedPayload) => void;
   "card:members-updated": (payload: CardMembersUpdatedPayload) => void;
+  "card:meta-updated": (payload: CardMetaUpdatedPayload) => void;
+  "board:archived": (payload: BoardArchivedPayload) => void;
+  "board:deleted": (payload: BoardDeletedPayload) => void;
   "comment:created": (payload: CommentCreatedPayload) => void;
   "board:presence": (payload: BoardPresencePayload) => void;
   "notification:new": (payload: NotificationNewPayload) => void;
   "invitation:new": (payload: InvitationNewPayload) => void;
   "analytics:refresh": (payload: AnalyticsRefreshPayload) => void;
   "board:error": (payload: { message: string }) => void;
+  "workspace:error": (payload: { message: string }) => void;
 };
 
 export type ClientToServerEvents = {

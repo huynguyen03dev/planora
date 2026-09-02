@@ -1,4 +1,3 @@
-// lib/schemas/checklist.ts
 import { z } from "zod";
 
 export const MIN_CHECKLIST_TITLE_LENGTH = 1;
@@ -18,7 +17,6 @@ const checklistItemTitleSchema = z
   .min(MIN_CHECKLIST_ITEM_TITLE_LENGTH, "Title is required")
   .max(MAX_CHECKLIST_ITEM_TITLE_LENGTH, "Title is too long");
 
-// Create a checklist on a card.
 export const createChecklistSchema = z.object({
   cardId: z.string({ message: "Card ID is required" }).uuid("Invalid card ID"),
   title: checklistTitleSchema,
@@ -31,7 +29,6 @@ export const deleteChecklistSchema = z.object({
     .uuid("Invalid checklist ID"),
 });
 
-// Add an item to a checklist.
 export const createChecklistItemSchema = z.object({
   checklistId: z
     .string({ message: "Checklist ID is required" })
@@ -48,7 +45,6 @@ export const toggleChecklistItemSchema = z.object({
     .transform((value) => value === "true"),
 });
 
-// Delete a single checklist item.
 export const deleteChecklistItemSchema = z.object({
   itemId: z.string({ message: "Item ID is required" }).uuid("Invalid item ID"),
 });

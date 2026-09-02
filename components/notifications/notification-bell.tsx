@@ -24,7 +24,7 @@ export function NotificationBell({ count, isOpen, className, ...props }: Notific
       variant="ghost"
       {...props}
       className={cn(
-        "relative flex h-auto items-center gap-1.5 px-2 py-1.5",
+        "relative size-9 pointer-coarse:size-11",
         isOpen ? "bg-accent font-medium text-foreground" : "text-muted-foreground",
         className,
       )}
@@ -32,7 +32,7 @@ export function NotificationBell({ count, isOpen, className, ...props }: Notific
     >
       <HugeiconsIcon icon={Notification02Icon} className="size-4" />
       {count > 0 && (
-        <span className="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-destructive text-[10px] font-semibold text-white ring-2 ring-background">
+        <span className="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-destructive text-xs font-semibold text-white ring-2 ring-background">
           {count > 9 ? "9+" : count}
         </span>
       )}

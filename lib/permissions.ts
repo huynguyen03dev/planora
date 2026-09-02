@@ -22,8 +22,6 @@ const statement = {
 
 export const ac = createAccessControl(statement);
 
-/* ── Roles ─────────────────────────────────────────────────────── */
-
 /** Full workspace control — inherits all owner-level org permissions */
 export const admin = ac.newRole({
   ...ownerAc.statements,

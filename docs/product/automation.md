@@ -108,9 +108,19 @@ after the trigger's own write and history events, before commit (decision 0022):
   emit sockets directly — they return effect descriptors the triggering action
   fires through the existing `emit*` helpers.
 
-Retryable triggers (e.g. `moveCardAction` on `StaleNeighborError`) rebuild the
-chain state and effect accumulator per attempt, so exactly one application
-persists and effects fire once after the final commit.
+Ordering actions use the shared transaction-safe protocol in decision 0032:
+the workspace gate and sorted board/list/card locks serialize the complete
+move, while the card `moveRevision` check rejects stale callers. A stale
+revision or contradictory anchor returns `ORDER_CONFLICT`; the caller
+resynchronizes instead of retrying with a new ordering hint. Automation uses
+the same move helper and therefore participates in the same cascade-wide lock
+protocol and emits the committed canonical state once. `evaluateRules()` and
+`executeRuleActions()` both enter at the workspace gate before the first
+ordered step can mutate or lock the card. Recursive evaluations safely
+re-acquire that row in the shared transaction; the workspace gate is the
+deadlock-prevention boundary, while the move helper preserves sorted
+board/list-before-card locking. Thus an ordered `set-priority` →
+`move-card-to-list` sequence cannot establish card → workspace ordering.
 
 ## Loop prevention
 

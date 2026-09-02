@@ -344,7 +344,7 @@ describe("US-074 Slice B — restoreListAction", () => {
     const result = await restoreListAction(form());
     expect(result).toEqual({ success: true });
 
-    expect(h.restoreList).toHaveBeenCalledWith(LIST_ID);
+    expect(h.restoreList).toHaveBeenCalledWith(LIST_ID, WS_A);
     expect(h.db.cardHistoryEvent.createMany).not.toHaveBeenCalled();
     expect(h.db.cardHistoryEvent.create).not.toHaveBeenCalled();
 
@@ -431,30 +431,21 @@ describe("US-074 Slice C — permanentlyDeleteListAction", () => {
     expectNoWrites(...writeSeams);
   });
 
-  // ── RBAC matrix: canPermanentDelete ↔ organization:update ──────────────
-
   it("RBAC: canPermanentDelete maps to organization:update (admin=true, editor=false, viewer=false)", async () => {
-    // The real permission check uses organization:["update"] which only
-    // admin has in the roleGrants mock. Editor and viewer do NOT have
-    // organization:update. This is proven by A2 tests above. Here we
-    // directly verify the role → permission mapping.
+    // Direct proof of the role → permission mapping the real check uses
+    // (organization:["update"] is admin-only in the roleGrants mock).
     expect(roleGrants("admin", { organization: ["update"] })).toBe(true);
     expect(roleGrants("editor", { organization: ["update"] })).toBe(false);
     expect(roleGrants("viewer", { organization: ["update"] })).toBe(false);
   });
 
   it("RBAC: role map gives admin canPermanentDelete=true, editor/viewer false", async () => {
-    // Direct BoardPagePermissions role-map proof, not through auth mock.
-    // This covers the path: role → getBoardPagePermissionsForRole → canPermanentDelete.
-    // The actual derivation is: role → canPermanentDelete.
-    // We import the pure function and test it directly.
+    // Pure role → getBoardPagePermissionsForRole → canPermanentDelete proof.
     const { getBoardPagePermissionsForRole } = await import("@/lib/authorization");
     expect(getBoardPagePermissionsForRole("admin").canPermanentDelete).toBe(true);
     expect(getBoardPagePermissionsForRole("editor").canPermanentDelete).toBe(false);
     expect(getBoardPagePermissionsForRole("viewer").canPermanentDelete).toBe(false);
   });
-
-  // ── Precondition guards (archived-only, title, archived board) ────────
 
   it("rejects active list (must be archived first)", async () => {
     signInAs("u", WS_A, "admin");
@@ -519,8 +510,6 @@ describe("US-074 Slice C — permanentlyDeleteListAction", () => {
     expectNoWrites(...writeSeams);
   });
 
-  // ── FOR UPDATE lock acquisition ─────────────────────────────────────
-
   it("acquires FOR UPDATE lock via $queryRaw inside the transaction", async () => {
     signInAs("u", WS_A, "admin");
     h.getArchivedListWithBoard.mockResolvedValue(archivedListFixture(WS_A));
@@ -536,7 +525,6 @@ describe("US-074 Slice C — permanentlyDeleteListAction", () => {
 
     // The transaction callback MUST have called $queryRaw with FOR UPDATE
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
-    // Verify the SQL contains FOR UPDATE (the $queryRaw mock receives the template literal)
     const callArgs = tx.$queryRaw.mock.calls[0];
     expect(callArgs.some((a: unknown) => String(a).includes("FOR UPDATE"))).toBe(true);
   });
@@ -564,7 +552,7 @@ describe("US-074 Slice C — permanentlyDeleteListAction", () => {
     h.getArchivedListWithBoard.mockResolvedValue(archivedListFixture(WS_A));
 
     const tx = makeTx();
-    // $queryRaw returns empty array (list was deleted before lock acquired)
+    // $queryRaw returns empty (list deleted before the lock was acquired)
     tx.$queryRaw.mockResolvedValue([]);
     h.db.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
 
@@ -578,11 +566,9 @@ describe("US-074 Slice C — permanentlyDeleteListAction", () => {
   });
 
   it("lock revalidation: removing the $queryRaw mock (no lock) makes test fail — lock is mandatory", async () => {
-    // This test proves the FOR UPDATE call-shape is load-bearing:
-    // if the production code stopped acquiring the lock, the mock tx
-    // would not intercept $queryRaw and the default mock (returning
-    // archived list) would still pass — but removing the assertion
-    // MUST make the "forces $queryRaw call" test fail.
+    // The FOR UPDATE call-shape is load-bearing: without the lock the mock
+    // tx never intercepts $queryRaw, so the default (archived list) mock
+    // would pass — removing the assertion MUST fail this test.
     signInAs("u", WS_A, "admin");
     h.getArchivedListWithBoard.mockResolvedValue(archivedListFixture(WS_A));
 
@@ -590,17 +576,13 @@ describe("US-074 Slice C — permanentlyDeleteListAction", () => {
     tx.card.count.mockResolvedValue(0);
     tx.card.findMany.mockResolvedValue([]);
     tx.list.deleteMany.mockResolvedValue({ count: 1 });
-    // Intentionally do NOT call h.db.$transaction.mockImplementation so we
-    // can verify the success path still requires the lock call-shape.
-    // Without the lock, the transaction is never called, so the default
-    // success path is blocked.
+    // No $transaction mockImplementation: without the lock the transaction
+    // is never called, so the success path stays blocked.
     expect(await permanentlyDeleteListAction(form())).toEqual({
       success: false,
       error: expect.any(String),
     });
   });
-
-  // ── Cloudinary attachment gate ────────────────────────────────────────
 
   it("blocks when Cloudinary-backed attachments exist (inside tx under FOR UPDATE)", async () => {
     signInAs("u", WS_A, "admin");
@@ -641,11 +623,9 @@ describe("US-074 Slice C — permanentlyDeleteListAction", () => {
       where: { id: LIST_ID, archivedAt: { not: null } },
     });
 
-    // Cloudinary guard passed (no attachment returned by default from tx.attachment.findFirst)
+    // Cloudinary guard passed: the default tx.attachment.findFirst returns nothing
     expect(tx.attachment.findFirst).toHaveBeenCalled();
   });
-
-  // ── Live cards guard ──────────────────────────────────────────────────
 
   it("blocks when active cards exist without force", async () => {
     signInAs("u", WS_A, "admin");
@@ -681,7 +661,6 @@ describe("US-074 Slice C — permanentlyDeleteListAction", () => {
     const result = await permanentlyDeleteListAction(form({ force: "true" }));
     expect(result).toEqual({ success: true });
 
-    // Should have written CARD_DELETED events for both cards
     expect(tx.cardHistoryEvent.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.arrayContaining([
@@ -694,8 +673,6 @@ describe("US-074 Slice C — permanentlyDeleteListAction", () => {
       where: { id: LIST_ID, archivedAt: { not: null } },
     });
   });
-
-  // ── Transaction body ──────────────────────────────────────────────────
 
   it("writes CARD_DELETED history events for every card (active, archived, and deleted states)", async () => {
     signInAs("u", WS_A, "admin");
@@ -768,8 +745,6 @@ describe("US-074 Slice C — permanentlyDeleteListAction", () => {
     });
   });
 
-  // ── Concurrent restore / conditional delete ───────────────────────────
-
   it("rolls back on concurrent restore (delete count 0) and emits no events", async () => {
     signInAs("u", WS_A, "admin");
     const fixture = archivedListFixture(WS_A);
@@ -790,8 +765,6 @@ describe("US-074 Slice C — permanentlyDeleteListAction", () => {
     expect(h.emit.emitAnalyticsRefresh).not.toHaveBeenCalled();
   });
 
-  // ── Success path ──────────────────────────────────────────────────────
-
   it("emit list:deleted and analytics:refresh on success", async () => {
     signInAs("u", WS_A, "admin");
     const fixture = archivedListFixture(WS_A);
@@ -811,24 +784,20 @@ describe("US-074 Slice C — permanentlyDeleteListAction", () => {
     expect(h.emit.emitAnalyticsRefresh).toHaveBeenCalledWith(WS_A);
   });
 
-  // ── Sabotage: admin gate removal ──────────────────────────────────────
-
+  // Sabotage: admin gate removal
   it("sabotage: removing admin organization:update guard makes A2 (editor) pass but write must still be gated", async () => {
     signInAs("u", WS_A, "editor");
     const fixture = archivedListFixture(WS_A);
     h.getArchivedListWithBoard.mockResolvedValue(fixture);
-    // The editor role grants organization:update in the roleGrants mock —
-    // so without the admin gate an editor would pass. But the REAL action
-    // checks organization:["update"] which is admin-only.
-    // By definition, editor roleGrants returns false for organization:update.
+    // Without the admin gate an editor would pass (roleGrants grants
+    // organization:update); the REAL action checks organization:["update"],
+    // which is admin-only.
     expect(await permanentlyDeleteListAction(form())).toEqual({
       success: false,
       error: "List not found",
     });
     expectNoWrites(...writeSeams);
   });
-
-  // ── Double purge ──────────────────────────────────────────────────────
 
   it("returns not found on double purge (list already deleted)", async () => {
     signInAs("u", WS_A, "admin");
@@ -844,11 +813,9 @@ describe("US-074 Slice C — permanentlyDeleteListAction", () => {
   // ── No-write on every rejection ───────────────────────────────────────
 
   it("no writes on every rejection path", async () => {
-    // Verify all rejection paths collectively don't write.
-    // Individual tests above already call expectNoWrites for each path.
+    // Collective no-write sweep; individual paths assert expectNoWrites above.
     signInAs("u", WS_A, "admin");
 
-    // active list
     h.getArchivedListWithBoard.mockResolvedValue(null);
     expect(await permanentlyDeleteListAction(form())).toEqual({
       success: false,
@@ -856,7 +823,7 @@ describe("US-074 Slice C — permanentlyDeleteListAction", () => {
     });
     expectNoWrites(...writeSeams);
 
-    // Cloudinary guard (now inside tx under FOR UPDATE)
+    // Cloudinary guard (inside tx under FOR UPDATE)
     vi.clearAllMocks();
     h.state.membership.clear();
     h.state.authed = true;
@@ -887,8 +854,6 @@ describe("US-074 Slice C — permanentlyDeleteListAction", () => {
     });
     expectNoWrites(...writeSeams);
   });
-
-  // ── Force never bypasses archived-list, title, auth, or Cloudinary guards ──
 
   it("force does not bypass authorization guard", async () => {
     signInAs("u", WS_A, "viewer");

@@ -58,7 +58,7 @@ test("execution log survives rule deletion", async ({ browser }) => {
   const ctx = await browser.newContext();
   page = await ctx.newPage();
 
-  // ── Step 1: Sign up, create workspace + board + list ──────────────────
+  // Step 1: sign up, create workspace + board + list
   await signUp(page, user);
   workspaceId = await createWorkspace(page, "Automation QA");
   const boardId = await createBoard(page, "Board");
@@ -69,7 +69,7 @@ test("execution log survives rule deletion", async ({ browser }) => {
 
   const slug = await getWorkspaceSlug(workspaceId);
 
-  // ── Step 2: Create an automation rule ─────────────────────────────────
+  // Step 2: create an automation rule
   await page.goto(`/workspace/${slug}/automation`);
   await page.getByRole("button", { name: "New rule" }).click();
 
@@ -77,22 +77,19 @@ test("execution log survives rule deletion", async ({ browser }) => {
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("New automation rule")).toBeVisible();
 
-  // Fill the rule name
   await page.locator("#rule-name").fill("Retention Rule");
 
   // Defaults are fine: trigger = "card-created", action = "set-priority" → Medium
-  // Submit
   await page.getByRole("button", { name: "Create rule" }).click();
 
-  // Dialog closes, rule row appears
   await expect(dialog).not.toBeVisible();
   await expect(page.getByText("Retention Rule", { exact: true })).toBeVisible();
 
-  // ── Step 3: Trigger the rule by creating a card ───────────────────────
+  // Step 3: trigger the rule by creating a card
   await page.goto(`/boards/${boardId}`);
   await addCardToList(page, listId, "Trigger card");
 
-  // ── Step 4: Verify execution log exists ───────────────────────────────
+  // Step 4: verify the execution log exists
   await page.goto(`/workspace/${slug}/automation`);
 
   // The log panel's empty state must NOT be showing
@@ -100,7 +97,6 @@ test("execution log survives rule deletion", async ({ browser }) => {
     page.getByText("No rule executions yet. Runs appear here as rules fire."),
   ).toHaveCount(0);
 
-  // Find a log entry containing the rule name and a success status
   const logEntry = page
     .locator("div")
     .filter({ hasText: "Retention Rule" })
@@ -118,24 +114,23 @@ test("execution log survives rule deletion", async ({ browser }) => {
     fullPage: true,
   });
 
-  // ── Step 5: Delete the rule ───────────────────────────────────────────
+  // Step 5: delete the rule
   const deleteButton = page.getByRole("button", { name: "Delete Retention Rule" });
   await deleteButton.click();
 
-  // Confirm in the AlertDialog
   const alertDialog = page.getByRole("alertdialog", { name: "Delete this rule?" });
   await expect(alertDialog).toBeVisible();
 
   await alertDialog.getByRole("button", { name: "Delete rule" }).click();
 
-  // Wait for the rule to disappear from the rules list — empty state should appear
+  // Rule gone from the list — empty state appears
   await expect(
     page.getByText("No automation rules yet"),
   ).toBeVisible({ timeout: 10_000 });
 
   console.log("✓ Step 5: rule 'Retention Rule' deleted from the rules list");
 
-  // ── Step 6: Reload — the execution log MUST survive ───────────────────
+  // Step 6: reload — the execution log MUST survive
   await page.reload();
 
   // The rules section must still show empty state

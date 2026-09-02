@@ -1,22 +1,21 @@
 "use server";
 
-import { getWorkspaceAnalytics } from "@/lib/analytics/engine";
+import { getLeadTimeRows, getWorkspaceAnalytics } from "@/lib/analytics/engine";
 import type {
   AnalyticsExportPayload,
   AnalyticsFilters,
+  LeadTimeRow,
   WorkspaceAnalyticsPayload,
 } from "@/lib/analytics/types";
 import { isWorkspaceMember } from "@/lib/authorization";
 import db from "@/lib/prisma";
 import { verifySession } from "@/lib/dal";
+import { loadMoreLeadTimeRowsSchema } from "@/lib/schemas";
 
 export type AnalyticsActionResult<T> =
   | { success: true; data: T }
   | { success: false; error: string };
 
-/**
- * Resolve workspace by slug.
- */
 async function getWorkspaceBySlug(slug: string) {
   return db.workspace.findUnique({
     where: { slug },
@@ -25,11 +24,15 @@ async function getWorkspaceBySlug(slug: string) {
 }
 
 /**
- * Get workspace analytics with permission check.
+ * Get workspace analytics with permission check. `leadTimeRows` optionally
+ * windows the lead-time detail rows (offset/limit) so the dashboard can
+ * server-render page 1 at the pagination page size instead of the engine's
+ * MAX_LEAD_TIME_ROWS cap. Omitted → historical default (offset 0, limit 100).
  */
 export async function getWorkspaceAnalyticsAction(
   slug: string,
   filters: AnalyticsFilters,
+  leadTimeRows?: { offset?: number; limit?: number },
 ): Promise<AnalyticsActionResult<WorkspaceAnalyticsPayload>> {
   const { userId } = await verifySession();
 
@@ -48,6 +51,7 @@ export async function getWorkspaceAnalyticsAction(
     const payload = await getWorkspaceAnalytics({
       workspaceId: workspace.id,
       filters,
+      ...(leadTimeRows ? { leadTimeRows } : {}),
     });
 
     return { success: true, data: payload };
@@ -57,9 +61,88 @@ export async function getWorkspaceAnalyticsAction(
   }
 }
 
+export type LoadMoreLeadTimeRowsResult =
+  | {
+      success: true;
+      rows: LeadTimeRow[];
+      hasMore: boolean;
+      totalCompleted: number;
+    }
+  | { success: false; error: string };
+
 /**
- * Export workspace analytics as serializable payload.
- * Reuses the same analytics engine output.
+ * Offset-paginated read of the next lead-time detail window (no silent cap).
+ * The dashboard renders the first page server-side; "Load more" appends the
+ * next window against the SAME resolved range/filters the dashboard used —
+ * from/to arrive as the payload's resolved dates, boardId/memberId/
+ * includeArchivedBoards echo the page's parsed searchParams — so appended rows
+ * can never drift from the displayed view. Read gate mirrors
+ * getWorkspaceAnalyticsAction: any workspace member (viewers included) may
+ * read analytics rows.
+ */
+export async function loadMoreLeadTimeRowsAction(
+  formData: FormData,
+): Promise<LoadMoreLeadTimeRowsResult> {
+  const rawData = Object.fromEntries(formData);
+  const parsed = loadMoreLeadTimeRowsSchema.safeParse(rawData);
+
+  if (!parsed.success) {
+    const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0];
+    return { success: false, error: firstError || "Validation failed" };
+  }
+
+  const { userId } = await verifySession();
+
+  const {
+    workspaceId,
+    from,
+    to,
+    boardId,
+    memberId,
+    includeArchivedBoards,
+    offset,
+    limit,
+  } = parsed.data;
+
+  const workspace = await db.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { id: true },
+  });
+  if (!workspace) {
+    return { success: false, error: "Workspace not found" };
+  }
+
+  if (!(await isWorkspaceMember(userId, workspace.id))) {
+    return { success: false, error: "Access denied" };
+  }
+
+  try {
+    const page = await getLeadTimeRows(
+      workspace.id,
+      {
+        from,
+        to,
+        ...(boardId ? { boardId } : {}),
+        ...(memberId ? { memberId } : {}),
+        includeArchivedBoards,
+      },
+      { offset, limit },
+    );
+
+    return {
+      success: true,
+      rows: page.rows,
+      hasMore: page.hasMore,
+      totalCompleted: page.totalCompleted,
+    };
+  } catch (error) {
+    console.error("Failed to load more lead-time rows:", error);
+    return { success: false, error: "Failed to load rows" };
+  }
+}
+
+/**
+ * Serializable export of the same engine output the dashboard renders.
  */
 export async function exportWorkspaceAnalyticsAction(
   slug: string,

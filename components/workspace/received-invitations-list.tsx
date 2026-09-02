@@ -97,7 +97,13 @@ export function ReceivedInvitationsList({
           </div>
 
           {errorByInvitationId[invitation.id] ? (
-            <p className="text-sm text-destructive">{errorByInvitationId[invitation.id]}</p>
+            <p
+              id={`invitation-error-${invitation.id}`}
+              role="alert"
+              className="text-sm text-destructive"
+            >
+              {errorByInvitationId[invitation.id]}
+            </p>
           ) : null}
 
           <div className="flex gap-2">
@@ -106,6 +112,11 @@ export function ReceivedInvitationsList({
               size="sm"
               onClick={() => handleAccept(invitation.id)}
               disabled={isPending}
+              aria-describedby={
+                errorByInvitationId[invitation.id]
+                  ? `invitation-error-${invitation.id}`
+                  : undefined
+              }
             >
               Accept
             </Button>
@@ -115,6 +126,11 @@ export function ReceivedInvitationsList({
               variant="outline"
               onClick={() => handleDecline(invitation.id)}
               disabled={isPending}
+              aria-describedby={
+                errorByInvitationId[invitation.id]
+                  ? `invitation-error-${invitation.id}`
+                  : undefined
+              }
             >
               Decline
             </Button>

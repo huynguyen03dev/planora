@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { z } from "zod";
 import { getWorkspaceAnalyticsAction } from "./actions";
+import { LEAD_TIME_PAGE_SIZE } from "@/lib/analytics/types";
 import { DashboardShell } from "./components/dashboard-shell";
 import { BurndownChart } from "./components/burndown-chart";
 import { FlowChart } from "./components/flow-chart";
@@ -142,7 +143,10 @@ export default async function DashboardPage({
   const [boards, members, analyticsResult] = await Promise.all([
     getWorkspaceBoards(workspace.id, queryParams.includeArchivedBoards === "1"),
     getWorkspaceMembers(workspace.id),
-    getWorkspaceAnalyticsAction(slug, filters),
+    getWorkspaceAnalyticsAction(slug, filters, {
+      offset: 0,
+      limit: LEAD_TIME_PAGE_SIZE,
+    }),
   ]);
 
   if (!analyticsResult.success) {
@@ -191,8 +195,18 @@ export default async function DashboardPage({
       <DataQualitySection analytics={analytics} workspaceSlug={slug} />
 
       <LeadTimeTable
+        workspaceId={workspaceRef.id}
         rows={analytics.leadTime.rows}
         totalCompleted={analytics.leadTime.totalCompleted}
+        hasMore={analytics.leadTime.hasMore}
+        pageSize={LEAD_TIME_PAGE_SIZE}
+        filterSnapshot={{
+          from: analytics.filters.from.toISOString(),
+          to: analytics.filters.to.toISOString(),
+          boardId: analytics.filters.boardId ?? null,
+          memberId: analytics.filters.memberId ?? null,
+          includeArchivedBoards: analytics.filters.includeArchivedBoards ?? false,
+        }}
       />
     </DashboardShell>
   );

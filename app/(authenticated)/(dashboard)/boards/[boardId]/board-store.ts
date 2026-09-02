@@ -10,6 +10,7 @@ import type {
   CardCreatedPayload,
   CardLabelsUpdatedPayload,
   CardMembersUpdatedPayload,
+  CardMetaUpdatedPayload,
   CardMovedPayload,
   CardUpdatedPayload,
   CommentCreatedPayload,
@@ -38,11 +39,15 @@ export type ListWithCards = {
   title: string;
   boardId: string;
   position: number;
+  /** Logical ordering-move revision (decision 0032); bumped optimistically on drag. */
+  moveRevision: number;
   cards: Array<{
     id: string;
     listId: string;
     title: string;
     position: number;
+    /** Logical ordering-move revision; sibling normalization does not bump it. */
+    moveRevision: number;
     coverImage: string | null;
     priority: "URGENT" | "HIGH" | "MEDIUM" | "LOW" | null;
     dueDate: Date | null;
@@ -56,6 +61,32 @@ export type ListWithCards = {
     commentCount: number;
   }>;
 };
+
+/** Normalize pre-0032 snapshots without changing identities when already canonical. */
+function normalizeOrderingRevisions(lists: ListWithCards[]): ListWithCards[] {
+  let changed = false;
+  const normalized = lists.map((list) => {
+    const listRevision = list.moveRevision ?? 0;
+    let cardsChanged = false;
+    const cards = list.cards.map((card) => {
+      const moveRevision = card.moveRevision ?? 0;
+      if (moveRevision !== card.moveRevision) {
+        changed = true;
+        cardsChanged = true;
+        return { ...card, moveRevision };
+      }
+      return card;
+    });
+
+    if (listRevision !== list.moveRevision || cardsChanged) {
+      changed = true;
+      return { ...list, moveRevision: listRevision, cards };
+    }
+    return list;
+  });
+
+  return changed ? normalized : lists;
+}
 
 export type SelectedCardData = {
   card: {
@@ -112,6 +143,9 @@ export type SelectedCardData = {
     email: string;
     image: string | null;
   }>;
+  /** Label set of the open card — patched live by card:labels-updated (F4) so
+   *  the detail sheet can render remote label changes without a reload. */
+  labels: CardLabel[];
 };
 
 type BoardStore = {
@@ -143,9 +177,8 @@ type BoardStore = {
   /** Client-only card search: title substring (case-insensitive). Empty = show all. */
   searchQuery: string;
   /** Board-level "expand labels" preference (US-044): false = compact color bars,
-   *  true = full text pills. One decision shared by every card; held here (not in
-   *  per-card local state) so it survives realtime re-renders and never flickers
-   *  during a drag. */
+   *  true = full text pills. Held here, not per-card, so it survives realtime
+   *  re-renders without flicker during a drag. */
   expandLabels: boolean;
 
   setBoardId: (boardId: string) => void;
@@ -182,6 +215,7 @@ type BoardStore = {
   applyRemoteCardCompletionUpdated: (payload: CardCompletionUpdatedPayload) => void;
   applyRemoteCardLabelsUpdated: (payload: CardLabelsUpdatedPayload) => void;
   applyRemoteCardMembersUpdated: (payload: CardMembersUpdatedPayload) => void;
+  applyRemoteCardMetaUpdated: (payload: CardMetaUpdatedPayload) => void;
   applyRemoteCommentCreated: (payload: CommentCreatedPayload) => void;
   applyRemotePresence: (payload: BoardPresencePayload) => void;
 };
@@ -210,7 +244,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
 
   setCurrentUserId: (userId) => set({ currentUserId: userId }),
 
-  setLists: (lists) => set({ lists }),
+  setLists: (lists) => set({ lists: normalizeOrderingRevisions(lists) }),
 
   setSelectedCardId: (cardId) => set({ selectedCardId: cardId }),
 
@@ -218,19 +252,17 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
 
   setSocketConnected: (connected) => set({ socketConnected: connected }),
 
-  // Seed presence with a known baseline (the current viewer) so the header isn't
-  // blank before the first server broadcast. The caller keys this on boardId, so
-  // it runs once per board — resetting to just yourself on a board switch, while
-  // the authoritative `board:presence` broadcast (deduped by user id) fills in
-  // everyone else a moment later.
+  // Seed presence with the current viewer so the header isn't blank before the
+  // first server broadcast; the authoritative `board:presence` broadcast fills
+  // in everyone else.
   seedWatchers: (watchers) => set({ watchers }),
 
   setDragging: (dragging) => set({ isDragging: dragging }),
 
-  // A structural remote board event (reorder/create/delete/archive) arrived
-  // while a local drag was in flight and was skipped to keep the list array
-  // stable under @hello-pangea/dnd. Flag that the board is now behind the
-  // server so BoardContent can reconcile via router.refresh() on drop.
+  // A structural remote board event (reorder/create/delete/archive) was skipped
+  // during a local drag to keep the list array stable under @hello-pangea/dnd;
+  // flag that the board is behind the server so BoardContent reconciles via
+  // router.refresh() on drop.
   markResyncPending: () => set({ pendingResync: true }),
 
   // Read the pending-resync flag and clear it in a single step. Returns whether
@@ -332,36 +364,84 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     }
 
     const { cardId, listId, position } = payload;
+    const revision = payload.moveRevision ?? 0;
 
     set((state) => {
-      // Self-echo dedupe: if the card already sits in the target list at the
-      // canonical position this payload carries, the store already reflects the
-      // move (the actor's own echo after a prior position-correcting apply, or a
-      // duplicate echo). No-op to avoid a redundant re-render. A genuine
-      // cross-user move (card elsewhere, or a stale optimistic position) still
-      // applies — applying is what now delivers canonical float-gap positions to
-      // the actor, since reorder/move no longer revalidate (decision 0008).
-      const reflectingList = state.lists.find((list) => list.id === listId);
+      // decision 0032 revision semantics: reject lower revisions; dedupe
+      // equal-revision echoes already at the canonical position (the actor's
+      // own echo after the optimistic commit); apply everything else (equal +
+      // different position = canonical correction; higher = cross-user move).
+      const sourceList = state.lists.find((list) =>
+        list.cards.some((card) => card.id === cardId),
+      );
+      if (!sourceList) {
+        // A destination-board echo can arrive with no local source card. New
+        // emitters include the canonical snapshot for this cross-board case;
+        // legacy moved payloads remain a safe no-op because they lack enough
+        // data to construct a board card.
+        const targetList = state.lists.find((list) => list.id === listId);
+        if (!targetList || !payload.card) {
+          return state;
+        }
+
+        const movedCard = {
+          ...payload.card,
+          listId,
+          position,
+          moveRevision: payload.card.moveRevision ?? revision,
+          coverImage: null,
+          priority: payload.card.priority ?? null,
+          dueDate: payload.card.dueDate ? new Date(payload.card.dueDate) : null,
+          completedAt: null,
+          updatedAt: new Date(),
+          labels: [],
+          members: [],
+          memberCount: 0,
+          checklistDone: 0,
+          checklistTotal: 0,
+          commentCount: 0,
+        };
+
+        return {
+          lists: state.lists.map((list) =>
+            list.id === listId
+              ? { ...list, cards: [...list.cards, movedCard].sort((a, b) => a.position - b.position) }
+              : list,
+          ),
+        };
+      }
+      const foundCard = sourceList.cards.find((card) => card.id === cardId)!;
+
+      if (revision < foundCard.moveRevision) {
+        return state;
+      }
       if (
-        reflectingList &&
-        reflectingList.cards.some((card) => card.id === cardId && card.position === position)
+        revision === foundCard.moveRevision &&
+        foundCard.listId === listId &&
+        foundCard.position === position
       ) {
         return state;
       }
 
-      const sourceList = state.lists.find((list) => list.cards.some((card) => card.id === cardId));
       const targetListExists = state.lists.some((list) => list.id === listId);
-
-      if (!sourceList || !targetListExists) {
-        return state;
+      if (!targetListExists) {
+        // A workspace-wide automation move can leave this board entirely. The
+        // source-room echo names the destination list, which is intentionally
+        // absent from this store; remove the card instead of retaining an
+        // invisible duplicate. The destination room handles insertion.
+        const listsWithoutMovedCard = state.lists.map((list) =>
+          list.id === sourceList.id
+            ? { ...list, cards: list.cards.filter((card) => card.id !== cardId) }
+            : list,
+        );
+        const selectionCleared =
+          state.selectedCardId === cardId
+            ? { selectedCardId: null, selectedCard: null }
+            : {};
+        return { lists: listsWithoutMovedCard, ...selectionCleared };
       }
 
-      const foundCard = sourceList.cards.find((card) => card.id === cardId);
-      if (!foundCard) {
-        return state;
-      }
-
-      const movedCard = { ...foundCard, listId, position };
+      const movedCard = { ...foundCard, listId, position, moveRevision: revision };
 
       const newLists = state.lists.map((list) => {
         const cardsWithoutMovedCard = list.cards.filter((card) => card.id !== cardId);
@@ -407,6 +487,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     }
 
     const { listId, position } = payload;
+    const revision = payload.moveRevision ?? 0;
 
     set((state) => {
       const targetList = state.lists.find((list) => list.id === listId);
@@ -415,15 +496,19 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
         return state;
       }
 
-      // Self-echo dedupe: already at the canonical position → no-op (the actor's
-      // own echo after the position was applied, or a duplicate). A real move
-      // (stale optimistic position, or cross-user) still applies and re-sorts.
-      if (targetList.position === position) {
+      // decision 0032 revision semantics, mirroring applyRemoteCardMoved:
+      // reject lower revisions; dedupe equal revision + same position (the
+      // actor's own echo); apply everything else (equal + different position =
+      // canonical correction; higher revision = cross-user move).
+      if (revision < targetList.moveRevision) {
+        return state;
+      }
+      if (revision === targetList.moveRevision && targetList.position === position) {
         return state;
       }
 
       const newLists = state.lists
-        .map((list) => (list.id === listId ? { ...list, position } : list))
+        .map((list) => (list.id === listId ? { ...list, position, moveRevision: revision } : list))
         .sort((a, b) => a.position - b.position);
 
       return { lists: newLists };
@@ -444,7 +529,10 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
         return state;
       }
 
-      const newLists = [...state.lists, { ...payload.list, cards: [] }].sort(
+      const newLists = [
+        ...state.lists,
+        { ...payload.list, moveRevision: payload.list.moveRevision ?? 0, cards: [] },
+      ].sort(
         (a, b) => a.position - b.position,
       );
 
@@ -533,6 +621,9 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
             {
               ...payload.card,
               coverImage: null,
+              // decision 0032: seed the canonical revision from the payload
+              // (default 0 for pre-0032 emitters) so later drags CAS on it.
+              moveRevision: payload.card.moveRevision ?? 0,
               // US-083 W7 fidelity: a quick-captured card's due date + priority
               // arrive on the wire; older payloads without the fields fall back
               // to null.
@@ -700,8 +791,10 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       const owningList = state.lists.find((list) =>
         list.cards.some((card) => card.id === payload.cardId),
       );
+      const isSelected =
+        state.selectedCardId === payload.cardId && Boolean(state.selectedCard);
 
-      if (!owningList) {
+      if (!owningList && !isSelected) {
         return state;
       }
 
@@ -711,7 +804,9 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       // re-render. The name/color comparison matters: a label rename/recolor
       // keeps the id set unchanged, so an id-only check would wrongly swallow it
       // and leave stale chips (US-010).
-      const current = owningList.cards.find((card) => card.id === payload.cardId);
+      const current = owningList
+        ? owningList.cards.find((card) => card.id === payload.cardId)
+        : undefined;
       if (
         current &&
         current.labels.length === payload.labels.length &&
@@ -725,20 +820,30 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
         return state;
       }
 
-      const newLists = state.lists.map((list) => {
-        if (!list.cards.some((card) => card.id === payload.cardId)) {
-          return list;
-        }
+      const newLists = owningList
+        ? state.lists.map((list) => {
+            if (!list.cards.some((card) => card.id === payload.cardId)) {
+              return list;
+            }
 
-        return {
-          ...list,
-          cards: list.cards.map((card) =>
-            card.id === payload.cardId ? { ...card, labels: payload.labels } : card,
-          ),
-        };
-      });
+            return {
+              ...list,
+              cards: list.cards.map((card) =>
+                card.id === payload.cardId ? { ...card, labels: payload.labels } : card,
+              ),
+            };
+          })
+        : state.lists;
 
-      return { lists: newLists };
+      // F4: also patch the open detail sheet's label set when this is the card
+      // being viewed — mirrors how members are patched, so a remote label
+      // attach/detach (or rename/recolor fan-out) reaches the sheet live.
+      const newSelectedCard =
+        isSelected && state.selectedCard
+          ? { ...state.selectedCard, labels: payload.labels }
+          : state.selectedCard;
+
+      return { lists: newLists, selectedCard: newSelectedCard };
     });
   },
 
@@ -785,6 +890,97 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
           assignableMembers: nextAssignable,
         },
       };
+    });
+  },
+
+  // In-place display-metadata patch (F3): one or more of a card's due date,
+  // priority, estimate, cover changed remotely. Safe to apply mid-drag — it
+  // never reorders the list array (mirrors card:completion-updated / labels).
+  // dueDate arrives as an ISO string (JSON-safe); rehydrate to a Date to match
+  // the store's card shape. estimateHours exists only on the open detail sheet,
+  // so it is applied to selectedCard only; the rest patch both faces.
+  applyRemoteCardMetaUpdated: (payload) => {
+    const { boardId } = get();
+
+    if (boardId !== payload.boardId) {
+      return;
+    }
+
+    const { cardId, fields } = payload;
+
+    const dueDate =
+      fields.dueDate === undefined ? undefined : fields.dueDate ? new Date(fields.dueDate) : null;
+    // Only the fields the payload carries are patched — the rest of the card is
+    // untouched.
+    const listPatch: Partial<Pick<ListWithCards["cards"][number], "coverImage" | "priority" | "dueDate">> = {};
+    if (fields.coverImage !== undefined) listPatch.coverImage = fields.coverImage;
+    if (fields.priority !== undefined) listPatch.priority = fields.priority;
+    if (fields.dueDate !== undefined) listPatch.dueDate = dueDate;
+
+    const selectedPatch: Partial<Pick<SelectedCardData["card"], "estimateHours" | "coverImage" | "priority" | "dueDate">> = {
+      ...listPatch,
+    };
+    if (fields.estimateHours !== undefined) selectedPatch.estimateHours = fields.estimateHours;
+
+    set((state) => {
+      const owningList = state.lists.find((list) =>
+        list.cards.some((card) => card.id === cardId),
+      );
+      const isSelected = state.selectedCardId === cardId && Boolean(state.selectedCard);
+
+      if (!owningList && !isSelected) {
+        return state;
+      }
+
+      // Self-echo dedupe: skip the re-render when the store already reflects
+      // every incoming field (the actor's own echo after router.refresh already
+      // reseeded it). Dates compare by instant, not reference.
+      const sameMetaValue = (a: unknown, b: unknown) =>
+        a instanceof Date && b instanceof Date ? a.getTime() === b.getTime() : a === b;
+      let unchanged = true;
+      if (owningList) {
+        const current = owningList.cards.find((card) => card.id === cardId)!;
+        for (const key of Object.keys(listPatch) as Array<keyof typeof listPatch>) {
+          if (!sameMetaValue(current[key], listPatch[key])) {
+            unchanged = false;
+            break;
+          }
+        }
+      }
+      if (unchanged && isSelected && state.selectedCard) {
+        for (const key of Object.keys(selectedPatch) as Array<keyof typeof selectedPatch>) {
+          if (!sameMetaValue(state.selectedCard.card[key], selectedPatch[key])) {
+            unchanged = false;
+            break;
+          }
+        }
+      }
+      if (unchanged) {
+        return state;
+      }
+
+      const newLists =
+        owningList && Object.keys(listPatch).length > 0
+          ? state.lists.map((list) => {
+              if (!list.cards.some((card) => card.id === cardId)) {
+                return list;
+              }
+
+              return {
+                ...list,
+                cards: list.cards.map((card) =>
+                  card.id === cardId ? { ...card, ...listPatch } : card,
+                ),
+              };
+            })
+          : state.lists;
+
+      const newSelectedCard =
+        isSelected && state.selectedCard
+          ? { ...state.selectedCard, card: { ...state.selectedCard.card, ...selectedPatch } }
+          : state.selectedCard;
+
+      return { lists: newLists, selectedCard: newSelectedCard };
     });
   },
 

@@ -1,12 +1,9 @@
 #!/usr/bin/env tsx
 /**
- * Independent correctness check for the analytics burndown.
- *
- *  1. Calls the real engine (event-replay path).
- *  2. Re-derives remaining hours from the raw event stream with a SEPARATE
- *     implementation (catches transcription bugs in the engine).
- *  3. Cross-checks the final ("now") point against the live `card` table — a
- *     completely different code path, i.e. the actual source of truth.
+ * Independent correctness check for the analytics burndown: calls the real
+ * engine, re-derives remaining hours with a SEPARATE implementation (catches
+ * transcription bugs), and cross-checks the final "now" point against the
+ * live `card` table — a different code path and the actual source of truth.
  *
  * Usage: npx tsx --env-file=.env scripts/verify-burndown.ts --slug=analytics-demo
  */
@@ -36,7 +33,6 @@ async function main() {
   const analytics = await getWorkspaceAnalytics({ workspaceId: ws.id, filters: { preset: "30d" } });
   const engineSeries = analytics.burndown;
 
-  // --- Independent replay from raw events -------------------------------------
   const boards = await db.board.findMany({ where: { workspaceId: ws.id, archivedAt: null }, select: { id: true } });
   const events = await db.cardHistoryEvent.findMany({
     where: { workspaceId: ws.id, boardId: { in: boards.map((b) => b.id) } },
@@ -95,7 +91,7 @@ async function main() {
     return total;
   }
 
-  // Compare every day. Each engine point is end-of-day; reconstruct the same instant.
+  // Each engine point is end-of-day; reconstruct the same instant per day.
   let maxDiff = 0;
   for (const point of engineSeries) {
     const endOfDayMs = new Date(`${point.date}T23:59:59.999Z`).getTime();
@@ -103,7 +99,6 @@ async function main() {
     maxDiff = Math.max(maxDiff, Math.abs(mine - point.remainingHours));
   }
 
-  // --- Cross-check "now" against the live card table (source of truth) --------
   const liveCards = await db.card.findMany({
     where: {
       list: { board: { workspaceId: ws.id, archivedAt: null } },

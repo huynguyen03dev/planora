@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Prisma } from "@/app/generated/prisma/client";
 
+import { lockWorkspaceRowForUpdate } from "@/lib/ordering";
 import { actionsSchema, triggerConfigSchema, type TriggerType } from "@/lib/schemas/automation";
 
 import { AUTOMATION_ACTOR_USER_ID } from "./index";
@@ -55,6 +56,12 @@ export async function evaluateRules(
   params: EvaluateRulesParams,
 ): Promise<EvaluateRulesResult> {
   const { client, workspaceId, triggerType, event, dedupKey } = params;
+
+  // Every automation sequence starts at the workspace serialization boundary.
+  // Recursive evaluations share this transaction, so re-acquiring the same row
+  // lock is safe and keeps the boundary ahead of every descendant executor.
+  await lockWorkspaceRowForUpdate(client, workspaceId);
+
   const actorId = params.actorId ?? AUTOMATION_ACTOR_USER_ID;
   const chain = params.chain ?? ChainTracker.root();
   const cardId = event.cardId ?? null;
@@ -80,15 +87,15 @@ export async function evaluateRules(
   });
 
   for (const rule of rules) {
-    // --- condition gate ---
+    // Condition gate.
     const parsedConfig = triggerConfigSchema.safeParse(rule.triggerConfig);
     const triggerConfig = parsedConfig.success ? parsedConfig.data : {};
     if (!evaluateConditions(triggerType, triggerConfig, event)) {
       continue;
     }
 
-    // --- scheduled-window gate (due-date-approaching only) ---
-    // A rule with no beforeMinutes, or an event without dueDate/now, is not window-gated.
+    // Scheduled-window gate (due-date-approaching only): a rule with no
+    // beforeMinutes, or an event without dueDate/now, is not window-gated.
     if (triggerType === "due-date-approaching") {
       const before = triggerConfig.beforeMinutes;
       if (before !== undefined && event.dueDate && event.now) {
@@ -99,7 +106,7 @@ export async function evaluateRules(
       }
     }
 
-    // --- loop guards ---
+    // Loop guards.
     if (cardId && chain.hasFired(rule.id, cardId)) {
       await logExecution(client, {
         workspaceId,
@@ -125,7 +132,7 @@ export async function evaluateRules(
       continue;
     }
 
-    // --- action payload validation (config error → skip, not a tx abort) ---
+    // Action payload validation: config error → skip, not a tx abort.
     const parsedActions = actionsSchema.safeParse(rule.actions);
     if (!parsedActions.success) {
       await logExecution(client, {
@@ -144,12 +151,12 @@ export async function evaluateRules(
       chain.markFired(rule.id, cardId);
     }
 
-    // --- claim-first mode (Tier 1 dedup for scheduled rules) ---
-    // Write the claim row BEFORE executing so concurrent ticks can't double-apply.
-    // The claim row is inserted INSIDE the tx, so if an UNEXPECTED error later
-    // aborts the tx, the claim rolls back too and the next tick retries
-    // (decision 0030 invariant #6). Isolated per-step failures do NOT abort, so
-    // the claim commits and the row is finalized (status + per-step audit) below.
+    // Claim-first mode (Tier 1 dedup for scheduled rules): write the claim
+    // row BEFORE executing so concurrent ticks can't double-apply. The claim is
+    // inserted INSIDE the tx, so if an UNEXPECTED error later aborts the tx,
+    // the claim rolls back too and the next tick retries (decision 0030
+    // invariant #6). Isolated per-step failures do NOT abort, so the claim
+    // commits and the row is finalized (status + per-step audit) below.
     let claimLogId: string | null = null;
     if (dedupKey) {
       try {
@@ -174,7 +181,7 @@ export async function evaluateRules(
       }
     }
 
-    // --- execute (decision 0030: isolated per-step; unexpected errors abort) ---
+    // Execute (decision 0030: isolated per-step; unexpected errors abort).
     try {
       const result = await executeRuleActions({
         client,

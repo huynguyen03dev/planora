@@ -4,16 +4,20 @@ import userEvent from "@testing-library/user-event";
 
 import { SignInForm } from "./sign-in-form";
 
-const { mockSignInEmail } = vi.hoisted(() => ({
+const { mockPush, mockSignInEmail, mockSendVerificationEmail } = vi.hoisted(() => ({
+  mockPush: vi.fn(),
   mockSignInEmail: vi.fn(),
+  mockSendVerificationEmail: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockPush }),
   useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock("@/lib/auth-client", () => ({
   signIn: { email: mockSignInEmail },
+  sendVerificationEmail: mockSendVerificationEmail,
 }));
 
 const user = userEvent.setup({ pointerEventsCheck: 0 });
@@ -71,4 +75,52 @@ describe("SignInForm", () => {
     const button = screen.getByRole("button", { name: "Sign In" });
     expect(button).not.toBeDisabled();
   });
+
+  it("routes unverified sign-in to recovery without a destructive error", async () => {
+    mockSignInEmail.mockImplementation((_data, { onError }) => {
+      onError?.({
+        error: {
+          message: "Email not verified",
+          code: "EMAIL_NOT_VERIFIED",
+        },
+      });
+      return Promise.resolve();
+    });
+    render(<SignInForm />);
+
+    await user.type(screen.getByLabelText("Email"), "test@example.com");
+    await user.type(screen.getByLabelText("Password"), "password123");
+    await user.click(screen.getByRole("button", { name: "Sign In" }));
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(
+        "/verify-email?email=test%40example.com&callbackURL=%2Fboards",
+      );
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(mockSendVerificationEmail).not.toHaveBeenCalled();
+  });
+
+  it("does not offer resend for a generic sign-in error (U4)", async () => {
+    mockSignInEmail.mockImplementation((_data, { onError }) => {
+      onError?.({ error: { message: "Invalid credentials" } });
+      return Promise.resolve();
+    });
+
+    render(<SignInForm />);
+
+    await user.type(screen.getByLabelText("Email"), "test@example.com");
+    await user.type(screen.getByLabelText("Password"), "password123");
+    await user.click(screen.getByRole("button", { name: "Sign In" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Invalid credentials",
+      );
+    });
+    expect(
+      screen.queryByRole("button", { name: "Resend verification email" }),
+    ).not.toBeInTheDocument();
+  });
+
 });

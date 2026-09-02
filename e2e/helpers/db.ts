@@ -111,6 +111,15 @@ export async function getListArchivedAt(listId: string): Promise<Date | null> {
   return rows[0]?.archivedAt ?? null;
 }
 
+/** A board's current archivedAt (null = active). */
+export async function getBoardArchivedAt(boardId: string): Promise<Date | null> {
+  const { rows } = await pool().query<{ archivedAt: Date | null }>(
+    `SELECT "archivedAt" FROM "board" WHERE id = $1`,
+    [boardId],
+  );
+  return rows[0]?.archivedAt ?? null;
+}
+
 /** Whether a list row still exists (false after permanent deletion). */
 export async function listExists(listId: string): Promise<boolean> {
   const { rows } = await pool().query<{ id: string }>(
@@ -173,6 +182,20 @@ export async function getWorkspaceSlug(workspaceId: string): Promise<string> {
   );
   if (!rows[0]) throw new Error(`No workspace found for ${workspaceId}`);
   return rows[0].slug;
+}
+
+/** Resolve the pending invitation created through the real invite UI. */
+export async function getPendingInvitationIdByEmail(email: string): Promise<string> {
+  const { rows } = await pool().query<{ id: string }>(
+    `SELECT id
+       FROM "invitation"
+      WHERE lower(email) = lower($1) AND status = 'pending'
+      ORDER BY "createdAt" DESC
+      LIMIT 1`,
+    [email],
+  );
+  if (!rows[0]) throw new Error(`No pending invitation found for ${email}`);
+  return rows[0].id;
 }
 
 /** True when the user holds a membership row in the workspace (W2 accept proof — DB source of truth). */

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import type { CardDetailRecord } from "@/lib/card";
@@ -7,6 +7,18 @@ import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId
 
 // Server Actions + router are boundaries; stub them so the test drives only the
 // sheet's own autosave logic.
+// Captures the props CardLabelsSection last received, so the A1 test can assert
+// the sheet forwards the STORE's live label set (not the stale server prop).
+const labelSectionSpy = vi.hoisted(() => ({
+  latest: null as null | { cardLabelIds: string[]; boardLabels: { id: string; name: string; color: string }[] },
+}));
+const checklistSectionSpy = vi.hoisted(() => ({
+  latest: null as null | {
+    checklists: { id: string; title: string }[];
+    onChecklistDeleted?: (checklistId: string) => void;
+  },
+}));
+
 const actions = vi.hoisted(() => ({
   updateCardDetailsAction: vi.fn(),
   updateCardEstimateAction: vi.fn(),
@@ -16,14 +28,31 @@ const actions = vi.hoisted(() => ({
   setCardCoverAction: vi.fn(),
   assignCardMemberAction: vi.fn(),
   removeCardMemberAction: vi.fn(),
+  createChecklistAction: vi.fn(),
   createCommentAction: vi.fn(),
+  uploadAttachmentAction: vi.fn(),
+  loadMoreCardDetailAction: vi.fn(),
   archiveCardAction: vi.fn(),
 }));
 
+// Shared, controllable doubles: the close/reopen lifecycle tests drive the URL
+// (as router.replace/push would) and assert against router.replace. The default
+// `?cardId=card-1` keeps every existing test rendering an OPEN sheet.
+const routerMock = vi.hoisted(() => ({
+  replace: vi.fn((href: string) => {
+    window.history.replaceState({}, "", href);
+  }),
+  refresh: vi.fn(),
+  push: vi.fn((href: string) => {
+    window.history.pushState({}, "", href);
+  }),
+}));
+const urlParams = vi.hoisted(() => new URLSearchParams("cardId=card-1"));
+
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn() }),
+  useRouter: () => routerMock,
   usePathname: () => "/boards/board-1",
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => urlParams,
 }));
 
 vi.mock("@/app/(authenticated)/(dashboard)/boards/[boardId]/actions", () => actions);
@@ -35,11 +64,38 @@ vi.mock("@/components/boards/card-completion-toggle", () => ({
   CardCompletionToggle: () => null,
 }));
 vi.mock("@/components/boards/card-checklists-section", () => ({
-  CardChecklistsSection: () => null,
+  CardChecklistsSection: (props: {
+    checklists: { id: string; title: string }[];
+    onChecklistDeleted?: (checklistId: string) => void;
+  }) => {
+    checklistSectionSpy.latest = props;
+    return (
+      <div>
+        {props.checklists.map((checklist) => (
+          <button
+            key={checklist.id}
+            type="button"
+            onClick={() => props.onChecklistDeleted?.(checklist.id)}
+          >
+            Remove {checklist.title}
+          </button>
+        ))}
+      </div>
+    );
+  },
 }));
-vi.mock("@/components/boards/card-labels-section", () => ({ CardLabelsSection: () => null }));
+vi.mock("@/components/boards/card-labels-section", () => ({
+  CardLabelsSection: (props: { cardLabelIds: string[]; boardLabels: { id: string; name: string; color: string }[] }) => {
+    labelSectionSpy.latest = props;
+    return null;
+  },
+}));
 vi.mock("./use-mention-autocomplete", () => ({
-  useMentionAutocomplete: () => ({
+  useMentionAutocomplete: ({
+    setValue,
+  }: {
+    setValue: (value: string) => void;
+  }) => ({
     open: false,
     items: [],
     activeIndex: 0,
@@ -49,7 +105,13 @@ vi.mock("./use-mention-autocomplete", () => ({
     listboxId: "mentions",
     optionId: (i: number) => `mention-${i}`,
     selectMember: vi.fn(),
-    comboboxProps: {},
+    // Emulate the real hook's combobox contract: onChange pushes the typed
+    // value through the setValue callback the component passes in, so the
+    // controlled textarea state stays in sync during tests.
+    comboboxProps: {
+      onChange: (event: { target: { value: string } }) =>
+        setValue(event.target.value),
+    },
   }),
 }));
 
@@ -77,7 +139,9 @@ function renderSheet(props: Partial<Parameters<typeof CardDetailSheet>[0]> = {})
       open
       card={makeCard()}
       comments={[]}
+      commentsHasMore={false}
       activity={[]}
+      activityHasMore={false}
       attachments={[]}
       assignees={[]}
       assignableMembers={[]}
@@ -95,6 +159,10 @@ function renderSheet(props: Partial<Parameters<typeof CardDetailSheet>[0]> = {})
 
 const user = userEvent.setup({ pointerEventsCheck: 0 });
 
+function renderSheetWithDescription() {
+  return renderSheet({ card: makeCard({ description: "Existing description" }) });
+}
+
 describe("CardDetailSheet — title autosave", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -109,6 +177,118 @@ describe("CardDetailSheet — title autosave", () => {
   it("shows the title in an editable field when the viewer can edit", () => {
     renderSheet();
     expect(screen.getByLabelText("Card title")).toHaveValue("Original title");
+  });
+
+  it("creates optional blocks in a small dialog before showing them", async () => {
+    actions.updateCardDetailsAction.mockResolvedValue({ success: true });
+    actions.createChecklistAction.mockResolvedValue({
+      success: true,
+      checklist: {
+        id: "checklist-new",
+        cardId: "card-1",
+        title: "Launch steps",
+        position: 1024,
+        items: [],
+      },
+    });
+    actions.uploadAttachmentAction.mockResolvedValue({
+      success: true,
+      attachmentId: "attachment-new",
+    });
+    renderSheet();
+
+    expect(screen.getByText("Comments and activity")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Add a more detailed description...")).not.toBeInTheDocument();
+    expect(document.getElementById("card-section-checklist")).not.toBeInTheDocument();
+    expect(document.getElementById("card-section-attachments")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add to card" }));
+    await user.click(screen.getByRole("menuitem", { name: "Description" }));
+    expect(screen.getByRole("dialog", { name: "Add description" })).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Add a more detailed description...")).not.toBeInTheDocument();
+    const descriptionDraft = screen.getByPlaceholderText("Write a description...");
+    expect(descriptionDraft).toHaveFocus();
+    await user.type(descriptionDraft, "Customer context");
+    await user.click(screen.getByRole("button", { name: "Add description" }));
+
+    await waitFor(() => expect(actions.updateCardDetailsAction).toHaveBeenCalledTimes(1));
+    expect(screen.queryByPlaceholderText("Write a description...")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Add a more detailed description...")).toHaveValue("Customer context");
+
+    await user.click(screen.getByRole("button", { name: "Add to card" }));
+    expect(
+      screen.queryByRole("menuitem", { name: "Description" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Checklist" }));
+    expect(document.getElementById("card-section-checklist")).not.toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText("Checklist title"), "Launch steps");
+    await user.click(screen.getByRole("button", { name: "Create checklist" }));
+    await waitFor(() => expect(actions.createChecklistAction).toHaveBeenCalledTimes(1));
+    expect(document.getElementById("card-section-checklist")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add to card" }));
+    expect(
+      screen.queryByRole("menuitem", { name: "Checklist" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Attachment" }));
+    expect(document.getElementById("card-section-attachments")).not.toBeInTheDocument();
+    const file = new File(["hello"], "brief.pdf", { type: "application/pdf" });
+    await user.upload(screen.getByLabelText("Attachment file"), file);
+    await user.click(screen.getByRole("button", { name: "Upload attachment" }));
+    await waitFor(() => expect(actions.uploadAttachmentAction).toHaveBeenCalledTimes(1));
+    // The upload action returns only an id. The section waits for the refreshed
+    // server record instead of flashing a misleading empty attachment block.
+    expect(document.getElementById("card-section-attachments")).not.toBeInTheDocument();
+  });
+
+  it("removes a locally-created checklist as soon as delete succeeds", async () => {
+    actions.createChecklistAction.mockResolvedValue({
+      success: true,
+      checklist: {
+        id: "checklist-new",
+        cardId: "card-1",
+        title: "Launch steps",
+        position: 1024,
+        items: [],
+      },
+    });
+    renderSheet();
+
+    await user.click(screen.getByRole("button", { name: "Add to card" }));
+    await user.click(screen.getByRole("menuitem", { name: "Checklist" }));
+    await user.type(screen.getByPlaceholderText("Checklist title"), "Launch steps");
+    await user.click(screen.getByRole("button", { name: "Create checklist" }));
+
+    await waitFor(() =>
+      expect(
+        checklistSectionSpy.latest?.checklists.map((checklist) => checklist.id),
+      ).toContain("checklist-new"),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Remove Launch steps" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Remove Launch steps" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("keeps an optional block hidden when creation fails", async () => {
+    actions.updateCardDetailsAction.mockResolvedValue({
+      success: false,
+      error: "Failed to update card. Please try again.",
+    });
+    renderSheet();
+
+    await user.click(screen.getByRole("button", { name: "Add to card" }));
+    await user.click(screen.getByRole("menuitem", { name: "Description" }));
+    await user.type(screen.getByPlaceholderText("Write a description..."), "Customer context");
+    await user.click(screen.getByRole("button", { name: "Add description" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Failed to update card");
+    expect(screen.getByRole("dialog", { name: "Add description" })).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Add a more detailed description...")).not.toBeInTheDocument();
   });
 
   it("autosaves the title on blur when it changed", async () => {
@@ -143,6 +323,119 @@ describe("CardDetailSheet — title autosave", () => {
     expect(actions.updateCardDetailsAction).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByLabelText("Card title")).toHaveValue("Original title"));
     expect(screen.getByText(/Title cannot be empty/)).toBeInTheDocument();
+  });
+
+  it("queues a description blur made while the title save is in flight (U2)", async () => {
+    let resolveFirst: ((value: { success: boolean }) => void) | null = null;
+    actions.updateCardDetailsAction
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValue({ success: true });
+
+    renderSheetWithDescription();
+
+    const title = screen.getByLabelText("Card title");
+    await user.clear(title);
+    await user.type(title, "Renamed card");
+    await user.tab(); // blur title → save 1 starts and stays pending
+
+    await waitFor(() =>
+      expect(actions.updateCardDetailsAction).toHaveBeenCalledTimes(1),
+    );
+
+    // Description blur lands while save 1 is still in flight.
+    const description = screen.getByPlaceholderText("Add a more detailed description...");
+    await user.clear(description);
+    await user.type(description, "More details");
+    await user.tab(); // blur description → save 2 queued, not dropped
+
+    // Still only the in-flight save while the queue waits for it.
+    expect(actions.updateCardDetailsAction).toHaveBeenCalledTimes(1);
+
+    resolveFirst!({ success: true });
+
+    await waitFor(() =>
+      expect(actions.updateCardDetailsAction).toHaveBeenCalledTimes(2),
+    );
+    const formData = actions.updateCardDetailsAction.mock
+      .calls[1][0] as FormData;
+    expect(formData.get("title")).toBe("Renamed card");
+    expect(formData.get("description")).toBe("More details");
+  });
+
+  it("keeps other fields editable while a field's save is in flight (U2)", async () => {
+    let resolveFirst: ((value: { success: boolean }) => void) | null = null;
+    actions.updateCardDetailsAction.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+
+    renderSheetWithDescription();
+
+    const title = screen.getByLabelText("Card title");
+    await user.clear(title);
+    await user.type(title, "Renamed card");
+    await user.tab();
+
+    await waitFor(() =>
+      expect(actions.updateCardDetailsAction).toHaveBeenCalledTimes(1),
+    );
+
+    // The shared isPending freeze is gone: while the title save is pending,
+    // the description editor and the estimate picker stay enabled.
+    const description = screen.getByPlaceholderText("Add a more detailed description...");
+    expect(description).not.toBeDisabled();
+    expect(title).not.toBeDisabled();
+    expect(
+      screen.getByRole("combobox", { name: "Estimate" }),
+    ).not.toBeDisabled();
+
+    await act(async () => {
+      resolveFirst!({ success: true });
+      await Promise.resolve();
+    });
+  });
+
+  it("shows a transient 'Saved' confirmation after a successful save (U3)", async () => {
+    actions.updateCardDetailsAction.mockResolvedValue({ success: true });
+    renderSheet();
+
+    const title = screen.getByLabelText("Card title");
+    await user.clear(title);
+    await user.type(title, "Renamed card");
+    await user.tab();
+
+    await waitFor(() => expect(screen.getByText("Saved")).toBeInTheDocument());
+    // Confirmation is transient: it disappears after ~1.5s.
+    await waitFor(
+      () => expect(screen.queryByText("Saved")).not.toBeInTheDocument(),
+      { timeout: 2500 },
+    );
+  });
+
+  it("surfaces a failed autosave as full error text (U3)", async () => {
+    actions.updateCardDetailsAction.mockResolvedValue({
+      success: false,
+      error: "Failed to update card. Please try again.",
+    });
+    renderSheet();
+
+    const title = screen.getByLabelText("Card title");
+    await user.clear(title);
+    await user.type(title, "Renamed card");
+    await user.tab();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Failed to update card. Please try again."),
+      ).toBeInTheDocument(),
+    );
   });
 
   it("renders the title as static text when the viewer cannot edit", () => {
@@ -186,3 +479,932 @@ describe("CardDetailSheet — archive from detail (US-069)", () => {
     expect(formData.get("cardId")).toBe("card-1");
   });
 });
+
+describe("CardDetailSheet — live label set from the store (A1 / F4 round-2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useBoardStore.getState().reset();
+    labelSectionSpy.latest = null;
+  });
+
+  it("forwards the STORE's live labels when the open card is selected (stale prop fallback)", () => {
+    // The server `cardLabelIds` prop is stale (fetched before a remote attach);
+    // the store's selectedCard.labels is the live snapshot (reducer-patched).
+    useBoardStore.setState({
+      selectedCardId: "card-1",
+      selectedCard: {
+        card: makeCard(),
+        comments: [],
+        activity: [],
+        attachments: [],
+        assignees: [],
+        assignableMembers: [],
+        labels: [
+          { id: "label-1", name: "QA-Live", color: "#7C3AED" },
+          { id: "label-2", name: "Bug", color: "#B04632" },
+        ],
+      },
+    });
+
+    renderSheet({
+      cardLabelIds: [],
+      boardLabels: [{ id: "label-1", name: "Stale Name", color: "#999999" }],
+    });
+
+    expect(labelSectionSpy.latest?.cardLabelIds).toEqual(["label-1", "label-2"]);
+    // Chip metadata (name/color) comes from the LIVE store snapshot, overriding
+    // the stale prop values.
+    expect(labelSectionSpy.latest?.boardLabels).toContainEqual({
+      id: "label-1",
+      name: "QA-Live",
+      color: "#7C3AED",
+    });
+    // A label absent from the stale prop list (remotely created) is unioned in.
+    expect(labelSectionSpy.latest?.boardLabels).toContainEqual({
+      id: "label-2",
+      name: "Bug",
+      color: "#B04632",
+    });
+  });
+
+  it("falls back to the server props when no store selection matches", () => {
+    renderSheet({ cardLabelIds: ["label-prop"], boardLabels: [{ id: "label-prop", name: "Prop", color: "#111" }] });
+
+    expect(labelSectionSpy.latest?.cardLabelIds).toEqual(["label-prop"]);
+  });
+});
+
+describe("CardDetailSheet — comments/activity load more (cap 50)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useBoardStore.getState().reset();
+  });
+
+  function comment(id: string, content: string, createdAt: Date) {
+    return {
+      id,
+      cardId: "card-1",
+      userId: "u1",
+      content,
+      createdAt,
+      updatedAt: createdAt,
+      user: { id: "u1", name: "Alice", image: null },
+    };
+  }
+
+  function activityEntry(
+    id: string,
+    action: "CREATED" | "UPDATED" | "MOVED" | "ARCHIVED" | "RESTORED" | "DELETED" | "COMMENTED",
+    createdAt: Date,
+  ) {
+    return {
+      id,
+      workspaceId: "ws-1",
+      boardId: "board-1",
+      cardId: "card-1",
+      userId: "u1",
+      action,
+      entityType: "CARD" as const,
+      metadata: null,
+      createdAt,
+      user: { id: "u1", name: "Alice", image: null },
+    };
+  }
+
+  it("shows a Load more button per section only when the server reports more", () => {
+    renderSheet({
+      comments: [comment("c1", "First", new Date("2026-01-01T00:00:00Z"))],
+      commentsHasMore: true,
+      activity: [activityEntry("a1", "CREATED", new Date("2026-01-01T00:00:00Z"))],
+      activityHasMore: false,
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Load more comments" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Load more activity" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides both Load more buttons when nothing is beyond the seed", () => {
+    renderSheet({
+      comments: [comment("c1", "First", new Date("2026-01-01T00:00:00Z"))],
+      activity: [activityEntry("a1", "CREATED", new Date("2026-01-01T00:00:00Z"))],
+    });
+
+    expect(
+      screen.queryByRole("button", { name: "Load more comments" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Load more activity" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("appends the next comment page, dedupes by id, and keeps order", async () => {
+    renderSheet({
+      comments: [
+        comment("c1", "First", new Date("2026-01-01T00:00:00Z")),
+        comment("c2", "Second", new Date("2026-01-01T00:01:00Z")),
+      ],
+      commentsHasMore: true,
+    });
+
+    // Page includes a duplicate of c2 (a race/tie would surface the same row);
+    // the sheet must not render it twice.
+    actions.loadMoreCardDetailAction.mockResolvedValue({
+      success: true,
+      section: "comments",
+      hasMore: false,
+      items: [
+        {
+          id: "c2",
+          content: "Second",
+          createdAt: "2026-01-01T00:01:00.000Z",
+          user: { id: "u1", name: "Alice", image: null },
+        },
+        {
+          id: "c3",
+          content: "Third",
+          createdAt: "2026-01-01T00:02:00.000Z",
+          user: { id: "u1", name: "Alice", image: null },
+        },
+      ],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Load more comments" }));
+
+    // The cursor is the (createdAt, id) of the last *displayed* comment.
+    await waitFor(
+      () => {
+        const fd = actions.loadMoreCardDetailAction.mock.calls[0][0] as FormData;
+        expect(fd.get("section")).toBe("comments");
+        expect(fd.get("cardId")).toBe("card-1");
+        expect(fd.get("cursorCreatedAt")).toBe("2026-01-01T00:01:00.000Z");
+        expect(fd.get("cursorId")).toBe("c2");
+      },
+      { timeout: 3000 },
+    );
+
+    await waitFor(() => expect(screen.getByText("Third")).toBeInTheDocument(), {
+      timeout: 3000,
+    });
+    // Append + dedupe: each comment renders exactly once, oldest first.
+    expect(
+      screen
+        .getAllByText(/^(First|Second|Third)$/)
+        .map((el) => el.textContent),
+    ).toEqual(["First", "Second", "Third"]);
+    // Last page → affordance disappears.
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Load more comments" }),
+      ).not.toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+  });
+
+  it("pages repeatedly while hasMore stays true, advancing the cursor", async () => {
+    renderSheet({
+      comments: [comment("c1", "First", new Date("2026-01-01T00:00:00Z"))],
+      commentsHasMore: true,
+    });
+
+    actions.loadMoreCardDetailAction
+      .mockResolvedValueOnce({
+        success: true,
+        section: "comments",
+        hasMore: true,
+        items: [
+          {
+            id: "c2",
+            content: "Second",
+            createdAt: "2026-01-01T00:01:00.000Z",
+            user: { id: "u1", name: "Alice", image: null },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        section: "comments",
+        hasMore: false,
+        items: [
+          {
+            id: "c3",
+            content: "Third",
+            createdAt: "2026-01-01T00:02:00.000Z",
+            user: { id: "u1", name: "Alice", image: null },
+          },
+        ],
+      });
+
+    await user.click(screen.getByRole("button", { name: "Load more comments" }));
+    await waitFor(() => expect(screen.getByText("Second")).toBeInTheDocument(), {
+      timeout: 3000,
+    });
+    // The pending flag settles a tick after the page renders — wait for the
+    // button to be interactive again before the next click.
+    await waitFor(
+      () =>
+        expect(
+          screen.getByRole("button", { name: "Load more comments" }),
+        ).toBeEnabled(),
+      { timeout: 3000 },
+    );
+
+    await user.click(screen.getByRole("button", { name: "Load more comments" }));
+    await waitFor(() => expect(screen.getByText("Third")).toBeInTheDocument(), {
+      timeout: 3000,
+    });
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Load more comments" }),
+      ).not.toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+
+    // Second call carried the cursor of the last *displayed* comment (c2).
+    const fd2 = actions.loadMoreCardDetailAction.mock.calls[1][0] as FormData;
+    expect(fd2.get("cursorId")).toBe("c2");
+    expect(fd2.get("cursorCreatedAt")).toBe("2026-01-01T00:01:00.000Z");
+  });
+
+  it("appends activity pages and hides the button on the last page", async () => {
+    renderSheet({
+      activity: [activityEntry("a1", "CREATED", new Date("2026-01-01T00:00:00Z"))],
+      activityHasMore: true,
+    });
+
+    actions.loadMoreCardDetailAction.mockResolvedValue({
+      success: true,
+      section: "activity",
+      hasMore: false,
+      items: [
+        {
+          id: "a2",
+          action: "UPDATED",
+          entityType: "CARD",
+          createdAt: "2026-01-01T00:01:00.000Z",
+          user: { id: "u1", name: "Alice", image: null },
+          metadata: null,
+        },
+      ],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Load more activity" }));
+
+    // The cursor is the (createdAt, id) of the last *displayed* activity row.
+    await waitFor(
+      () => {
+        const fd = actions.loadMoreCardDetailAction.mock.calls[0][0] as FormData;
+        expect(fd.get("section")).toBe("activity");
+        expect(fd.get("cursorId")).toBe("a1");
+        expect(fd.get("cursorCreatedAt")).toBe("2026-01-01T00:00:00.000Z");
+      },
+      { timeout: 3000 },
+    );
+
+    await waitFor(
+      () => expect(screen.getByText(/updated this card/)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Load more activity" }),
+      ).not.toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+  });
+
+  it("surfaces a failed load as full error text", async () => {
+    renderSheet({
+      comments: [comment("c1", "First", new Date("2026-01-01T00:00:00Z"))],
+      commentsHasMore: true,
+    });
+
+    actions.loadMoreCardDetailAction.mockResolvedValue({
+      success: false,
+      error: "Card not found",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Load more comments" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("Card not found")).toBeInTheDocument(),
+    );
+    // Nothing was appended and the affordance stays (retryable) — the pending
+    // flag settles a tick after the error commits, so wait for the button.
+    expect(screen.getByText("First")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Load more comments" }),
+      ).toBeInTheDocument(),
+    );
+  });
+});
+
+describe("CardDetailSheet — comment composer", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useBoardStore.getState().reset();
+  });
+
+  it("posts the comment when Enter is pressed in the textarea", async () => {
+    actions.createCommentAction.mockResolvedValue({ success: true });
+    renderSheet();
+
+    const textarea = screen.getByPlaceholderText("Write a comment...");
+    await user.type(textarea, "Nice work");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() =>
+      expect(actions.createCommentAction).toHaveBeenCalledTimes(1),
+    );
+    const formData = actions.createCommentAction.mock.calls[0][0] as FormData;
+    expect(formData.get("cardId")).toBe("card-1");
+    expect(formData.get("content")).toBe("Nice work");
+    // Success clears the composer.
+    await waitFor(() => expect(textarea).toHaveValue(""));
+  });
+
+  it("posts the comment when the submit button is clicked", async () => {
+    actions.createCommentAction.mockResolvedValue({ success: true });
+    renderSheet();
+
+    await user.type(
+      screen.getByPlaceholderText("Write a comment..."),
+      "Via button",
+    );
+    await user.click(screen.getByRole("button", { name: "Post comment" }));
+
+    await waitFor(() =>
+      expect(actions.createCommentAction).toHaveBeenCalledTimes(1),
+    );
+    const formData = actions.createCommentAction.mock.calls[0][0] as FormData;
+    expect(formData.get("content")).toBe("Via button");
+  });
+
+  it("keeps Shift+Enter a newline instead of submitting", async () => {
+    actions.createCommentAction.mockResolvedValue({ success: true });
+    renderSheet();
+
+    const textarea = screen.getByPlaceholderText("Write a comment...");
+    await user.type(textarea, "line one{Shift>}{Enter}{/Shift}line two");
+
+    await waitFor(() => expect(textarea).toHaveValue("line one\nline two"));
+    expect(actions.createCommentAction).not.toHaveBeenCalled();
+  });
+
+  it("shows the empty-comment error on Enter instead of posting", async () => {
+    renderSheet();
+
+    const textarea = screen.getByPlaceholderText("Write a comment...");
+    await user.click(textarea);
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByText("Comment cannot be empty")).toBeInTheDocument();
+    expect(actions.createCommentAction).not.toHaveBeenCalled();
+  });
+});
+
+describe("CardDetailSheet — comment composer single-flight (same-tick)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useBoardStore.getState().reset();
+  });
+
+  it("posts once when Enter and the submit button fire in the same tick", async () => {
+    let resolvePost: ((v: { success: boolean }) => void) | null = null;
+    actions.createCommentAction.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePost = resolve;
+        }),
+    );
+    renderSheet();
+
+    const textarea = screen.getByPlaceholderText("Write a comment...");
+    const submitButton = screen.getByRole("button", { name: "Post comment" });
+    await user.type(textarea, "Nice work");
+
+    // Enter + submit click land before the pending render flips `isPending`:
+    // the synchronous ref guard must drop the second submit (no double post).
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    fireEvent.click(submitButton);
+
+    expect(actions.createCommentAction).toHaveBeenCalledTimes(1);
+
+    resolvePost!({ success: true });
+    await waitFor(() => expect(textarea).toHaveValue(""));
+  });
+
+  it("allows a retry after a failed post", async () => {
+    actions.createCommentAction
+      .mockResolvedValueOnce({
+        success: false,
+        error: "Could not post comment.",
+      })
+      .mockResolvedValueOnce({ success: true });
+    renderSheet();
+
+    const textarea = screen.getByPlaceholderText("Write a comment...");
+    await user.type(textarea, "Nice work");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() =>
+      expect(screen.getByText("Could not post comment.")).toBeInTheDocument(),
+    );
+    // The guard released on failure — posting again works.
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() =>
+      expect(actions.createCommentAction).toHaveBeenCalledTimes(2),
+    );
+    await waitFor(() => expect(textarea).toHaveValue(""));
+  });
+
+  it("surfaces a generic error on a thrown action and allows a retry", async () => {
+    actions.createCommentAction
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValueOnce({ success: true });
+    renderSheet();
+
+    const textarea = screen.getByPlaceholderText("Write a comment...");
+    await user.type(textarea, "Nice work");
+    await user.keyboard("{Enter}");
+
+    // The rejection is caught (no unhandled rejection): exactly one call and
+    // a visible generic error.
+    await waitFor(() =>
+      expect(
+        screen.getByText("Something went wrong. Please try again."),
+      ).toBeInTheDocument(),
+    );
+    expect(actions.createCommentAction).toHaveBeenCalledTimes(1);
+
+    // The guard released on the rejection — a retry posts successfully.
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() =>
+      expect(actions.createCommentAction).toHaveBeenCalledTimes(2),
+    );
+    await waitFor(() => expect(textarea).toHaveValue(""));
+  });
+});
+
+describe("CardDetailSheet — autosave queue recovery (rejected save)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useBoardStore.getState().reset();
+  });
+
+  it("surfaces a generic error and leaves the Saving state when a queued save rejects", async () => {
+    actions.updateCardDetailsAction.mockRejectedValue(new Error("network down"));
+    renderSheet();
+
+    const title = screen.getByLabelText("Card title");
+    await user.clear(title);
+    await user.type(title, "Renamed card");
+    await user.tab();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Something went wrong. Please try again."),
+      ).toBeInTheDocument(),
+    );
+    // The drain is not stuck: the Saving indicator clears once the queue
+    // settles, so the sheet recovers instead of freezing in-flight.
+    await waitFor(() =>
+      expect(screen.queryByText("Saving…")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("keeps draining saves queued behind a rejected save in the same drain", async () => {
+    let rejectSave1: ((e: Error) => void) | null = null;
+    actions.updateCardDetailsAction
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectSave1 = reject;
+          }),
+      )
+      .mockResolvedValueOnce({ success: true });
+    renderSheetWithDescription();
+
+    const title = screen.getByLabelText("Card title");
+    await user.clear(title);
+    await user.type(title, "Renamed card");
+    await user.tab(); // save 1 starts and stays pending
+
+    await waitFor(() =>
+      expect(actions.updateCardDetailsAction).toHaveBeenCalledTimes(1),
+    );
+
+    // A description blur lands while save 1 is still in flight → queued behind
+    // it in the same drain.
+    const description = screen.getByPlaceholderText("Add a more detailed description...");
+    await user.clear(description);
+    await user.type(description, "More details");
+    await user.tab();
+
+    // Still only the in-flight save while the queue waits for it.
+    expect(actions.updateCardDetailsAction).toHaveBeenCalledTimes(1);
+
+    // Save 1 rejects — the drain must NOT abort; the queued save behind it runs.
+    rejectSave1!(new Error("network down"));
+    await waitFor(() =>
+      expect(actions.updateCardDetailsAction).toHaveBeenCalledTimes(2),
+    );
+    const formData = actions.updateCardDetailsAction.mock
+      .calls[1][0] as FormData;
+    expect(formData.get("title")).toBe("Renamed card");
+    expect(formData.get("description")).toBe("More details");
+    // The queued save succeeded → transient confirmation.
+    await waitFor(() => expect(screen.getByText("Saved")).toBeInTheDocument());
+  });
+
+  it("resets drain ownership after a rejected save so later queued saves still drain", async () => {
+    actions.updateCardDetailsAction
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValueOnce({ success: true });
+    renderSheetWithDescription();
+
+    const title = screen.getByLabelText("Card title");
+    await user.clear(title);
+    await user.type(title, "Renamed card");
+    await user.tab();
+
+    // Save 1 rejects; the generic error surfaces and the queue settles.
+    await waitFor(() =>
+      expect(
+        screen.getByText("Something went wrong. Please try again."),
+      ).toBeInTheDocument(),
+    );
+
+    // A later blur queues a NEW save; the drain (ownership was reset) runs it.
+    const description = screen.getByPlaceholderText("Add a more detailed description...");
+    await user.clear(description);
+    await user.type(description, "More details");
+    await user.tab();
+
+    await waitFor(() =>
+      expect(actions.updateCardDetailsAction).toHaveBeenCalledTimes(2),
+    );
+    const formData = actions.updateCardDetailsAction.mock
+      .calls[1][0] as FormData;
+    expect(formData.get("title")).toBe("Renamed card");
+    expect(formData.get("description")).toBe("More details");
+    await waitFor(() => expect(screen.getByText("Saved")).toBeInTheDocument());
+  });
+});
+
+describe("CardDetailSheet — meta draft reconciliation (dueDate/priority/estimate)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useBoardStore.getState().reset();
+  });
+
+  function seedStoreCard(card: CardDetailRecord) {
+    useBoardStore.setState({
+      selectedCardId: card.id,
+      selectedCard: {
+        card,
+        comments: [],
+        activity: [],
+        attachments: [],
+        assignees: [],
+        assignableMembers: [],
+        labels: [],
+      },
+    });
+  }
+
+  it("reflects a remote priority change into the picker when not interacting", async () => {
+    seedStoreCard(makeCard({ priority: null }));
+    renderSheet();
+
+    const combo = screen.getByRole("combobox", { name: "Priority" });
+    expect(combo).toHaveTextContent(/No priority/);
+
+    // Remote card:meta-updated patches the store; the open sheet's draft
+    // follows because the user is not interacting with the picker.
+    act(() => seedStoreCard(makeCard({ priority: "LOW" })));
+    await waitFor(() => expect(combo).toHaveTextContent(/Low/));
+  });
+
+  it("reflects a remote estimate change into the estimate picker when not interacting", async () => {
+    seedStoreCard(makeCard({ estimateHours: 2 }));
+    renderSheet();
+
+    const combo = screen.getByRole("combobox", { name: "Estimate" });
+    expect(combo).toHaveTextContent(/2h/);
+
+    act(() => seedStoreCard(makeCard({ estimateHours: 8 })));
+    await waitFor(() => expect(combo).toHaveTextContent(/8h/));
+  });
+
+  it("reflects a remote due date change into the due-date control when not interacting", async () => {
+    seedStoreCard(makeCard({ dueDate: null }));
+    renderSheet();
+
+    const dueButton = screen.getByRole("button", { name: /Set due date/ });
+    expect(dueButton).toHaveTextContent(/No due date/);
+
+    act(() => seedStoreCard(makeCard({ dueDate: new Date(2026, 0, 15) })));
+    await waitFor(() =>
+      expect(dueButton).not.toHaveTextContent(/No due date/),
+    );
+    expect(dueButton).toHaveTextContent(/Jan/);
+  });
+
+  it("protects an open priority picker from a remote change, then resyncs on close without a pick", async () => {
+    seedStoreCard(makeCard({ priority: null }));
+    renderSheet();
+
+    const combo = screen.getByRole("combobox", { name: "Priority" });
+    await user.click(combo); // open the picker
+
+    // A remote change (priority + a title rename, so we can prove the render
+    // flushed with the new store snapshot) arrives while the picker is open.
+    act(() =>
+      seedStoreCard(makeCard({ priority: "LOW", title: "Remote rename" })),
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("Card title")).toHaveValue("Remote rename"),
+    );
+    // The open picker keeps showing the pre-interaction value — not clobbered.
+    expect(combo).toHaveTextContent(/No priority/);
+
+    // Closing without a pick (click elsewhere) resyncs to the live value.
+    await user.click(screen.getByLabelText("Card title"));
+    await waitFor(() => expect(combo).toHaveTextContent(/Low/));
+  });
+
+  it("commits a pick made while the picker is open (never resynced on close)", async () => {
+    actions.updateCardPriorityAction.mockResolvedValue({ success: true });
+    seedStoreCard(makeCard({ priority: null }));
+    renderSheet();
+
+    const combo = screen.getByRole("combobox", { name: "Priority" });
+    await user.click(combo);
+    await user.click(screen.getByRole("option", { name: /High/ }));
+
+    await waitFor(() =>
+      expect(actions.updateCardPriorityAction).toHaveBeenCalledTimes(1),
+    );
+    const formData = actions.updateCardPriorityAction.mock
+      .calls[0][0] as FormData;
+    expect(formData.get("priority")).toBe("HIGH");
+    // The pick is the user's intent: closing the picker must not resync the
+    // draft back to the (still null) live prop.
+    expect(combo).toHaveTextContent(/High/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Close/reopen lifecycle (close-flash regression, fix/card-detail-close-flash)
+//
+// A keyed parent can still force a card → no-card → card server re-render to
+// UNMOUNT and REMOUNT the sheet, destroying the dismissedCardId latch. The
+// close-flash happens when an in-flight router.refresh() payload (fetched while
+// ?cardId was still in the URL — queued autosave, socket reconnect,
+// list:restored, drag resync) lands AFTER the close navigation: the server
+// re-renders with the card selected again and a fresh sheet mounts with open=true
+// and dismissedCardId=null. The URL no longer selects a card, so the dialog must
+// stay closed — the open state must be URL-authoritative, not server-payload
+// authoritative.
+//
+// These tests drive the same sequences with a keyed harness, asserting the
+// dialog never flashes open after close and that intentional reopens still
+// work.
+//
+// The harness intentionally keeps the historical keyed-parent stress case;
+// production now keeps CardDetailSheet mounted across server prop changes.
+function keyedSheet(
+  card: CardDetailRecord | null,
+  overrides: Partial<Parameters<typeof CardDetailSheet>[0]> = {},
+) {
+  return (
+    <CardDetailSheet
+      key={card?.id ?? "card-detail-sheet-closed"}
+      open={Boolean(card)}
+      card={card}
+      comments={[]}
+      commentsHasMore={false}
+      activity={[]}
+      activityHasMore={false}
+      attachments={[]}
+      assignees={[]}
+      assignableMembers={[]}
+      boardId="board-1"
+      boardLabels={[]}
+      cardLabelIds={[]}
+      checklists={[]}
+      canEdit
+      canArchive={false}
+      canComment
+      {...overrides}
+    />
+  );
+}
+
+function unkeyedSheet(
+  card: CardDetailRecord | null,
+  overrides: Partial<Parameters<typeof CardDetailSheet>[0]> = {},
+) {
+  return (
+    <CardDetailSheet
+      open={Boolean(card)}
+      card={card}
+      comments={[]}
+      commentsHasMore={false}
+      activity={[]}
+      activityHasMore={false}
+      attachments={[]}
+      assignees={[]}
+      assignableMembers={[]}
+      boardId="board-1"
+      boardLabels={[]}
+      cardLabelIds={[]}
+      checklists={[]}
+      canEdit
+      canArchive={false}
+      canComment
+      {...overrides}
+    />
+  );
+}
+
+describe("CardDetailSheet — close/reopen lifecycle (close-flash regression)", () => {
+  const card = makeCard();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useBoardStore.getState().reset();
+    urlParams.set("cardId", "card-1");
+    window.history.replaceState({}, "", "/boards/board-1?cardId=card-1");
+  });
+
+  it("stays closed when a stale RSC payload remounts the sheet after close (the close-flash bug)", async () => {
+    const { rerender } = render(keyedSheet(card));
+    expect(screen.getByLabelText("Card title")).toBeInTheDocument();
+
+    // User closes (outside click / X / Escape all funnel through
+    // onOpenChange(false)) → handleClose: latch the dismissal and strip ?cardId.
+    await user.click(screen.getByRole("button", { name: "Close card" }));
+      expect(window.location.pathname).toBe("/boards/board-1");
+      expect(window.location.search).toBe("");
+      expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
+        scroll: false,
+      });
+
+    // The close navigation lands: server renders with no selected card → the
+    // key flips to the closed marker → the sheet unmounts (latch destroyed).
+    urlParams.delete("cardId");
+    rerender(keyedSheet(null));
+    expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
+
+    // A STALE refresh payload (fetched while ?cardId was still in the URL)
+    // lands after the close navigation: server re-renders with card-1 selected
+    // again → key flips back → the sheet REMOUNTS with open=true. The URL has
+    // no cardId, so the dialog must stay closed. This is the reported flash.
+    rerender(keyedSheet(card));
+    expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
+  });
+
+  it("reopens the same card when the user intentionally navigates to it again", async () => {
+    const { rerender } = render(keyedSheet(card));
+    await user.click(screen.getByRole("button", { name: "Close card" }));
+
+    urlParams.delete("cardId");
+    rerender(keyedSheet(null));
+    // Stale payload between close and reopen — must stay closed.
+    rerender(keyedSheet(card));
+    expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
+
+    // Intentional reopen: BoardContent.openCard pushes ?cardId again → the URL
+    // and the server payload agree → the dialog opens.
+    urlParams.set("cardId", "card-1");
+    rerender(keyedSheet(card));
+    expect(await screen.findByLabelText("Card title")).toBeInTheDocument();
+  });
+
+  it("reopens the same card when a stale payload kept the sheet mounted (latch is cleared once the URL drops the card)", async () => {
+    const { rerender } = render(keyedSheet(card));
+    expect(screen.getByLabelText("Card title")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Close card" }));
+      expect(window.location.pathname).toBe("/boards/board-1");
+      expect(window.location.search).toBe("");
+      expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
+        scroll: false,
+      });
+
+    // The replace commits (URL loses cardId) but a stale payload keeps the
+    // sheet MOUNTED with the same key — no remount, so the dismissal latch
+    // would survive and block a later reopen.
+    urlParams.delete("cardId");
+    rerender(keyedSheet(card));
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument(),
+    );
+
+    // User re-clicks the same card: push re-adds ?cardId, same key → no
+    // remount. The latch must have been cleared when the URL dropped the card.
+    urlParams.set("cardId", "card-1");
+    rerender(keyedSheet(card));
+    expect(await screen.findByLabelText("Card title")).toBeInTheDocument();
+  });
+
+  it("Escape closes the dialog through the same handleClose path", async () => {
+    const { rerender } = render(keyedSheet(card));
+    expect(screen.getByLabelText("Card title")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+      expect(window.location.pathname).toBe("/boards/board-1");
+      expect(window.location.search).toBe("");
+      expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
+        scroll: false,
+      });
+
+    urlParams.delete("cardId");
+    rerender(keyedSheet(null));
+    expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
+  });
+
+  it("reopens the same card after the selected card briefly becomes null", async () => {
+    const { rerender } = render(unkeyedSheet(card));
+    expect(screen.getByLabelText("Card title")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Close card" }));
+      expect(window.location.pathname).toBe("/boards/board-1");
+      expect(window.location.search).toBe("");
+      expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
+        scroll: false,
+      });
+
+    // This mirrors production keeping CardDetailSheet mounted while the
+    // server payload briefly has no selected card.
+    urlParams.delete("cardId");
+    rerender(unkeyedSheet(null));
+    expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
+
+    // Opening the same card again must not inherit the previous close latch.
+    urlParams.set("cardId", "card-1");
+    rerender(unkeyedSheet(card));
+    expect(await screen.findByLabelText("Card title")).toBeInTheDocument();
+  });
+
+    it("closes from an outside click without reopening during the route update", async () => {
+      const { rerender } = render(keyedSheet(card));
+      const overlay = document.querySelector('[data-slot="dialog-overlay"]');
+
+    expect(overlay).toBeInTheDocument();
+    await user.click(overlay!);
+      expect(window.location.pathname).toBe("/boards/board-1");
+      expect(window.location.search).toBe("");
+      expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
+        scroll: false,
+      });
+
+    urlParams.delete("cardId");
+      rerender(keyedSheet(card));
+      expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
+    });
+
+    it("commits the close URL before an in-flight field save refresh completes", async () => {
+      let resolveSave: ((value: { success: true }) => void) | null = null;
+      actions.updateCardEstimateAction.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveSave = resolve;
+          }),
+      );
+      const { rerender } = render(keyedSheet(card));
+
+      await user.click(screen.getByRole("combobox", { name: "Estimate" }));
+      await user.click(screen.getByRole("option", { name: /4h/ }));
+      await waitFor(() =>
+        expect(actions.updateCardEstimateAction).toHaveBeenCalledTimes(1),
+      );
+
+      const overlay = document.querySelector('[data-slot="dialog-overlay"]');
+      await user.click(overlay!);
+
+      // Closing is synchronous: a save that resolves immediately afterward can
+      // only refresh the no-card URL, never the stale selected-card URL.
+      expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
+        scroll: false,
+      });
+      expect(window.location.search).toBe("");
+      expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
+
+      await act(async () => {
+        resolveSave!({ success: true });
+        await Promise.resolve();
+      });
+      await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
+
+      urlParams.delete("cardId");
+      rerender(keyedSheet(card));
+      expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
+    });
+  });

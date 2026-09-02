@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Crown02Icon, StarIcon } from "@hugeicons/core-free-icons";
+import { Crown02Icon, StarIcon, UserAddIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 import {
@@ -15,6 +15,7 @@ import { boardHeaderAvatarCountClass } from "@/components/boards/board-header-co
 import { ArchivedCardsDialog } from "@/components/boards/archived-cards-dialog";
 import type { ArchivedCardData, ArchivedListData } from "@/components/boards/archived-cards-dialog";
 import { BoardMenu } from "@/components/boards/board-menu";
+import { InviteMemberDialog } from "@/components/workspace/members/invite-member-dialog";
 import {
   Avatar,
   AvatarBadge,
@@ -48,6 +49,11 @@ type BoardHeaderProps = {
   // Admin-only permanent delete affordance (US-074 Slice C).
   canPermanentDelete?: boolean;
   starred: boolean;
+  // U1: the Share button is the workspace invite entry. Without a workspace
+  // to invite into (or the invitation:create permission), no dead button
+  // renders — the header never offers an action the user can't take.
+  workspaceId?: string | null;
+  canInviteMembers?: boolean;
 };
 
 export function BoardHeader({
@@ -60,6 +66,8 @@ export function BoardHeader({
   archivedLists = [],
   canPermanentDelete = false,
   starred,
+  workspaceId = null,
+  canInviteMembers = false,
 }: BoardHeaderProps) {
   // Live presence: who currently has this board open. Server-driven, deduped.
   const watchers = useBoardStore((s) => s.watchers);
@@ -113,7 +121,24 @@ export function BoardHeader({
   const boardTheme = getBoardTheme(board.backgroundColor);
 
   function handleSave() {
-    if (!canEdit || !canSubmit || isPending) {
+    if (!canEdit) {
+      setEditing(false);
+      setDraftTitle(board.title);
+      return;
+    }
+
+    // A blur that lands while a save is in flight (the input is disabled
+    // mid-flight, and disabling a focused input fires a blur) must not wipe the
+    // typed draft — the transition settles editing/error state on completion, and
+    // reverting here could discard a rename that may still land. Stay in edit
+    // mode and keep the draft.
+    if (isPending) {
+      return;
+    }
+
+    if (!canSubmit) {
+      // Nothing to save (unchanged or empty draft): close the editor and
+      // restore the last known title.
       setEditing(false);
       setDraftTitle(board.title);
       return;
@@ -147,13 +172,16 @@ export function BoardHeader({
 
   return (
     <header
-      className="space-y-4 rounded-t-xl border border-white/15 p-4 md:p-5"
+      className="space-y-2 rounded-t-xl border border-white/15 p-3 md:space-y-4 md:p-5"
       style={{ background: boardTheme.header }}
     >
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between md:gap-3">
         <div className="min-w-0 flex-1">
           {canEdit && editing ? (
             <Input
+              aria-label="Board title"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "board-title-error" : undefined}
               value={draftTitle}
               onChange={(event) => {
                 setDraftTitle(event.target.value);
@@ -194,11 +222,11 @@ export function BoardHeader({
           )}
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-1.5 md:gap-2">
           {showReconnecting ? (
             <Badge
               role="status"
-              className="flex h-6 items-center gap-1.5 rounded-full bg-amber-500/90 hover:bg-amber-500/90 px-2.5 py-1 text-xs font-medium text-white border-none"
+              className="flex h-6 items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-xs font-medium text-white"
             >
               <span className="size-1.5 animate-pulse rounded-full bg-white" />
               Reconnecting…
@@ -253,14 +281,25 @@ export function BoardHeader({
             </AvatarGroup>
           ) : null}
 
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="rounded-md border-white/40 bg-white/15 text-white hover:bg-white/25"
-          >
-            Share
-          </Button>
+          {canInviteMembers && workspaceId ? (
+            <InviteMemberDialog
+              workspaceId={workspaceId}
+              trigger={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label="Share"
+                  className="gap-1.5 rounded-md border-white/40 bg-white/15 text-white hover:bg-white/25"
+                >
+                  <HugeiconsIcon icon={UserAddIcon} size={16} aria-hidden="true" />
+                  {/* Label hides below md so the toolbar stays a single icon
+                      row on narrow screens; the aria-label keeps the name. */}
+                  <span className="hidden md:inline">Share</span>
+                </Button>
+              }
+            />
+          ) : null}
 
           <Button
             type="button"
@@ -296,7 +335,15 @@ export function BoardHeader({
         </div>
       </div>
 
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {error ? (
+        <p
+          id="board-title-error"
+          role="alert"
+          className="text-sm text-destructive"
+        >
+          {error}
+        </p>
+      ) : null}
     </header>
   );
 }

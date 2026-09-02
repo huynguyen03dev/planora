@@ -34,12 +34,14 @@ type CardChecklistsSectionProps = {
   cardId: string;
   checklists: ChecklistData[];
   canEdit: boolean;
+  onChecklistDeleted?: (checklistId: string) => void;
 };
 
 export function CardChecklistsSection({
   cardId,
   checklists,
   canEdit,
+  onChecklistDeleted,
 }: CardChecklistsSectionProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -108,7 +110,7 @@ export function CardChecklistsSection({
   function removeChecklist(checklistId: string) {
     const formData = new FormData();
     formData.set("checklistId", checklistId);
-    run(() => deleteChecklistAction(formData));
+    run(() => deleteChecklistAction(formData), () => onChecklistDeleted?.(checklistId));
   }
 
   return (

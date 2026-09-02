@@ -200,15 +200,14 @@ describe("demo fixture safety", () => {
 });
 
 describe("US-083 fixture contracts (rehearsal-caught, 2026-08-02)", () => {
-  // Regression guards for the two defects the demo rehearsal caught:
+  // Regression guards for two defects the demo rehearsal caught:
   // 1. the workspace id must be in the app's 32-char alphanumeric format
-  //    (^[A-Za-z0-9]{32}$, lib/schemas/invitation.ts + board.ts +
-  //    automation.ts) — a UUID made invites, board creation, and automation
-  //    rules fail with "Invalid workspace ID" in the demo workspace;
+  //    (^[A-Za-z0-9]{32}$) — a UUID made invites, board creation, and
+  //    automation rules fail with "Invalid workspace ID";
   // 2. board createdAt is pinned 1ms apart in fixture order so "Product
   //    Roadmap" deterministically precedes "Team Operations" — quick
   //    capture's default board (first creatable, ordered by createdAt then
-  //    id) would otherwise flip between seeds on the random-UUID tiebreak.
+  //    id) would otherwise flip on the random-UUID tiebreak.
   const now = new Date("2026-08-02T10:00:00.000Z");
 
   it("seeds the workspace id in the app's 32-char alphanumeric format", () => {

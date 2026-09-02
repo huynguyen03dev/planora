@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+
 import { signIn } from "@/lib/auth-client";
 import { safeInternalPath } from "@/lib/redirect";
 import { Button } from "@/components/ui/button";
@@ -14,15 +15,18 @@ import {
   CardDescription,
   CardFooter,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 
+function verificationHref(email: string, callbackURL: string): string {
+  const params = new URLSearchParams({ email, callbackURL });
+  return `/verify-email?${params.toString()}`;
+}
+
 export function SignInForm() {
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect") ?? undefined;
-  const redirectTo = safeInternalPath(redirect);
+  const redirectTo = safeInternalPath(searchParams.get("redirect") ?? undefined);
   const invitedEmail = searchParams.get("email") ?? "";
-  // Preserve invite context when bouncing to the sign-up link.
   const signUpHref = `/sign-up${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
   const [email, setEmail] = useState(invitedEmail);
   const [password, setPassword] = useState("");
@@ -36,13 +40,18 @@ export function SignInForm() {
 
     try {
       await signIn.email(
-        {
-          email,
-          password,
-          callbackURL: redirectTo,
-        },
+        { email, password, callbackURL: redirectTo },
         {
           onError(ctx) {
+            const needsVerification =
+              ctx.error.code === "EMAIL_NOT_VERIFIED" ||
+              /email.{0,20}not verified/i.test(ctx.error.message);
+
+            if (needsVerification) {
+              router.push(verificationHref(email, redirectTo));
+              return;
+            }
+
             setError(ctx.error.message);
           },
         },
@@ -58,16 +67,16 @@ export function SignInForm() {
     <div className="flex flex-1 items-center justify-center px-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-2xl">Welcome back</CardTitle>
-          <CardDescription>
-            Sign in to your Planora account.
-          </CardDescription>
+          <h1 className="text-2xl leading-normal font-medium">Welcome back</h1>
+          <CardDescription>Sign in to your Planora account.</CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
-            {error && (
-              <p id="form-error" role="alert" className="text-sm text-destructive">{error}</p>
-            )}
+            {error ? (
+              <p id="form-error" role="alert" className="text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -75,9 +84,13 @@ export function SignInForm() {
                 type="email"
                 placeholder="you@example.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(event) => {
+                  setEmail(event.target.value);
+                  setError("");
+                }}
                 required
                 autoComplete="email"
+                autoFocus
                 aria-invalid={hasError}
                 aria-describedby={hasError ? "form-error" : undefined}
               />
@@ -97,7 +110,7 @@ export function SignInForm() {
                 type="password"
                 placeholder="••••••••"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(event) => setPassword(event.target.value)}
                 required
                 autoComplete="current-password"
                 aria-invalid={hasError}

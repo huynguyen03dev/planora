@@ -1,12 +1,13 @@
 /**
  * US-083 W6 — `/today` page wiring (async RSC): prove the seam
- * `verifySession` → `getPersonalWorkCards(session.user.id)` → `TodayView`
- * props, plus the metadata export. The read model and the client boundary are
- * mocked (their own contracts are proven in tests/server-actions/today.test.ts
- * and components/today/today-view.test.tsx) so the wiring itself is asserted
- * exactly: the session-derived user id flows into the read model, and the
- * read model's workspaceCount + cards are handed to TodayView untouched.
- * Renders the async RSC the way the layout test does (await → render).
+ * `verifySession` → `getPersonalWorkCards(session.user.id, { limit })` →
+ * `TodayView` props, plus the metadata export. The read model and the client
+ * boundary are mocked (their own contracts are proven in
+ * tests/server-actions/today.test.ts and components/today/today-view.test.tsx)
+ * so the wiring itself is asserted exactly: the session-derived user id flows
+ * into the paginated read model, and the model's workspaceCount + items +
+ * hasMore are handed to TodayView untouched. Renders the async RSC the way
+ * the layout test does (await → render).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
@@ -16,10 +17,16 @@ import type { TodayCard } from "@/lib/today";
 const h = vi.hoisted(() => ({
   verifySession: vi.fn(),
   getPersonalWorkCards: vi.fn(),
-  TodayView: vi.fn((props: { workspaceCount: number; cards: TodayCard[] }) => {
-    void props;
-    return null;
-  }),
+  TodayView: vi.fn(
+    (props: {
+      workspaceCount: number;
+      cards: TodayCard[];
+      hasMore: boolean;
+    }) => {
+      void props;
+      return null;
+    },
+  ),
 }));
 
 vi.mock("@/lib/dal", () => ({ verifySession: h.verifySession }));
@@ -53,30 +60,39 @@ beforeEach(() => {
   });
   h.getPersonalWorkCards
     .mockReset()
-    .mockResolvedValue({ workspaceCount: 1, cards: [] });
-  h.TodayView
-    .mockReset()
-    .mockReturnValue(null);
+    .mockResolvedValue({ workspaceCount: 1, items: [], hasMore: false });
+  h.TodayView.mockReset().mockReturnValue(null);
 });
 
 describe("TodayPage — RSC wiring (US-083 W6)", () => {
-  it("derives the read model from the session user id, not a hardcoded caller", async () => {
-    h.getPersonalWorkCards.mockResolvedValue({ workspaceCount: 2, cards: [] });
+  it("derives the read model from the session user id and requests the first page", async () => {
+    h.getPersonalWorkCards.mockResolvedValue({
+      workspaceCount: 2,
+      items: [],
+      hasMore: false,
+    });
 
     const element = await TodayPage();
     render(element);
 
     expect(h.verifySession).toHaveBeenCalledTimes(1);
     expect(h.getPersonalWorkCards).toHaveBeenCalledTimes(1);
-    expect(h.getPersonalWorkCards).toHaveBeenCalledWith(SESSION_USER_ID);
+    expect(h.getPersonalWorkCards).toHaveBeenCalledWith(SESSION_USER_ID, {
+      limit: 30,
+    });
     expect(h.TodayView.mock.calls[0][0]).toMatchObject({
       workspaceCount: 2,
       cards: [],
+      hasMore: false,
     });
   });
 
-  it("hands the read model's cards through to TodayView untouched", async () => {
-    h.getPersonalWorkCards.mockResolvedValue({ workspaceCount: 1, cards: [CARD] });
+  it("hands the read model's first page through to TodayView untouched", async () => {
+    h.getPersonalWorkCards.mockResolvedValue({
+      workspaceCount: 1,
+      items: [CARD],
+      hasMore: true,
+    });
 
     const element = await TodayPage();
     render(element);
@@ -84,6 +100,7 @@ describe("TodayPage — RSC wiring (US-083 W6)", () => {
     const props = h.TodayView.mock.calls[0][0];
     expect(props.workspaceCount).toBe(1);
     expect(props.cards).toEqual([CARD]);
+    expect(props.hasMore).toBe(true);
   });
 
   it("exports the page metadata seam", () => {

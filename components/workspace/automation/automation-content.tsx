@@ -21,6 +21,9 @@ export type AutomationContentProps = {
   rules: RuleRowData[];
   options: AutomationOptions;
   logs: LogEntry[];
+  // Exact (server-probed) "more logs may exist" flag for the initial feed
+  // state — never inferred from a page-size heuristic.
+  logsHasMore: boolean;
   lastRunByRule: Record<string, { status: string; executedAt: string }>;
   // Board-level modal (US-067): preset the "New rule" builder's board scope and
   // re-fetch the host's lazily-loaded data after each successful mutation. Both
@@ -43,6 +46,7 @@ export function AutomationContent({
   rules,
   options,
   logs,
+  logsHasMore,
   lastRunByRule,
   defaultBoardId,
   onMutated,
@@ -137,6 +141,7 @@ export function AutomationContent({
       <ExecutionLogPanel
         workspaceId={workspaceId}
         initialLogs={logs}
+        initialHasMore={logsHasMore}
         notify={notify}
         onRefresh={onMutated}
       />
@@ -147,7 +152,7 @@ export function AutomationContent({
           role={toast.variant === "error" ? "alert" : "status"}
           aria-live={toast.variant === "error" ? "assertive" : "polite"}
           className={cn(
-            "fixed right-4 top-4 z-[60] flex max-w-sm items-start gap-2 rounded-md border px-3 py-2 text-sm shadow-md",
+            "fixed right-4 bottom-4 z-[60] flex max-w-sm items-start gap-2 rounded-lg border px-4 py-3 text-sm shadow-lg",
             toast.variant === "error"
               ? "border-destructive/30 bg-destructive/10 text-destructive"
               : "border-border bg-card text-foreground",
