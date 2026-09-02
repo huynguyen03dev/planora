@@ -1252,7 +1252,9 @@ describe("CardDetailSheet — close/reopen lifecycle (close-flash regression)", 
     await user.click(screen.getByRole("button", { name: "Close card" }));
       expect(window.location.pathname).toBe("/boards/board-1");
       expect(window.location.search).toBe("");
-      expect(routerMock.refresh).toHaveBeenCalledTimes(1);
+      expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
+        scroll: false,
+      });
 
     // The close navigation lands: server renders with no selected card → the
     // key flips to the closed marker → the sheet unmounts (latch destroyed).
@@ -1292,7 +1294,9 @@ describe("CardDetailSheet — close/reopen lifecycle (close-flash regression)", 
     await user.click(screen.getByRole("button", { name: "Close card" }));
       expect(window.location.pathname).toBe("/boards/board-1");
       expect(window.location.search).toBe("");
-      expect(routerMock.refresh).toHaveBeenCalledTimes(1);
+      expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
+        scroll: false,
+      });
 
     // The replace commits (URL loses cardId) but a stale payload keeps the
     // sheet MOUNTED with the same key — no remount, so the dismissal latch
@@ -1317,7 +1321,9 @@ describe("CardDetailSheet — close/reopen lifecycle (close-flash regression)", 
     await user.keyboard("{Escape}");
       expect(window.location.pathname).toBe("/boards/board-1");
       expect(window.location.search).toBe("");
-      expect(routerMock.refresh).toHaveBeenCalledTimes(1);
+      expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
+        scroll: false,
+      });
 
     urlParams.delete("cardId");
     rerender(keyedSheet(null));
@@ -1331,7 +1337,9 @@ describe("CardDetailSheet — close/reopen lifecycle (close-flash regression)", 
     await user.click(screen.getByRole("button", { name: "Close card" }));
       expect(window.location.pathname).toBe("/boards/board-1");
       expect(window.location.search).toBe("");
-      expect(routerMock.refresh).toHaveBeenCalledTimes(1);
+      expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
+        scroll: false,
+      });
 
     // This mirrors production keeping CardDetailSheet mounted while the
     // server payload briefly has no selected card.
@@ -1353,7 +1361,9 @@ describe("CardDetailSheet — close/reopen lifecycle (close-flash regression)", 
     await user.click(overlay!);
       expect(window.location.pathname).toBe("/boards/board-1");
       expect(window.location.search).toBe("");
-      expect(routerMock.refresh).toHaveBeenCalledTimes(1);
+      expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
+        scroll: false,
+      });
 
     urlParams.delete("cardId");
       rerender(keyedSheet(card));
@@ -1381,6 +1391,9 @@ describe("CardDetailSheet — close/reopen lifecycle (close-flash regression)", 
 
       // Closing is synchronous: a save that resolves immediately afterward can
       // only refresh the no-card URL, never the stale selected-card URL.
+      expect(routerMock.replace).toHaveBeenCalledWith("/boards/board-1", {
+        scroll: false,
+      });
       expect(window.location.search).toBe("");
       expect(screen.queryByLabelText("Card title")).not.toBeInTheDocument();
 
@@ -1388,7 +1401,7 @@ describe("CardDetailSheet — close/reopen lifecycle (close-flash regression)", 
         resolveSave!({ success: true });
         await Promise.resolve();
       });
-      await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
 
       urlParams.delete("cardId");
       rerender(keyedSheet(card));
