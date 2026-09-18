@@ -80,11 +80,28 @@ const maybeCardIdSchema = z
   .nullable()
   .optional();
 
+// Explicit placement intent (decision 0032): start/end are absolute (relative
+// to the current live ends of the target list), between is relative to the two
+// named anchors. Required — the server must never guess intent from null hints.
+export const placementIntentSchema = z.enum(["start", "end", "between"]);
+
+// Optimistic-concurrency anchor (decision 0032): the moveRevision the client
+// observed before its optimistic bump. FormData values arrive as strings;
+// absent/empty parses to 0 (the default revision of an un-moved item).
+export const expectedMoveRevisionSchema = z
+  .preprocess(
+    (value) => (value === undefined || value === "" ? 0 : Number(value)),
+    z.number().int().min(0, "Invalid move revision"),
+  )
+  .default(0);
+
 export const reorderCardSchema = z
   .object({
     cardId: z.string().uuid({ message: "Invalid card ID" }),
+    intent: placementIntentSchema,
     prevCardId: maybeCardIdSchema,
     nextCardId: maybeCardIdSchema,
+    expectedMoveRevision: expectedMoveRevisionSchema,
   })
   .refine(
     (data) => !(data.prevCardId && data.nextCardId && data.prevCardId === data.nextCardId),
@@ -107,8 +124,10 @@ export const moveCardSchema = z
   .object({
     cardId: z.string().uuid({ message: "Invalid card ID" }),
     targetListId: z.string().uuid({ message: "Invalid list ID" }),
+    intent: placementIntentSchema,
     prevCardId: maybeCardIdSchema,
     nextCardId: maybeCardIdSchema,
+    expectedMoveRevision: expectedMoveRevisionSchema,
   })
   .refine(
     (data) => !(data.prevCardId && data.nextCardId && data.prevCardId === data.nextCardId),

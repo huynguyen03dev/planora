@@ -15,7 +15,7 @@ vi.mock("@/lib/prisma", () => ({
   db: mockDb,
 }));
 
-import { StaleNeighborError } from "./ordering";
+import { OrderConflictError } from "./ordering";
 import {
   archiveList,
   getArchivedListWithBoard,
@@ -23,7 +23,7 @@ import {
   getListsByBoardId,
   getListWithBoard,
   reorderListByNeighbors,
-  resolveListPosition,
+  resolveListPositionIntent,
   restoreList,
   updateListTitle,
 } from "./list";
@@ -40,9 +40,13 @@ type FakeList = {
 
 /**
  * In-memory stand-in for the subset of `Prisma.TransactionClient` that
- * `resolveListPosition` touches (`list.findUnique` / `list.findFirst`), honouring
- * the `position` gt/lt filter, the `id: { not }` exclusion, and asc/desc order.
- * Mirrors the card-resolver harness in ordering.test.ts.
+ * `resolveListPositionIntent` touches (`list.findUnique` / `list.findFirst`),
+ * honouring the `position` gt/lt filter, the `id: { not }` exclusion, and
+ * asc/desc order. Mirrors the card-resolver harness in ordering.test.ts.
+ *
+ * `makeRawLockMock` additionally fakes `$queryRaw` for the `FOR UPDATE` lock
+ * helpers: the board-scope lock, the live-list lock, and the archived-list lock
+ * are routed by the SQL text of the raw query (decision 0032).
  */
 function makeListClient(lists: FakeList[]) {
   const matches = (list: FakeList, where: Record<string, unknown>): boolean => {
@@ -88,24 +92,25 @@ function makeListClient(lists: FakeList[]) {
   };
 }
 
-describe("resolveListPosition (US-062 MJ3)", () => {
+describe("resolveListPositionIntent (decision 0032)", () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const client = (lists: FakeList[]) => makeListClient(lists) as any;
 
-  it("appends after the last live list when only prev is given and prev is truly last", async () => {
+  it("end intent appends after the last live list (absolute, ignores stale hints)", async () => {
     const lists: FakeList[] = [
       { id: "a", boardId: B, position: GAP },
       { id: "b", boardId: B, position: GAP * 2 },
     ];
-    const pos = await resolveListPosition(client(lists), {
+    const pos = await resolveListPositionIntent(client(lists), {
       boardId: B,
-      prevListId: "b",
+      intent: "end",
+      prevListId: "stale-hint",
       excludeListId: "mover",
     });
     expect(pos).toBe(GAP * 2 + GAP);
   });
 
-  it("bisects against the real follower — the concurrent end-drop the old direct-bisect looped on", async () => {
+  it("between intent bisects against the real follower — the concurrent end-drop the old direct-bisect looped on", async () => {
     // A rival list has just committed immediately after the client's prev hint
     // ("b"). Anchored bisection must land BETWEEN b and the rival, not on the
     // rival's slot (which the old prev.position + GAP would have returned).
@@ -114,67 +119,99 @@ describe("resolveListPosition (US-062 MJ3)", () => {
       { id: "b", boardId: B, position: GAP * 2 },
       { id: "rival", boardId: B, position: GAP * 3 },
     ];
-    const pos = await resolveListPosition(client(lists), {
+    const pos = await resolveListPositionIntent(client(lists), {
       boardId: B,
+      intent: "between",
       prevListId: "b",
+      nextListId: "rival",
       excludeListId: "mover",
     });
     expect(pos).toBe((GAP * 2 + GAP * 3) / 2);
     expect(pos).not.toBe(GAP * 2 + GAP);
   });
 
-  it("ignores the list being moved when finding the follower", async () => {
+  it("between intent ignores the list being moved when finding the follower", async () => {
     const lists: FakeList[] = [
       { id: "b", boardId: B, position: GAP * 2 },
       { id: "mover", boardId: B, position: GAP * 3 },
     ];
-    const pos = await resolveListPosition(client(lists), {
+    const pos = await resolveListPositionIntent(client(lists), {
       boardId: B,
+      intent: "between",
       prevListId: "b",
       excludeListId: "mover",
     });
     expect(pos).toBe(GAP * 2 + GAP);
   });
 
-  it("bisects before the real preceder for a start-drop (only next given)", async () => {
+    it("between intent rebases on the surviving NEXT anchor when prev is stale", async () => {
     const lists: FakeList[] = [
       { id: "rival", boardId: B, position: GAP },
       { id: "b", boardId: B, position: GAP * 2 },
     ];
-    const pos = await resolveListPosition(client(lists), {
+    const pos = await resolveListPositionIntent(client(lists), {
       boardId: B,
+      intent: "between",
+      prevListId: "gone",
       nextListId: "b",
       excludeListId: "mover",
     });
-    expect(pos).toBe((GAP + GAP * 2) / 2);
-  });
+      expect(pos).toBe((GAP + GAP * 2) / 2);
+    });
 
-  it("places before first when next is truly first", async () => {
-    const lists: FakeList[] = [{ id: "b", boardId: B, position: GAP * 2 }];
-    const pos = await resolveListPosition(client(lists), {
+    it("rejects between anchors that are both live but reversed", async () => {
+      const lists: FakeList[] = [
+        { id: "prev", boardId: B, position: GAP * 3 },
+        { id: "next", boardId: B, position: GAP * 2 },
+      ];
+
+      const error = await resolveListPositionIntent(client(lists), {
+        boardId: B,
+        intent: "between",
+        prevListId: "prev",
+        nextListId: "next",
+        excludeListId: "mover",
+      }).catch((cause: unknown) => cause);
+
+      expect(error).toBeInstanceOf(OrderConflictError);
+      expect((error as OrderConflictError).reason).toBe("ANCHORS_STALE");
+    });
+
+  it("start intent places before the current first live list (absolute)", async () => {
+    const lists: FakeList[] = [
+      { id: "first", boardId: B, position: GAP },
+      { id: "b", boardId: B, position: GAP * 2 },
+    ];
+    const pos = await resolveListPositionIntent(client(lists), {
       boardId: B,
-      nextListId: "b",
+      intent: "start",
+      nextListId: "stale-hint",
       excludeListId: "mover",
     });
-    expect(pos).toBe(GAP * 2 - GAP);
+    expect(pos).toBe(GAP - GAP);
   });
 
-  it("appends at GAP into an empty board", async () => {
-    const pos = await resolveListPosition(client([]), { boardId: B });
+  it("end intent appends at GAP into an empty board", async () => {
+    const pos = await resolveListPositionIntent(client([]), { boardId: B, intent: "end" });
     expect(pos).toBe(GAP);
   });
 
-  it("throws a retryable StaleNeighborError when a prev hint is an archived list", async () => {
-    const lists: FakeList[] = [{ id: "archived-1", boardId: B, position: GAP, archivedAt: new Date() }];
-    const err = await resolveListPosition(client(lists), {
+  it("throws OrderConflictError(ANCHORS_STALE) when BOTH between anchors are archived/foreign — never a silent append", async () => {
+    const lists: FakeList[] = [
+      { id: "archived-1", boardId: B, position: GAP, archivedAt: new Date() },
+      { id: "archived-2", boardId: B, position: GAP * 2, archivedAt: new Date() },
+    ];
+    const err = await resolveListPositionIntent(client(lists), {
       boardId: B,
+      intent: "between",
       prevListId: "archived-1",
-    }).catch((e) => e);
-    expect(err).toBeInstanceOf(StaleNeighborError);
-    expect((err as StaleNeighborError).side).toBe("prev");
+      nextListId: "archived-2",
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OrderConflictError);
+    expect((err as OrderConflictError).reason).toBe("ANCHORS_STALE");
   });
 
-  it("skips archived middle/follower lists during bisection, making archived lists invisible to adjacency search", async () => {
+  it("between intent skips archived middle/follower lists during bisection, making archived lists invisible to adjacency search", async () => {
     // Live list A at GAP, archived list M in middle at GAP*2, live list B at GAP*3
     const lists: FakeList[] = [
       { id: "a", boardId: B, position: GAP },
@@ -183,16 +220,18 @@ describe("resolveListPosition (US-062 MJ3)", () => {
     ];
 
     // prevListId = "a": follower search must skip archived "m" and find live "b"
-    const posPrev = await resolveListPosition(client(lists), {
+    const posPrev = await resolveListPositionIntent(client(lists), {
       boardId: B,
+      intent: "between",
       prevListId: "a",
       excludeListId: "mover",
     });
     expect(posPrev).toBe((GAP + GAP * 3) / 2);
 
     // nextListId = "b": preceding search must skip archived "m" and find live "a"
-    const posNext = await resolveListPosition(client(lists), {
+    const posNext = await resolveListPositionIntent(client(lists), {
       boardId: B,
+      intent: "between",
       nextListId: "b",
       excludeListId: "mover",
     });
@@ -203,8 +242,9 @@ describe("resolveListPosition (US-062 MJ3)", () => {
       { id: "a", boardId: B, position: GAP },
       { id: "m", boardId: B, position: GAP * 2, archivedAt: new Date() },
     ];
-    const posEnd = await resolveListPosition(client(listsEndArchived), {
+    const posEnd = await resolveListPositionIntent(client(listsEndArchived), {
       boardId: B,
+      intent: "between",
       prevListId: "a",
       excludeListId: "mover",
     });
@@ -212,38 +252,69 @@ describe("resolveListPosition (US-062 MJ3)", () => {
   });
 });
 
-describe("reorderListByNeighbors stale-neighbour recovery (US-062 mn2)", () => {
+describe("reorderListByNeighbors (decision 0032 lock + OCC protocol)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("drops a stale prev hint and appends instead of failing the reorder", async () => {
-    // Board has one other live list "keep"; the mover is "m". The client's prev
-    // hint "gone" no longer exists (a rival removed/moved it). First attempt
-    // throws StaleNeighborError; the loop drops the hint and retries, appending
-    // after the last live list.
-    const lists: FakeList[] = [
-      { id: "keep", boardId: B, position: GAP },
-      { id: "m", boardId: B, position: GAP * 5 },
-    ];
-    const clientFns = makeListClient(lists).list;
+  // Fakes `$queryRaw` for the two FOR UPDATE lock helpers the reorder uses:
+  // the board scope lock and the live-list lock (routed by SQL text).
+  function rawLockMock(opts: { boardFound?: boolean; liveLists?: string[] }) {
+    const { boardFound = true, liveLists = [] } = opts;
+    return vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const sql = strings[0] ?? "";
+      const id = String(values[0] ?? "");
+      if (sql.includes('FROM "board"')) {
+        return boardFound ? [{ id }] : [];
+      }
+      if (sql.includes('FROM "list"')) {
+        return liveLists.includes(id)
+          ? [{ id, boardId: B, position: id === "m" ? GAP * 5 : GAP, moveRevision: 0 }]
+          : [];
+      }
+      return [];
+    });
+  }
 
-    const tx = {
+  function baseTx(overrides: Record<string, unknown> = {}) {
+    return {
       list: {
-        findUnique: clientFns.findUnique,
-        findFirst: clientFns.findFirst,
-        update: vi.fn(async ({ data }: { data: { position: number } }) => ({
+        findUnique: vi.fn(async ({ where }: { where: { id: string } }) => {
+          if (where.id === "m") {
+            return { id: "m", boardId: B, position: GAP * 5, moveRevision: 0, archivedAt: null };
+          }
+          if (where.id === "keep") {
+            return { id: "keep", boardId: B, position: GAP, moveRevision: 0, archivedAt: null };
+          }
+          return null;
+        }),
+        findFirst: makeListClient([
+          { id: "keep", boardId: B, position: GAP },
+          { id: "m", boardId: B, position: GAP * 5 },
+        ]).list.findFirst,
+        findMany: vi.fn(
+          async (): Promise<Array<{ id: string; position: number }>> => [],
+        ),
+        update: vi.fn(async () => ({})),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+        findUniqueOrThrow: vi.fn(async () => ({
           id: "m",
           boardId: B,
-          title: "Moved",
-          position: data.position,
+          title: "Mover",
+          position: GAP * 2,
+          moveRevision: 1,
+          archivedAt: null,
           createdAt: new Date(0),
           updatedAt: new Date(0),
         })),
       },
+      $queryRaw: rawLockMock({ liveLists: ["m"] }),
+      ...overrides,
     };
-    // reorderListByNeighbors reads the mover via tx.list.findUnique({id:"m"}) —
-    // handled by the fake client — then resolves position, then updates.
+  }
+
+  it("end intent with a matching expectedMoveRevision appends and CAS-bumps the revision", async () => {
+    const tx = baseTx();
     mockDb.$transaction.mockImplementation(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       async (cb: any) => cb(tx),
@@ -251,91 +322,165 @@ describe("reorderListByNeighbors stale-neighbour recovery (US-062 mn2)", () => {
 
     const result = await reorderListByNeighbors({
       listId: "m",
-      prevListId: "gone",
+      workspaceId: "ws-1",
+      intent: "end",
+      prevListId: null,
+      nextListId: null,
+      expectedMoveRevision: 0,
     });
 
-    // Appended after the last live list (excluding the mover) → keep.position + GAP.
+    // End intent: after the last live list excluding the mover → keep.position + GAP.
     expect(result.position).toBe(GAP + GAP);
-    expect(tx.list.update).toHaveBeenCalledTimes(1);
+    // Compare-and-set on the revision read under the lock, bumping it atomically.
+    expect(tx.list.updateMany).toHaveBeenCalledWith({
+      where: { id: "m", moveRevision: 0 },
+      data: { position: GAP + GAP, moveRevision: 1 },
+    });
   });
 
-  it("triggers normalizeListPositions on PositionSpaceExhaustedError, filtering archivedAt:null, and succeeds on retry", async () => {
-    // Setup board with mover list 'm' and another list 'keep'
-    const moverList = { id: "m", boardId: B, title: "Mover", position: GAP, archivedAt: null, createdAt: new Date(0), updatedAt: new Date(0) };
-    const keepList = { id: "keep", boardId: B, title: "Keep", position: GAP, archivedAt: null, createdAt: new Date(0), updatedAt: new Date(0) };
-    let attempt = 0;
-    const findManyCalls: Array<Record<string, unknown>> = [];
+  it("rejects a stale expectedMoveRevision with OrderConflictError(MOVE_REVISION) and never writes", async () => {
+    const tx = baseTx();
+    tx.list.findUnique.mockResolvedValueOnce({
+      id: "m",
+      boardId: B,
+      position: GAP * 5,
+      moveRevision: 3, // client saw an older revision
+      archivedAt: null,
+    });
+    tx.$queryRaw.mockImplementation(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const sql = strings[0] ?? "";
+      const id = String(values[0] ?? "");
+      if (sql.includes('FROM "board"')) {
+        return [{ id }];
+      }
+      if (sql.includes('FROM "list"')) {
+        return [{ id, boardId: B, position: GAP * 5, moveRevision: 3 }];
+      }
+      return [];
+    });
+    mockDb.$transaction.mockImplementation(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      async (cb: any) => cb(tx),
+    );
 
-    // First attempt: resolveListPosition in reorderListByNeighbors is called.
-    // findUnique finds "m" and "keep", but finding following list throws PositionSpaceExhaustedError.
-    const txAttempt1 = {
-      list: {
-        findUnique: vi.fn(async ({ where }: { where: { id: string } }) => {
-          if (where.id === "m") return moverList;
-          if (where.id === "keep") return keepList;
-          return null;
-        }),
-        findFirst: vi.fn(async () => {
+    await expect(
+      reorderListByNeighbors({
+        listId: "m",
+        workspaceId: "ws-1",
+        intent: "end",
+        expectedMoveRevision: 2,
+      }),
+    ).rejects.toMatchObject({ reason: "MOVE_REVISION" });
+    expect(tx.list.updateMany).not.toHaveBeenCalled();
+    expect(tx.list.findUniqueOrThrow).not.toHaveBeenCalled();
+  });
+
+  it("rebases a between intent on the surviving anchor instead of failing", async () => {
+    const tx = baseTx();
+    mockDb.$transaction.mockImplementation(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      async (cb: any) => cb(tx),
+    );
+
+    // prev hint is gone (foreign/stale), next hint "keep" survives → bisect
+    // before keep against its current preceding card (none, excluding the mover).
+    const result = await reorderListByNeighbors({
+      listId: "m",
+      workspaceId: "ws-1",
+      intent: "between",
+      prevListId: "gone",
+      nextListId: "keep",
+      expectedMoveRevision: 0,
+    });
+
+    // The CAS write carries the rebased position (keep.position - GAP).
+    expect(tx.list.updateMany).toHaveBeenCalledWith({
+      where: { id: "m", moveRevision: 0 },
+      data: { position: GAP - GAP, moveRevision: 1 },
+    });
+    expect(result.position).toBeDefined();
+  });
+
+  it("renumbers IN THE SAME transaction on PositionSpaceExhaustedError (lock still held), then re-resolves", async () => {
+    const tx = baseTx();
+    const findManyCalls: Array<Record<string, unknown>> = [];
+    tx.list.findMany = vi.fn(
+      async ({ where }: { where: Record<string, unknown> }): Promise<
+        Array<{ id: string; position: number }>
+      > => {
+        findManyCalls.push(where);
+        return [
+          { id: "m", position: GAP * 5 },
+          { id: "keep", position: GAP },
+        ];
+      },
+    );
+
+    let resolveCalls = 0;
+    const realClient = makeListClient([
+      { id: "keep", boardId: B, position: GAP },
+      { id: "m", boardId: B, position: GAP * 5 },
+    ]).list;
+    tx.list.findFirst = vi.fn(
+      async (args: { where: Record<string, unknown>; orderBy?: unknown }) => {
+        resolveCalls += 1;
+        if (resolveCalls === 1) {
+          // First resolve: neighbours too close to split.
           const { PositionSpaceExhaustedError } = await import("./ordering");
           throw new PositionSpaceExhaustedError();
-        }),
-        update: vi.fn(),
+        }
+        return realClient.findFirst(args);
       },
-    };
+    );
 
-    // Normalization transaction: db.$transaction calls normalizeListPositions callback
-    const txNormalize = {
-      list: {
-        findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
-          findManyCalls.push(where);
-          return [moverList, keepList];
-        }),
-        update: vi.fn(async () => moverList),
-      },
-    };
-
-    // Second attempt after normalization: succeeds
-    const txAttempt2 = {
-      list: {
-        findUnique: vi.fn(async ({ where }: { where: { id: string } }) => {
-          if (where.id === "m") return moverList;
-          if (where.id === "keep") return keepList;
-          return null;
-        }),
-        findFirst: vi.fn(async () => null), // no following list after keep -> appends
-        update: vi.fn(async ({ data }: { data: { position: number } }) => ({
-          ...moverList,
-          position: data.position,
-        })),
-      },
-    };
-
-    mockDb.$transaction.mockImplementation(async (cb: (tx: unknown) => unknown) => {
-      attempt += 1;
-      if (attempt === 1) {
-        return cb(txAttempt1);
-      }
-      if (attempt === 2) {
-        // This is normalizeListPositions transaction
-        return cb(txNormalize);
-      }
-      if (attempt === 3) {
-        // This is retry attempt in reorderListByNeighbors
-        return cb(txAttempt2);
-      }
-      throw new Error(`Unexpected transaction attempt ${attempt}`);
-    });
+    mockDb.$transaction.mockImplementation(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      async (cb: any) => cb(tx),
+    );
 
     const result = await reorderListByNeighbors({
       listId: "m",
+      workspaceId: "ws-1",
+      intent: "between",
       prevListId: "keep",
+      expectedMoveRevision: 0,
     });
 
     expect(result.position).toBeDefined();
-    // Verify normalizeListPositions ran tx.list.findMany with archivedAt: null
+    // Normalization ran inside the SAME transaction (single $transaction call),
+    // querying live lists with the archivedAt: null filter.
+    expect(mockDb.$transaction).toHaveBeenCalledTimes(1);
     expect(findManyCalls).toHaveLength(1);
     expect(findManyCalls[0]).toEqual({ boardId: B, archivedAt: null });
-    expect(txAttempt2.list.update).toHaveBeenCalledTimes(1);
+    expect(tx.list.update).toHaveBeenCalled(); // renumber writes
+    const normalizationUpdates = (tx.list.update as ReturnType<typeof vi.fn>).mock.calls;
+    expect(
+      normalizationUpdates.every((call) => {
+        const args = call[0] as { data?: Record<string, unknown> } | undefined;
+        if (!args?.data) {
+          return false;
+        }
+        return Object.keys(args.data).every((key) => key === "position");
+      }),
+    ).toBe(true);
+  });
+
+  it("throws List not found when the board scope vanished under the lock", async () => {
+    const tx = baseTx({ $queryRaw: rawLockMock({ boardFound: false, liveLists: ["m"] }) });
+    mockDb.$transaction.mockImplementation(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      async (cb: any) => cb(tx),
+    );
+
+    await expect(
+        reorderListByNeighbors({
+          listId: "m",
+          workspaceId: "ws-1",
+          intent: "end",
+          expectedMoveRevision: 0,
+        }),
+    ).rejects.toThrow("List not found");
+    expect(tx.list.updateMany).not.toHaveBeenCalled();
   });
 });
 
@@ -509,72 +654,93 @@ describe("US-074 Slice B — getArchivedLists / getArchivedListWithBoard / resto
     });
   });
 
-  describe("restoreList", () => {
-    it("preserves original position if position is free", async () => {
+  describe("restoreList (decision 0032 lock + revision protocol)", () => {
+    function makeRawLockMock(opts: { boardFound?: boolean; archivedListFound?: boolean }) {
+      const { boardFound = true, archivedListFound = true } = opts;
+      return vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+        const sql = strings[0] ?? "";
+        const id = String(values[0] ?? "");
+        if (sql.includes('FROM "board"')) {
+          return boardFound ? [{ id }] : [];
+        }
+        if (sql.includes('FROM "list"')) {
+          return archivedListFound
+            ? [{ id, boardId: B, position: 16384 }]
+            : [];
+        }
+        return [];
+      });
+    }
+
+    function baseTx(overrides: Record<string, unknown> = {}) {
       const now = new Date();
-      const tx = {
+      return {
         list: {
           findFirst: vi
             .fn()
-            // 1. targetList lookup inside tx
             .mockResolvedValueOnce({ id: "l-1", boardId: B, position: 16384 })
-            // 2. occupied lookup -> free
-            .mockResolvedValueOnce(null),
+            .mockResolvedValueOnce(null), // occupied → free
           updateMany: vi.fn().mockResolvedValueOnce({ count: 1 }),
           findUniqueOrThrow: vi.fn().mockResolvedValueOnce({
             id: "l-1",
             boardId: B,
             title: "List 1",
             position: 16384,
+            moveRevision: 1,
             archivedAt: null,
             createdAt: now,
             updatedAt: now,
           }),
         },
+        $queryRaw: makeRawLockMock({}),
+        ...overrides,
       };
+    }
 
+    it("preserves original position if free, under the board + archived-list locks, bumping the revision", async () => {
+      const tx = baseTx();
       mockDb.$transaction.mockImplementationOnce(async (cb: (t: typeof tx) => unknown) => cb(tx));
 
-      const res = await restoreList("l-1");
+      const res = await restoreList("l-1", "ws-1");
       expect(res.position).toBe(16384);
+      expect(res.moveRevision).toBe(1);
       expect(tx.list.updateMany).toHaveBeenCalledWith({
         where: { id: "l-1", archivedAt: { not: null } },
-        data: { archivedAt: null, position: 16384 },
+        data: { archivedAt: null, position: 16384, moveRevision: { increment: 1 } },
       });
+      // Workspace, board, and archived-list FOR UPDATE locks are acquired in
+      // the global hierarchy.
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
     });
 
     it("appends after last active list if original position is occupied", async () => {
-      const now = new Date();
-      const tx = {
-        list: {
-          findFirst: vi
-            .fn()
-            // 1. targetList lookup inside tx
-            .mockResolvedValueOnce({ id: "l-1", boardId: B, position: 16384 })
-            // 2. occupied lookup -> occupied by active list!
-            .mockResolvedValueOnce({ id: "l-active-1" })
-            // 3. lastActive lookup -> max position is 32768
-            .mockResolvedValueOnce({ position: 32768 }),
-          updateMany: vi.fn().mockResolvedValueOnce({ count: 1 }),
-          findUniqueOrThrow: vi.fn().mockResolvedValueOnce({
-            id: "l-1",
-            boardId: B,
-            title: "List 1",
-            position: 32768 + GAP,
-            archivedAt: null,
-            createdAt: now,
-            updatedAt: now,
-          }),
-        },
-      };
-
+      const tx = baseTx();
+      tx.list.findFirst
+        .mockReset()
+        // 1. targetList lookup inside tx
+        .mockResolvedValueOnce({ id: "l-1", boardId: B, position: 16384 })
+        // 2. occupied lookup -> occupied by active list!
+        .mockResolvedValueOnce({ id: "l-active-1" })
+        // 3. lastActive lookup -> max position is 32768
+        .mockResolvedValueOnce({ position: 32768 });
+      tx.list.updateMany.mockReset().mockResolvedValueOnce({ count: 1 });
+      tx.list.findUniqueOrThrow.mockReset().mockResolvedValueOnce({
+        id: "l-1",
+        boardId: B,
+        title: "List 1",
+        position: 32768 + GAP,
+        moveRevision: 1,
+        archivedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
       mockDb.$transaction.mockImplementationOnce(async (cb: (t: typeof tx) => unknown) => cb(tx));
 
-      const res = await restoreList("l-1");
+      const res = await restoreList("l-1", "ws-1");
       expect(res.position).toBe(32768 + GAP);
       expect(tx.list.updateMany).toHaveBeenCalledWith({
         where: { id: "l-1", archivedAt: { not: null } },
-        data: { archivedAt: null, position: 49152 },
+        data: { archivedAt: null, position: 49152, moveRevision: { increment: 1 } },
       });
     });
 
@@ -583,79 +749,36 @@ describe("US-074 Slice B — getArchivedLists / getArchivedListWithBoard / resto
         list: {
           findFirst: vi.fn().mockResolvedValueOnce(null),
         },
+        $queryRaw: makeRawLockMock({}),
       };
       mockDb.$transaction.mockImplementationOnce(async (cb: (t: typeof tx) => unknown) => cb(tx));
 
-      await expect(restoreList("l-active")).rejects.toThrow("LIST_NOT_FOUND");
+      await expect(restoreList("l-active", "ws-1")).rejects.toThrow("LIST_NOT_FOUND");
     });
 
-    it("retries on P2002 collision by opening a fresh transaction and recomputing target", async () => {
-      const now = new Date();
-      const p2002Err = new Error("Unique constraint failed");
-      (p2002Err as { code?: string }).code = "P2002";
+    it("throws LIST_NOT_FOUND when a concurrent restore/purge beat us to the archived-list lock", async () => {
+      const tx = baseTx({ $queryRaw: makeRawLockMock({ archivedListFound: false }) });
+      mockDb.$transaction.mockImplementationOnce(async (cb: (t: typeof tx) => unknown) => cb(tx));
 
-      // Attempt 1: target position occupied, computes 49152, updateMany throws P2002
-      const tx1 = {
-        list: {
-          findFirst: vi
-            .fn()
-            .mockResolvedValueOnce({ id: "l-1", boardId: B, position: 16384 })
-            .mockResolvedValueOnce({ id: "l-active-1" })
-            .mockResolvedValueOnce({ position: 32768 }),
-          updateMany: vi.fn().mockRejectedValueOnce(p2002Err),
-        },
-      };
-
-      // Attempt 2: fresh tx, lastActive is now 49152, computes 65536, updateMany succeeds!
-      const tx2 = {
-        list: {
-          findFirst: vi
-            .fn()
-            .mockResolvedValueOnce({ id: "l-1", boardId: B, position: 16384 })
-            .mockResolvedValueOnce({ id: "l-active-1" })
-            .mockResolvedValueOnce({ position: 49152 }),
-          updateMany: vi.fn().mockResolvedValueOnce({ count: 1 }),
-          findUniqueOrThrow: vi.fn().mockResolvedValueOnce({
-            id: "l-1",
-            boardId: B,
-            title: "List 1",
-            position: 65536,
-            archivedAt: null,
-            createdAt: now,
-            updatedAt: now,
-          }),
-        },
-      };
-
-      mockDb.$transaction
-        .mockImplementationOnce(async (cb: (t: typeof tx1) => unknown) => cb(tx1))
-        .mockImplementationOnce(async (cb: (t: typeof tx2) => unknown) => cb(tx2));
-
-      const res = await restoreList("l-1");
-      expect(res.position).toBe(65536);
-      expect(tx2.list.updateMany).toHaveBeenCalledWith({
-        where: { id: "l-1", archivedAt: { not: null } },
-        data: { archivedAt: null, position: 65536 },
-      });
+      await expect(restoreList("l-1", "ws-1")).rejects.toThrow("LIST_NOT_FOUND");
+      expect(tx.list.updateMany).not.toHaveBeenCalled();
     });
 
-    it("throws retry exhaustion error when all retries hit P2002", async () => {
-      const p2002Err = new Error("Unique constraint failed");
-      (p2002Err as { code?: string }).code = "P2002";
+    it("throws LIST_NOT_FOUND when the board is archived/missing under the scope lock", async () => {
+      const tx = baseTx({ $queryRaw: makeRawLockMock({ boardFound: false }) });
+      mockDb.$transaction.mockImplementationOnce(async (cb: (t: typeof tx) => unknown) => cb(tx));
 
-      mockDb.$transaction.mockImplementation(async (cb: (t: unknown) => unknown) =>
-        cb({
-          list: {
-            findFirst: vi
-              .fn()
-              .mockResolvedValueOnce({ id: "l-1", boardId: B, position: 16384 })
-              .mockResolvedValueOnce(null),
-            updateMany: vi.fn().mockRejectedValue(p2002Err),
-          },
-        }),
-      );
+      await expect(restoreList("l-1", "ws-1")).rejects.toThrow("LIST_NOT_FOUND");
+      expect(tx.list.updateMany).not.toHaveBeenCalled();
+    });
 
-      await expect(restoreList("l-1")).rejects.toThrow("Failed to restore list after retrying position conflicts");
+    it("throws LIST_NOT_FOUND when the updateMany CAS matches zero rows (concurrent restore won)", async () => {
+      const tx = baseTx();
+      tx.list.updateMany.mockReset().mockResolvedValueOnce({ count: 0 });
+      mockDb.$transaction.mockImplementationOnce(async (cb: (t: typeof tx) => unknown) => cb(tx));
+
+      await expect(restoreList("l-1", "ws-1")).rejects.toThrow("LIST_NOT_FOUND");
+      expect(tx.list.findUniqueOrThrow).not.toHaveBeenCalled();
     });
   });
 

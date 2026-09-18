@@ -111,7 +111,7 @@ export function cardWithListAndBoardFixture(
 /** Shaped like `getCardWithListAndMembers(cardId)`. */
 export function cardWithListAndMembersFixture(
   workspaceId: string,
-  opts: { boardId?: string; cardId?: string } = {},
+  opts: { boardId?: string; cardId?: string; listId?: string } = {},
 ) {
   const boardId = opts.boardId ?? "board-1";
   return {
@@ -121,7 +121,7 @@ export function cardWithListAndMembersFixture(
       estimateHours: null as number | null,
       dueDate: null as Date | null,
     },
-    list: { id: "list-1", boardId },
+    list: { id: opts.listId ?? "list-1", boardId },
     board: { id: boardId, workspaceId },
     memberIds: [] as string[],
   };

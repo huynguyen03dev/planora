@@ -33,7 +33,7 @@ export async function fetchVerificationLink(
           const body = (await full.json()) as { Text?: string; HTML?: string };
           const content = `${body.Text ?? ""}\n${body.HTML ?? ""}`;
           const match = content.match(
-            /https?:\/\/[^\s"'<>]*\/verify-email\?token=[^\s"'<>&]+/,
+              /https?:\/\/[^\s"'<>]*\/verify-email\?token=[^\s"'<>]+/,
           );
           if (match) return match[0];
         }

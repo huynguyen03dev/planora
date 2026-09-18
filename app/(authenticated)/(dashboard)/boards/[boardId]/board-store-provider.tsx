@@ -5,12 +5,15 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { initSocket, joinBoard, leaveBoard } from "@/lib/realtime/client";
 import type {
+  BoardArchivedPayload,
+  BoardDeletedPayload,
   BoardPresencePayload,
   CardArchivedPayload,
   CardCompletionUpdatedPayload,
   CardCreatedPayload,
   CardLabelsUpdatedPayload,
   CardMembersUpdatedPayload,
+  CardMetaUpdatedPayload,
   CardMovedPayload,
   CardUpdatedPayload,
   CommentCreatedPayload,
@@ -69,6 +72,7 @@ export function BoardStoreProvider({
   const applyRemoteCardCompletionUpdated = useBoardStore((s) => s.applyRemoteCardCompletionUpdated);
   const applyRemoteCardLabelsUpdated = useBoardStore((s) => s.applyRemoteCardLabelsUpdated);
   const applyRemoteCardMembersUpdated = useBoardStore((s) => s.applyRemoteCardMembersUpdated);
+  const applyRemoteCardMetaUpdated = useBoardStore((s) => s.applyRemoteCardMetaUpdated);
   const applyRemoteCommentCreated = useBoardStore((s) => s.applyRemoteCommentCreated);
   const applyRemotePresence = useBoardStore((s) => s.applyRemotePresence);
   const seedWatchers = useBoardStore((s) => s.seedWatchers);
@@ -102,7 +106,6 @@ export function BoardStoreProvider({
     setSelectedCard,
   ]);
 
-  // Socket lifecycle: connect once, handle errors
   useEffect(() => {
     const socket = initSocket();
 
@@ -216,6 +219,45 @@ export function BoardStoreProvider({
       applyRemoteCardMembersUpdated(payload);
     }
 
+    function handleCardMetaUpdated(payload: CardMetaUpdatedPayload) {
+      // In-place patch (due date / priority / estimate / cover); safe mid-drag,
+      // applied live like card:completion-updated — it never reorders the list
+      // array.
+      applyRemoteCardMetaUpdated(payload);
+    }
+
+    function handleBoardArchived(payload: BoardArchivedPayload) {
+      // F10: the board we are viewing was soft-archived. Leave its room so no
+      // further broadcasts arrive, clear the local store, and re-render
+      // server-side — the page's getBoardById → notFound() takes over naturally
+      // (no bespoke banner needed: the server is authoritative).
+      if (useBoardStore.getState().boardId !== payload.boardId) {
+        return;
+      }
+      leaveBoard(payload.boardId);
+      useBoardStore.getState().reset();
+      router.refresh();
+    }
+
+    function handleBoardDeleted(payload: BoardDeletedPayload) {
+      // F10: the board we are viewing was permanently deleted — redirect to the
+      // boards list (the board no longer exists for anyone).
+      if (useBoardStore.getState().boardId !== payload.boardId) {
+        return;
+      }
+      leaveBoard(payload.boardId);
+      useBoardStore.getState().reset();
+      router.replace("/boards");
+    }
+
+    function handleBoardError() {
+      // U5: the server rejected a join (permission revoked, board archived, or
+      // membership removed while connected). Server state is authoritative:
+      // re-render this page server-side so the role/board checks 404 or
+      // redirect naturally. The base console.error lives in client.ts.
+      router.refresh();
+    }
+
     function handleCommentCreated(payload: CommentCreatedPayload) {
       applyRemoteCommentCreated(payload);
     }
@@ -241,6 +283,10 @@ export function BoardStoreProvider({
     socket.on("card:completion-updated", handleCardCompletionUpdated);
     socket.on("card:labels-updated", handleCardLabelsUpdated);
     socket.on("card:members-updated", handleCardMembersUpdated);
+    socket.on("card:meta-updated", handleCardMetaUpdated);
+    socket.on("board:archived", handleBoardArchived);
+    socket.on("board:deleted", handleBoardDeleted);
+    socket.on("board:error", handleBoardError);
     socket.on("comment:created", handleCommentCreated);
     socket.on("board:presence", handlePresence);
 
@@ -260,6 +306,10 @@ export function BoardStoreProvider({
       socket.off("card:completion-updated", handleCardCompletionUpdated);
       socket.off("card:labels-updated", handleCardLabelsUpdated);
       socket.off("card:members-updated", handleCardMembersUpdated);
+      socket.off("card:meta-updated", handleCardMetaUpdated);
+      socket.off("board:archived", handleBoardArchived);
+      socket.off("board:deleted", handleBoardDeleted);
+      socket.off("board:error", handleBoardError);
       socket.off("comment:created", handleCommentCreated);
       socket.off("board:presence", handlePresence);
     };
@@ -276,6 +326,7 @@ export function BoardStoreProvider({
     applyRemoteCardCompletionUpdated,
     applyRemoteCardLabelsUpdated,
     applyRemoteCardMembersUpdated,
+    applyRemoteCardMetaUpdated,
     applyRemoteCommentCreated,
     applyRemotePresence,
     router,
@@ -299,7 +350,7 @@ export function BoardStoreProvider({
 
     if (socket.connected) {
       joinBoard(boardId);
-      connectedRef.current = true; // baseline: we were already connected at mount
+      connectedRef.current = true;
     }
 
     function onConnect() {
@@ -318,7 +369,6 @@ export function BoardStoreProvider({
     };
   }, [boardId, router]);
 
-  // Reset store on unmount
   useEffect(() => {
     return () => {
       reset();

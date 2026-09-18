@@ -250,11 +250,9 @@ test("card:updated — a card renamed by one user updates the face live for anot
   const baseline = { ...tripwire.counts };
   await expect(cardInListById(bobPage, todo, "Original card")).toBeVisible();
 
-  // Act: Alice renames the card via the real detail-sheet autosave.
   await openCardDetail(alicePage, "Original card");
   await renameOpenCard(alicePage, "Renamed card");
 
-  // Assert: the face title updates live on Bob's loaded board — no reload.
   await expect(cardInListById(bobPage, todo, "Renamed card")).toBeVisible();
   await expect(cardInListById(bobPage, todo, "Original card")).toHaveCount(0);
   tripwire.check(baseline, "card:updated proof window");
@@ -271,13 +269,11 @@ test("list:created — a list added by one user appears live for another (no rel
   const baseline = { ...tripwire.counts };
 
   const newListTitle = `Sprint ${tag}`;
-  // Does not exist anywhere yet — prove it from Bob's loaded board.
+  // Unique title — its appearance on Bob's loaded board is non-vacuous.
   await expect(bobPage.getByText(newListTitle, { exact: true })).toHaveCount(0);
 
-  // Act: Alice adds the list through the real composer.
   await addList(alicePage, newListTitle);
 
-  // Assert: the unique title appears on Bob's loaded board — no reload.
   await expect(bobPage.getByText(newListTitle, { exact: true })).toBeVisible();
   tripwire.check(baseline, "list:created proof window");
 });
@@ -294,10 +290,8 @@ test("list:updated — a list renamed by one user updates live for another (no r
   const baseline = { ...tripwire.counts };
   await expect(listColumnById(bobPage, todo)).toBeVisible();
 
-  // Act: Alice renames the list via its inline title editor.
   await renameList(alicePage, todo, "To Do", "In Progress");
 
-  // Assert: the new title is live on Bob's loaded board and the old is gone.
   await expect(bobPage.getByText("In Progress", { exact: true })).toBeVisible();
   await expect(bobPage.getByText("To Do", { exact: true })).toHaveCount(0);
   tripwire.check(baseline, "list:updated proof window");
@@ -318,11 +312,9 @@ test("list:deleted — a list archived by one user disappears live for another (
   const baseline = { ...tripwire.counts };
   await expect(listColumnById(bobPage, lists["To Go"])).toBeVisible();
 
-  // Act: Alice archives the list via the real archive-list UI (soft archive,
-  // never permanent purge).
+  // Alice archives via the real archive-list UI (soft archive, never purge).
   await archiveList(alicePage, lists["To Go"]);
 
-  // Assert: the archived column leaves Bob's loaded board; the other stays.
   await expect(listColumnById(bobPage, lists["To Go"])).toHaveCount(0);
   await expect(listColumnById(bobPage, lists["Keep"])).toBeVisible();
   tripwire.check(baseline, "list:deleted proof window");
@@ -353,8 +345,8 @@ test("notification:new — a mention by Alice increments Bob's bell badge with n
     dismissMentionListbox: true,
   });
 
-  // Assert: Bob's bell badge increments to exactly one unread — while he stays
-  // on the board page, with no reload and no socket reconnect/resync (the
+  // Assert: Bob's bell badge increments to exactly one unread while he stays
+  // on the board page — no reload and no socket reconnect/resync (the
   // tripwire excludes the unread-count reconnect fallback, not just reload).
   await expect(
     bobPage.getByRole("button", { name: "Notifications (1 unread)" }),
@@ -374,17 +366,15 @@ test("analytics:refresh — a card created by Alice refreshes Bob's dashboard me
 
   // Route-POST tripwire IS armed for the dashboard: router.refresh() is an RSC
   // GET (observed on the wire), so the debounce delivery never POSTs — any
-  // POST to the dashboard route inside the proof window is a masking-capable
-  // resync. This is also the only counter that sees a polling-transport
-  // reconnect (no websocket events at all, but the onConnect header unread
-  // resync still POSTs to the current route).
+  // POST inside the proof window is a masking-capable resync. This is also the
+  // only counter that sees a polling-transport reconnect (no websocket events,
+  // but the onConnect unread resync still POSTs to the current route).
   const tripwire = armProofTripwire(bobPage, dashboardPath);
   await joinBoardAndConfirmPresence(alicePage, bobPage, boardId);
 
   // Bob opens the dashboard while the workspace has NO cards, so the FlowChart
-  // starts in its empty state (no summary metric at all). The assertion below
-  // therefore cannot pass from initial SSR — the metric can only appear via a
-  // live re-render.
+  // starts empty (no summary metric at all) — the metric below can only appear
+  // via a live re-render, never from initial SSR.
   const resyncSettled = bobPage.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
@@ -393,14 +383,13 @@ test("analytics:refresh — a card created by Alice refreshes Bob's dashboard me
   );
   await bobPage.goto(dashboardPath);
   // Masking barrier: the header's connect-time unread resync
-  // (getInboxBadgeCountsAction, US-062 mn8 extended by US-083 W2) is a Server Action that
-  // re-renders the CURRENT route server-side and returns a fresh RSC payload
-  // (observed: the full dashboard, incl. getWorkspaceAnalyticsAction). If it
-  // landed after Alice's card create it would refresh the metric and mask a
-  // removed analytics:refresh emit. Wait for it to complete BEFORE Alice acts;
-  // from here on, the only page re-render source is the workspace-room signal
-  // → 700ms debounce → router.refresh() (an RSC GET — never a route POST, so
-  // it cannot trip the armed route-POST counter).
+  // (getInboxBadgeCountsAction, US-062 mn8 extended by US-083 W2) re-renders
+  // the CURRENT route server-side and returns a fresh RSC payload (the full
+  // dashboard, incl. getWorkspaceAnalyticsAction). If it landed after Alice's
+  // card create it would mask a removed analytics:refresh emit — wait for it
+  // to complete BEFORE Alice acts; afterwards the only page re-render source
+  // is the workspace-room signal → 700ms debounce → router.refresh() (an RSC
+  // GET — never a route POST, so it cannot trip the armed counter).
   await resyncSettled;
   await expect(
     bobPage.getByText("No cards were created or completed in the selected period."),
@@ -411,8 +400,8 @@ test("analytics:refresh — a card created by Alice refreshes Bob's dashboard me
   const todo = (await getListIdsByTitle(boardId))["To Do"];
   await addCardToList(alicePage, todo, "Analytics trigger");
 
-  // Assert: the Created metric appears on Bob's already-loaded dashboard — no
-  // reload, no navigation; the empty state stays if the emit is removed.
+  // Assert: the Created metric appears on Bob's already-loaded dashboard —
+  // no reload, no navigation; the empty state stays if the emit is removed.
   await expect(flowChartCreatedTotal(bobPage)).toHaveText("1");
   tripwire.check(baseline, "analytics:refresh proof window");
 });

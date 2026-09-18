@@ -47,6 +47,7 @@ const h = vi.hoisted(() => {
     cancelInvitation: vi.fn(),
     listMemberships: vi.fn(async () => [] as { workspaceId: string }[]),
     setActive: vi.fn(),
+    kickUserSockets: vi.fn(),
     db: {
       workspaceMember: { findFirst: vi.fn() },
       invitation: { findFirst: vi.fn() },
@@ -74,6 +75,7 @@ vi.mock("@/lib/workspace", () => ({
   listWorkspaceMembershipsByUserId: h.listMemberships,
   setActiveWorkspaceForCurrentUser: h.setActive,
 }));
+vi.mock("@/lib/realtime/server", () => ({ kickUserSockets: h.kickUserSockets }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/headers", () => ({ headers: vi.fn(async () => new Headers()) }));
 
@@ -157,6 +159,15 @@ describe("removeMemberAction (member:delete — admin only)", () => {
         body: { memberIdOrEmail: "member-t", organizationId: WS_A },
       }),
     );
+    // F2: the removed member's sockets are kicked so they stop receiving
+    // board/workspace broadcasts immediately.
+    expect(h.kickUserSockets).toHaveBeenCalledWith("victim");
+  });
+
+  it("F2: a denied removal never kicks the target's sockets", async () => {
+    signInAs("u", WS_A, "editor");
+    expect(await removeMemberAction(input(WS_A))).toEqual({ success: false, error: "Workspace not found" });
+    expect(h.kickUserSockets).not.toHaveBeenCalled();
   });
 
   it("R2: removing the sole admin is blocked, BA never called", async () => {
@@ -207,6 +218,9 @@ describe("updateMemberRoleAction (member:update — admin only)", () => {
     expect(h.updateMemberRole).toHaveBeenCalledWith(
       expect.objectContaining({ body: { memberId: "member-t", role: "admin", organizationId: WS_A } }),
     );
+    // F2: any successful role change kicks the target's sockets so their
+    // presence badge and room memberships re-resolve under the new role.
+    expect(h.kickUserSockets).toHaveBeenCalledWith("t");
   });
 
   it("R2: demoting the sole admin is blocked, BA never called", async () => {
@@ -225,6 +239,8 @@ describe("updateMemberRoleAction (member:update — admin only)", () => {
     targetMember({ id: "member-t", role: "editor" });
     expect(await updateMemberRoleAction(input(WS_A, "editor"))).toEqual({ success: true });
     expectNoWrites(...baWrites);
+    // F2: no role actually changed → no kick.
+    expect(h.kickUserSockets).not.toHaveBeenCalled();
   });
 });
 

@@ -61,11 +61,9 @@ export function CardCompletionToggle({
       if (!result.success) {
         return;
       }
-      // The socket echo (emitCardCompletionUpdated) updates this and other
-      // clients live when connected, but the realtime layer can be down. Refresh
-      // so the actor's UI reflects the write regardless — matching every sibling
-      // mutation in the card detail sheet, and re-hydrating the board store from
-      // fresh server props via BoardStoreProvider's setLists effect.
+      // The socket echo updates clients live when connected, but the realtime
+      // layer can be down — refresh so the actor's UI reflects the write
+      // regardless (matching every sibling mutation).
       router.refresh();
     });
   }

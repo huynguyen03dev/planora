@@ -46,6 +46,10 @@ describe("ResetPasswordForm", () => {
     const helper = screen.getByText("Minimum 8 characters");
     expect(helper).toBeInTheDocument();
     expect(helper).toHaveAttribute("id", "pw-help");
+
+    const confirmationInput = screen.getByLabelText("Confirm new password");
+    expect(confirmationInput).toHaveAttribute("autocomplete", "new-password");
+    expect(confirmationInput).toHaveAttribute("minLength", "8");
   });
 
   it("applies aria-invalid on password input when there is an error", async () => {
@@ -55,7 +59,11 @@ describe("ResetPasswordForm", () => {
 
     render(<ResetPasswordForm />);
 
-    await user.type(screen.getByLabelText("New password"), "newPassword123");
+      await user.type(screen.getByLabelText("New password"), "newPassword123");
+      await user.type(
+        screen.getByLabelText("Confirm new password"),
+        "newPassword123",
+      );
     await user.click(screen.getByRole("button", { name: "Reset password" }));
 
     await waitFor(() => {
@@ -76,6 +84,10 @@ describe("ResetPasswordForm", () => {
     render(<ResetPasswordForm />);
 
     await user.type(screen.getByLabelText("New password"), "newPassword123");
+    await user.type(
+      screen.getByLabelText("Confirm new password"),
+      "newPassword123",
+    );
     await user.click(screen.getByRole("button", { name: "Reset password" }));
 
     await waitFor(() => {
@@ -94,5 +106,23 @@ describe("ResetPasswordForm", () => {
     render(<ResetPasswordForm />);
     const button = screen.getByRole("button", { name: "Reset password" });
     expect(button).not.toBeDisabled();
+  });
+
+  it("blocks reset and scopes the error when confirmation does not match", async () => {
+    render(<ResetPasswordForm />);
+
+    await user.type(screen.getByLabelText("New password"), "newPassword123");
+    await user.type(
+      screen.getByLabelText("Confirm new password"),
+      "newPassword124",
+    );
+    await user.click(screen.getByRole("button", { name: "Reset password" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Passwords do not match");
+    expect(screen.getByLabelText("Confirm new password")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    expect(mockResetPassword).not.toHaveBeenCalled();
   });
 });

@@ -28,11 +28,20 @@ function makeClient(rules: RuleRow[]) {
     return { id: "log" };
   });
   const update = vi.fn(async () => ({ id: "log" }));
+  const findMany = vi.fn(async () => rules);
+  const workspaceGate = vi.fn(async () => []);
   const client = {
-    rule: { findMany: vi.fn(async () => rules) },
+    rule: { findMany },
     ruleExecutionLog: { create, update },
+    $queryRaw: workspaceGate,
   };
-  return { client: client as never, logCreate: create, logUpdate: update };
+  return {
+    client: client as never,
+    logCreate: create,
+    logUpdate: update,
+    findMany,
+    workspaceGate,
+  };
 }
 
 const VALID_ACTIONS = [{ type: "set-priority", priority: "HIGH" }];
@@ -56,6 +65,22 @@ beforeEach(() => {
 });
 
 describe("evaluateRules — matching + logging", () => {
+  it("takes the workspace gate before reading or executing a rule sequence", async () => {
+    const { client, findMany, workspaceGate } = makeClient([rule()]);
+
+    await evaluateRules({
+      client,
+      workspaceId: "ws",
+      triggerType: "card-created",
+      event: baseEvent,
+    });
+
+    expect(workspaceGate).toHaveBeenCalledTimes(1);
+    expect(workspaceGate.mock.invocationCallOrder[0]).toBeLessThan(
+      findMany.mock.invocationCallOrder[0],
+    );
+  });
+
   it("no enabled rules → no execution, no logs, no effects", async () => {
     const { client, logCreate } = makeClient([]);
     const result = await evaluateRules({
@@ -130,7 +155,7 @@ describe("evaluateRules — loop prevention", () => {
       producedEvents: [{ triggerType: "card-created", payload: { cardId: "c0", boardId: "b1" } }],
       stepOutcomes: [{ stepIndex: 0, actionType: "set-priority", status: "success" }],
     });
-    const { client, logCreate } = makeClient([rule()]);
+    const { client, logCreate, workspaceGate } = makeClient([rule()]);
     await evaluateRules({
       client,
       workspaceId: "ws",
@@ -143,6 +168,7 @@ describe("evaluateRules — loop prevention", () => {
     );
     expect(statuses).toContain("success");
     expect(statuses).toContain("skipped");
+    expect(workspaceGate).toHaveBeenCalledTimes(2);
   });
 
   it("halts a cascade at the depth cap (5): executes 5 levels, then logs halted", async () => {
@@ -166,6 +192,7 @@ describe("evaluateRules — loop prevention", () => {
     });
     // Depths 0..4 execute (5 fires); depth 5 is at the cap → halted, no execute.
     expect(mockExecute).toHaveBeenCalledTimes(5);
+    expect(mockExecute.mock.calls.every(([params]) => params.client === client)).toBe(true);
     const halted = logCreate.mock.calls
       .map((c) => c[0] as unknown as { data: { status: string; chainDepth: number } })
       .filter((d) => d.data.status === "halted");
@@ -388,6 +415,7 @@ describe("evaluateRules — dedupKey claim-first mode", () => {
     const client = {
       rule: { findMany: vi.fn(async () => [rule()]) },
       ruleExecutionLog: { create },
+      $queryRaw: vi.fn(async () => []),
     };
 
     const result = await evaluateRules({

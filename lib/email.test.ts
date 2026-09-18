@@ -10,7 +10,11 @@ vi.hoisted(() => {
 });
 
 // Mock Resend so we can capture the .send() argument without sending real email
-const mockResendSend = vi.hoisted(() => vi.fn(() => ({ error: null })));
+const mockResendSend = vi.hoisted(() =>
+  vi
+    .fn<() => Promise<{ error: null | { message: string } }>>()
+    .mockResolvedValue({ error: null }),
+);
 vi.mock("resend", () => ({
   Resend: vi.fn(() => ({
     emails: { send: mockResendSend },
@@ -99,6 +103,32 @@ describe("sendEmail from composition (Resend mock)", () => {
     expect(mockResendSend).not.toHaveBeenCalled();
 
     process.env.RESEND_API_KEY = origKey;
+  });
+
+  it("rejects when Resend returns a provider error", async () => {
+    mockResendSend.mockResolvedValueOnce({
+      error: { message: "Provider unavailable" },
+    });
+
+    await expect(
+      sendEmail({
+        to: "user@test.com",
+        subject: "Test",
+        react: dummyReact,
+      }),
+    ).rejects.toThrow("Provider unavailable");
+  });
+
+  it("rejects when the Resend request throws", async () => {
+    mockResendSend.mockRejectedValueOnce(new Error("Network unavailable"));
+
+    await expect(
+      sendEmail({
+        to: "user@test.com",
+        subject: "Test",
+        react: dummyReact,
+      }),
+    ).rejects.toThrow("Network unavailable");
   });
 });
 

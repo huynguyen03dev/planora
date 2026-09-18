@@ -130,7 +130,7 @@ export function MemberManagement({
       {toast ? (
         <div
           role="alert"
-          className="fixed right-4 top-4 z-[60] rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive shadow-md"
+          className="fixed right-4 bottom-4 z-[60] rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive shadow-lg"
         >
           {toast}
         </div>

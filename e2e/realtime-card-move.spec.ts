@@ -159,16 +159,15 @@ test("a structural remote event is deferred while the observer is mid-drag, then
   const todo = lists["To Do"];
   const doing = lists["Doing"];
 
-  // Bob's card lives in "To Do" (the list he will keep dragging within), while
-  // the cards Alice mutates live in "Doing" — so the live rename re-render never
-  // touches Bob's dragged list's array.
+  // Bob's card lives in "To Do" (the list he keeps dragging within), while
+  // the cards Alice mutates live in "Doing" — so the live rename re-render
+  // never touches Bob's dragged list's array.
   await addCardToList(alicePage, todo, "Bob card");
   await addCardToList(alicePage, doing, "Alice card");
   await addCardToList(alicePage, doing, "Marker");
   const bobCardId = await getCardIdByTitle(boardId, "Bob card");
   const aliceCardId = await getCardIdByTitle(boardId, "Alice card");
 
-  // Bob opens the board; all three cards present in their starting lists.
   await bobPage.goto(`/boards/${boardId}`);
   await expect(cardInListById(bobPage, todo, "Bob card")).toBeVisible();
   await expect(cardInListById(bobPage, doing, "Alice card")).toBeVisible();
@@ -178,11 +177,11 @@ test("a structural remote event is deferred while the observer is mid-drag, then
   // store's isDragging gate is armed and structural remote events defer.
   await liftCard(bobPage, bobCardId);
 
-  // Alice archives her card (mouse only — does not disturb Bob's held drag).
-  // This emits a structural card:archived that Bob must defer.
+  // Alice archives her card (mouse only — does not disturb Bob's held drag);
+  // this emits a structural card:archived that Bob must defer.
   await archiveCard(alicePage, aliceCardId);
-  // Confirm it committed on Alice (so card:archived has been emitted) before the
-  // rename below. socket.io delivers archive-before-rename on Bob's connection.
+  // Confirm it committed on Alice (so card:archived was emitted) before the
+  // rename below; socket.io delivers archive-before-rename on Bob's connection.
   await expect(cardInListById(alicePage, doing, "Alice card")).toHaveCount(0);
 
   // Alice renames "Marker". card:updated is an in-place patch applied LIVE on
@@ -194,19 +193,17 @@ test("a structural remote event is deferred while the observer is mid-drag, then
   // Barrier reached on Bob's still-dragging board.
   await expect(cardInListById(bobPage, doing, "Marker RENAMED")).toBeVisible();
 
-  // ── Deferral proof ────────────────────────────────────────────────────────
-  // The archive was delivered (the rename, emitted after it, is already showing)
-  // yet NOT applied: "Alice card" is still present on Bob's board — it was not
-  // removed from the list array under the active drag.
+  // Deferral proof: the archive was delivered (the rename emitted after it is
+  // already showing) yet NOT applied — "Alice card" is still present on Bob's
+  // board, i.e. not removed from the list array under the active drag.
   await expect(cardInListById(bobPage, doing, "Alice card")).toHaveCount(1);
 
-  // Bob drops his card. onDragEnd consumes the pending resync and pulls
+  // Bob drops his card: onDragEnd consumes the pending resync and pulls
   // canonical server state via router.refresh().
   await dropCard(bobPage);
 
-  // ── Reconciliation proof ──────────────────────────────────────────────────
-  // The deferred archive now folds in: "Alice card" disappears on Bob's view,
-  // while the live rename remains.
+  // Reconciliation proof: the deferred archive now folds in — "Alice card"
+  // disappears on Bob's view, while the live rename remains.
   await expect(cardInListById(bobPage, doing, "Alice card")).toHaveCount(0);
   await expect(cardInListById(bobPage, doing, "Marker RENAMED")).toBeVisible();
 });

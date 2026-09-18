@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -73,11 +74,22 @@ export function CreateWorkspaceModal({
       <DialogContent className="w-[calc(100%-2rem)]">
         <DialogHeader>
           <DialogTitle>Create workspace</DialogTitle>
+          <DialogDescription>
+            Workspaces group your boards and members together.
+          </DialogDescription>
         </DialogHeader>
 
         <form action={handleSubmit}>
           <div className="space-y-4">
-            {error ? <p className="text-sm text-destructive">{error}</p> : null}
+            {error ? (
+              <p
+                id="create-workspace-error"
+                role="alert"
+                className="text-sm text-destructive"
+              >
+                {error}
+              </p>
+            ) : null}
 
             <div className="space-y-2">
               <Label htmlFor="workspaceName">Workspace name</Label>
@@ -86,13 +98,25 @@ export function CreateWorkspaceModal({
                 name="workspaceName"
                 placeholder="Product Team"
                 autoFocus
+                aria-invalid={Boolean(error || fieldError)}
+                aria-describedby={
+                  [error ? "create-workspace-error" : null, fieldError ? "create-workspace-field-error" : null]
+                    .filter(Boolean)
+                    .join(" ") || undefined
+                }
                 onChange={() => {
                   setFieldError("");
                   setError("");
                 }}
               />
               {fieldError ? (
-                <p className="text-sm text-destructive">{fieldError}</p>
+                <p
+                  id="create-workspace-field-error"
+                  role="alert"
+                  className="text-sm text-destructive"
+                >
+                  {fieldError}
+                </p>
               ) : null}
             </div>
           </div>

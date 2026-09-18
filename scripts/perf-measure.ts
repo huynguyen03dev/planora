@@ -1,15 +1,12 @@
 #!/usr/bin/env tsx
 /**
  * DnD INP-vs-board-size measurement (US-027 need-assessment — local only).
- *
  * Signs up a fresh user against a PROD server, seeds boards at several card
- * counts, and for each one drives the @hello-pangea/dnd keyboard sensor through
- * the US-004 sequence (lift -> 3x move within list -> cross to next list ->
- * drop) while capturing the Event Timing API entries the INP metric is derived
- * from. Reports the worst interaction (== INP) per board, median of N runs.
- *
- * Prereq: a prod server on $BASE (default :3100) whose Better Auth origin
- * matches $BASE. Usage: npx tsx --env-file=.env scripts/perf-measure.ts
+ * counts, and drives the @hello-pangea/dnd keyboard sensor through the US-004
+ * lift -> move -> drop sequence while capturing Event Timing entries;
+ * reports the worst interaction (== INP) per board, median of N runs.
+ * Prereq: a prod server on $BASE (default :3100) with matching Better Auth origin.
+ * Usage: npx tsx --env-file=.env scripts/perf-measure.ts
  */
 import { execSync } from "node:child_process";
 
@@ -22,6 +19,8 @@ const SIZES = [30, 60, 100, 150];
 const RUNS = 3;
 // CPU throttle multiplier: 1 = this desktop, 4 ≈ mid-tier laptop, 6 ≈ phone.
 const CPU = parseInt(process.env.PERF_CPU ?? "1", 10);
+const INP_LIMIT_MS = parseInt(process.env.PERF_INP_MAX_MS ?? "500", 10);
+const LOAD_LIMIT_MS = parseInt(process.env.PERF_LOAD_MAX_MS ?? "3000", 10);
 
 type Interaction = { name: string; dur: number };
 
@@ -54,10 +53,17 @@ async function readInp(page: Page): Promise<{ max: number; entries: Interaction[
   });
 }
 
-/** One full drag session; returns the worst interaction latency + breakdown. */
+async function readNavigationMs(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const entry = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming;
+    return entry?.duration ?? 0;
+  });
+}
+
 async function measureDrag(page: Page): Promise<{ max: number; entries: Interaction[] }> {
-  // First CARD drag handle (lists also have handles; scope by aria-label).
-  const cardHandle = page.getByRole("button", { name: "Drag card" }).first();
+  // The whole card body is the drag handle (lists also have handles). Its
+  // accessible name is the card-open label, not a separate "Drag card" grip.
+  const cardHandle = page.getByRole("button", { name: /^Open card / }).first();
   await cardHandle.waitFor({ state: "visible", timeout: 15_000 });
   const cardId = await cardHandle.getAttribute("data-rfd-drag-handle-draggable-id");
   if (!cardId) throw new Error("no card drag handle id");
@@ -100,7 +106,9 @@ async function main() {
   const boards: Record<number, string> = {};
   for (const size of SIZES) {
     const out = execSync(
-      `npx tsx --env-file=.env scripts/seed-perf-board.ts --email ${creds.email} --cards ${size} --lists 5 --rich --slug perf-${stamp}-${size}`,
+      // Inherit the benchmark process environment. Passing --env-file here
+      // would overwrite an explicit DATABASE_URL used for an isolated test DB.
+      `npx tsx scripts/seed-perf-board.ts --email ${creds.email} --cards ${size} --lists 5 --rich --slug perf-${stamp}-${size}`,
       { cwd: process.cwd(), encoding: "utf8" },
     );
     const id = out.match(/BOARD_ID=([0-9a-f-]+)/)?.[1];
@@ -115,35 +123,51 @@ async function main() {
   }
   console.log(`CPU throttle: ${CPU}x`);
 
-  const results: Array<{ size: number; runs: number[]; median: number }> = [];
+  const results: Array<{
+    size: number;
+    inpRuns: number[];
+    loadRuns: number[];
+    medianInp: number;
+    medianLoad: number;
+  }> = [];
   for (const size of SIZES) {
-    const runs: number[] = [];
+    const inpRuns: number[] = [];
+    const loadRuns: number[] = [];
     let worst: { max: number; entries: Interaction[] } = { max: 0, entries: [] };
     for (let r = 0; r < RUNS; r++) {
       await page.goto(`/boards/${boards[size]}`, { waitUntil: "networkidle" });
+      loadRuns.push(Math.round(await readNavigationMs(page)));
       const inp = await measureDrag(page);
-      runs.push(Math.round(inp.max));
+      inpRuns.push(Math.round(inp.max));
       if (inp.max > worst.max) worst = inp;
     }
-    results.push({ size, runs, median: Math.round(median(runs)) });
-    console.log(`size ${size}: runs=[${runs.join(", ")}] median=${median(runs)}ms`);
+    const medianInp = Math.round(median(inpRuns));
+    const medianLoad = Math.round(median(loadRuns));
+    results.push({ size, inpRuns, loadRuns, medianInp, medianLoad });
+    console.log(
+      `size ${size}: INP=[${inpRuns.join(", ")}] median=${medianInp}ms; load=[${loadRuns.join(", ")}] median=${medianLoad}ms`,
+    );
     console.log(
       `  worst-run interactions: ${worst.entries.map((e) => `${e.name}=${Math.round(e.dur)}`).join("  ")}`,
     );
   }
 
-  console.log("\n========== INP vs board size (prod, no CPU throttle) ==========");
-  console.log("cards | 5 lists | runs (ms)            | median INP | band");
-  console.log("------|---------|---------------------|------------|------");
-  for (const { size, runs, median: med } of results) {
-    const band = med <= 200 ? "GOOD" : med <= 500 ? "needs-improvement" : "POOR";
+  console.log(`\n========== Planora board benchmark (CPU throttle ${CPU}x) ==========`);
+  console.log(`Thresholds: median INP <= ${INP_LIMIT_MS}ms; median board load <= ${LOAD_LIMIT_MS}ms`);
+  console.log("cards | median INP | median load | result");
+  console.log("------|------------|-------------|-------");
+  for (const { size, medianInp, medianLoad } of results) {
+    const pass = medianInp <= INP_LIMIT_MS && medianLoad <= LOAD_LIMIT_MS;
     console.log(
-      `${String(size).padEnd(5)} |    ${size / 5}    | ${runs.join(", ").padEnd(19)} | ${String(med).padEnd(10)} | ${band}`,
+      `${String(size).padEnd(5)} | ${String(medianInp).padEnd(10)} | ${String(medianLoad).padEnd(11)} | ${pass ? "PASS" : "FAIL"}`,
     );
   }
 
   await browser.close();
-  process.exit(0);
+  const failed = results.some(
+    ({ medianInp, medianLoad }) => medianInp > INP_LIMIT_MS || medianLoad > LOAD_LIMIT_MS,
+  );
+  process.exit(failed ? 1 : 0);
 }
 
 main().catch((err) => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import { createBoardAction } from "@/app/(authenticated)/(dashboard)/boards/actions";
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -33,6 +34,11 @@ export function CreateBoardModal({
   const [backgroundColor, setBackgroundColor] = useState<string>(DEFAULT_BOARD_COLOR);
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
+  // Synchronous same-tick single-flight: `isPending` only flips on the next
+  // render, so a double Enter (or Enter + click) in the same tick would create
+  // the board twice. The ref guards immediately and releases on completion or
+  // failure, so a retry after either always works.
+  const submittingRef = useRef(false);
 
   const isSubmitDisabled = useMemo(() => {
     return title.trim().length === 0 || isPending;
@@ -55,6 +61,10 @@ export function CreateBoardModal({
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submittingRef.current) {
+      return;
+    }
+    submittingRef.current = true;
     setError("");
 
     const formData = new FormData(event.currentTarget);
@@ -63,17 +73,26 @@ export function CreateBoardModal({
     formData.set("backgroundColor", backgroundColor);
 
     startTransition(async () => {
-      const result = await createBoardAction(formData);
+      try {
+        const result = await createBoardAction(formData);
 
-      if (!result.success) {
-        setError(result.error);
-        return;
+        if (!result.success) {
+          setError(result.error);
+          return;
+        }
+
+        resetState();
+        onClose();
+        router.push(`/boards/${result.boardId}`);
+        router.refresh();
+      } catch {
+        // A thrown/rejected action (network blip, unexpected server failure)
+        // surfaces a generic actionable error instead of an unhandled
+        // rejection; the guard still releases so a retry always works.
+        setError("Something went wrong. Please try again.");
+      } finally {
+        submittingRef.current = false;
       }
-
-      resetState();
-      onClose();
-      router.push(`/boards/${result.boardId}`);
-      router.refresh();
     });
   }
 
@@ -82,12 +101,23 @@ export function CreateBoardModal({
       <DialogContent className="w-[calc(100%-2rem)]">
         <DialogHeader>
           <DialogTitle>Create board</DialogTitle>
+          <DialogDescription>
+            Create a board to start organizing cards and lists.
+          </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <input type="hidden" name="workspaceId" value={workspaceId} />
 
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          {error ? (
+            <p
+              id="create-board-error"
+              role="alert"
+              className="text-sm text-destructive"
+            >
+              {error}
+            </p>
+          ) : null}
 
           <div className="space-y-2">
             <Label htmlFor="boardTitle">Board title</Label>
@@ -103,6 +133,8 @@ export function CreateBoardModal({
               autoFocus
               disabled={isPending}
               required
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "create-board-error" : undefined}
             />
           </div>
 

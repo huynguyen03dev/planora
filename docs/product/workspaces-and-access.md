@@ -11,6 +11,12 @@ plugin, remapped to Planora's domain.
 - All auth requests flow through the catch-all `app/api/auth/[...all]/route.ts`.
 - Client hooks come from `lib/auth-client.ts` (`useSession`, `signIn`, `signUp`,
   `signOut`, `organization`, `useActiveOrganization`, …).
+- Email ownership is enforced in every environment (decision 0023). Signup and
+  reset-password require matching password confirmation locally. Unverified
+  sign-in transitions to the `/verify-email` recovery hub instead of rendering a
+  destructive credential error. The hub supports neutral resend, token
+  verification, invalid/expired-link recovery, and a safe internal return path
+  (decision 0033).
 - Server code resolves identity with `verifySession()` (`lib/dal.ts`) — the
   first step of every Server Action. Never trust client-supplied identity.
 

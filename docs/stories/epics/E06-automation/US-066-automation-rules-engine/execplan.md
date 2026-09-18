@@ -117,14 +117,22 @@ Hard gates (→ high-risk):
    - `addCardLabel`, `removeCardLabel` (`lib/label.ts`)
    - `assignMemberToCard`, `removeMemberFromCard` (`lib/card-member.ts`)
 
-   **Deferred to Phase 5/6:** the card-move helper
-   `reorderCardWithinListByNeighbors` (`lib/card.ts:138`) opens its **own**
-   `db.$transaction` and retries the whole block on `StaleNeighborError`. It
-   cannot take an outer `tx` via a mechanical param swap — per decision 0022's
-   retry-loop semantics, rule evaluation must run *inside each move attempt*, so
-   move-action composition is an executor/hook design decision handled where the
-   `move-card-to-list` action handler is built, not a Phase-4 refactor.
-   Zero behavior change; existing tests stay green.
+   **Completed by decision 0032:** card moves use the shared
+   `moveCardInTransaction` protocol. It accepts the outer transaction client,
+   applies the workspace-gated sorted lock hierarchy, validates `moveRevision`
+   and anchors, normalizes in the same transaction when necessary, and returns
+   canonical state. The automation executor calls this helper directly, so
+   recursive cascades do not open a competing transaction or write positions
+   with a direct last-position shortcut. Stale revisions or contradictory
+   anchors return `ORDER_CONFLICT` for resynchronization.
+
+   **Cascade lock invariant (decision 0032):** `evaluateRules` and
+   `executeRuleActions` acquire the workspace serialization gate before the
+   first ordered action can mutate or lock the card. Recursive calls safely
+   re-acquire the same row in the shared transaction. The workspace row is the
+   deadlock-prevention boundary; the move helper remains responsible for the
+   sorted parent board/list/card locks inside it, including after a leading
+   `set-priority` step.
 
 5. **Loop guard + resolver + executor** — `lib/automation/loop-guard.ts`
    (ChainTracker), `lib/automation/resolver.ts` (dynamic-target resolver, 0022
@@ -144,9 +152,10 @@ Hard gates (→ high-risk):
      the Phase-4 client-aware helpers; returns `{ effects: DeferredEffect[],
      producedEvents: ProducedEvent[] }` (the seam Phase 6's evaluator consumes —
      it does NOT recurse or emit itself); first-failing-step throws → tx aborts.
-     20 tests. **Move handler**: appends to the end of the target list inside the
-     shared tx (last-position + `CARD_POSITION_GAP`), deliberately NOT calling the
-     self-transacting `reorderCardWithinListByNeighbors` (the Phase-4 deferral).
+     20 tests. **Move handler**: calls `moveCardInTransaction` in the shared tx
+     with an explicit end-placement intent; the helper resolves the live
+     position, applies the lock/CAS protocol, and returns the canonical move
+     result.
    - **Attribution**: `lib/card-history.ts` `BuildCardHistoryEventInput` gained an
      optional `ruleId?: string`, merged into the persisted metadata JSON in
      `buildCardHistoryEvent` (no-op when absent → existing card-history tests stay

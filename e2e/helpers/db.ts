@@ -111,6 +111,15 @@ export async function getListArchivedAt(listId: string): Promise<Date | null> {
   return rows[0]?.archivedAt ?? null;
 }
 
+/** A board's current archivedAt (null = active). */
+export async function getBoardArchivedAt(boardId: string): Promise<Date | null> {
+  const { rows } = await pool().query<{ archivedAt: Date | null }>(
+    `SELECT "archivedAt" FROM "board" WHERE id = $1`,
+    [boardId],
+  );
+  return rows[0]?.archivedAt ?? null;
+}
+
 /** Whether a list row still exists (false after permanent deletion). */
 export async function listExists(listId: string): Promise<boolean> {
   const { rows } = await pool().query<{ id: string }>(
@@ -175,6 +184,20 @@ export async function getWorkspaceSlug(workspaceId: string): Promise<string> {
   return rows[0].slug;
 }
 
+/** Resolve the pending invitation created through the real invite UI. */
+export async function getPendingInvitationIdByEmail(email: string): Promise<string> {
+  const { rows } = await pool().query<{ id: string }>(
+    `SELECT id
+       FROM "invitation"
+      WHERE lower(email) = lower($1) AND status = 'pending'
+      ORDER BY "createdAt" DESC
+      LIMIT 1`,
+    [email],
+  );
+  if (!rows[0]) throw new Error(`No pending invitation found for ${email}`);
+  return rows[0].id;
+}
+
 /** True when the user holds a membership row in the workspace (W2 accept proof — DB source of truth). */
 export async function isWorkspaceMember(
   organizationId: string,
@@ -185,6 +208,25 @@ export async function isWorkspaceMember(
     [organizationId, userId],
   );
   return rows.length > 0;
+}
+
+export async function getWorkspaceMemberRole(
+  organizationId: string,
+  userId: string,
+): Promise<string | null> {
+  const { rows } = await pool().query<{ role: string }>(
+    `SELECT role FROM "workspaceMember" WHERE "organizationId" = $1 AND "userId" = $2 LIMIT 1`,
+    [organizationId, userId],
+  );
+  return rows[0]?.role ?? null;
+}
+
+export async function getAttachmentPublicIds(cardId: string): Promise<string[]> {
+  const { rows } = await pool().query<{ cloudinaryPublicId: string | null }>(
+    `SELECT "cloudinaryPublicId" FROM "attachment" WHERE "cardId" = $1`,
+    [cardId],
+  );
+  return rows.flatMap((row) => (row.cloudinaryPublicId ? [row.cloudinaryPublicId] : []));
 }
 
 /**

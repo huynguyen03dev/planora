@@ -12,6 +12,9 @@ Conceptual states:
   resetting (token) → done → sign-in`.
 - **Email verification (enforce — decision 0023):** `signed-up-unverified →
   verify-pending (resend) → verified → app`.
+- **Verification recovery (decision 0033):** `requesting → pending → resend
+  cooldown`, or `token → verifying → success → safe callback`; invalid/expired
+  tokens return to the requesting state without another password submission.
 
 ## Application Flow
 
@@ -23,11 +26,12 @@ Forgot password (Better Auth method names verified against dist):
   → redirect to /sign-in
 
 Email verification (enforce — decision 0023):
-  signUp.email({...})                     → BA creates user, sends verify email
+  signUp.email({...})                     → BA creates the unverified user
+  sendVerificationEmail({...})            → BA sends the verification email
   → show "verify your email" state (not router.push to /boards)
-  GET  /verify-email?token=…              → verifyEmail({ token })
-  → verified → /boards
-  sendVerificationEmail({ email })        → re-send from the pending state
+  GET  /verify-email[?token=…]            → request/pending/token hub
+  verifyEmail({ token })                  → verified → safe callbackURL
+  sendVerificationEmail({ email, callbackURL }) → neutral resend response
 ```
 
 > **Method names (verified against `node_modules/better-auth/dist/`):**
@@ -48,15 +52,27 @@ New public routes (under `app/(public)/`):
 | --- | --- |
 | `/forgot-password` | email request → `requestPasswordReset` |
 | `/reset-password` | token consume → `resetPassword` |
-| `/verify-email` | token consume → `verifyEmail` |
+| `/verify-email` | verification request/pending/token/success/expired hub |
 
 Sign-in form gains: `<Link href="/forgot-password">Forgot password?</Link>`.
 
 Sign-up form gains (posture-dependent): a "verify your email" intermediate
 instead of immediate `router.push`, plus a resend control.
 
-All new forms reuse the US-070 error model (`role="alert"` + `aria-invalid` +
-`autocomplete` tokens: `"email"`, `"new-password"`).
+All new forms reuse the US-070 error model (`role="alert"` + field-scoped
+`aria-invalid` + `autocomplete` tokens: `"email"`, `"new-password"`). Signup
+and reset-password add `confirm-password`; it must match locally and is never
+included in a Better Auth payload. `EMAIL_NOT_VERIFIED` is represented as a
+verification transition, not a destructive alert.
+
+`callbackURL` is passed through signup, resend, the app-owned verification email
+link, and token consumption. Browser-provided values are normalized with
+`safeInternalPath`; missing or unsafe values fall back to `/boards`.
+
+`emailVerification.sendOnSignUp` stays disabled. The signup client requests the
+verification email explicitly after account creation so it can route to a
+truthful `delivery=sent|failed` recovery state instead of treating account
+creation as proof that the provider accepted the message.
 
 ## Data Model
 
@@ -76,6 +92,9 @@ risk) — surface it, don't silently push a migration.
 - Surface BA errors via the same US-070 error model.
 - Avoid revealing whether an email exists ("if that account exists, we've sent a
   link") to prevent user-enumeration via the forgot-password endpoint.
+- A verification resend reports success only when the Better Auth client result
+  has no error. Provider failures use a generic retryable message; unknown and
+  already-verified addresses retain the same neutral success state.
 
 ## Alternatives Considered
 

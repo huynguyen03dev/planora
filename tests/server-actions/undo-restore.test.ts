@@ -142,14 +142,37 @@ function archivedCardFixture(
  */
 function makeTx(listRow: { id: string; archivedAt: Date | null } | null) {
   return {
-    $queryRaw: vi.fn(async () => (listRow === null ? [] : [listRow])),
+    // decision 0032: the restore body takes workspace → board → parent-list →
+    // archived-card FOR UPDATE locks, routed by SQL text. The card lock reports
+    // the card STILL archived so the restore proceeds.
+    $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+      const sql = strings[0] ?? "";
+      if (sql.includes('FROM "board"')) {
+        return [{ id: BOARD_A }];
+      }
+      if (sql.includes('FROM "list"')) {
+        return listRow === null ? [] : [listRow];
+      }
+      if (sql.includes('FROM "card"')) {
+        return [{ id: CARD_ID, listId: LIST_ID, archivedAt: new Date("2026-07-01T00:00:00Z") }];
+      }
+      return [];
+    }),
     card: {
       update: vi.fn(async () => ({
         id: CARD_ID,
+        listId: LIST_ID,
+        title: "Card",
+        position: 16384,
+        moveRevision: 1,
+        priority: null,
         estimateHours: null,
         dueDate: null,
+        archivedAt: null,
+        deletedAt: null,
         members: [],
       })),
+      findFirst: vi.fn(async () => null),
     },
     cardHistoryEvent: { createMany: vi.fn(async () => ({ count: 1 })) },
   };
@@ -296,13 +319,13 @@ describe("restoreCardAction — W8 parent-list discrimination (no existence leak
 
     expect(r).toEqual({ success: true });
     // Lock + revalidation happen FIRST, inside the transaction (call-shape pin).
-    const queryRawArgs = tx.$queryRaw.mock.calls[0];
+    const queryRawArgs = tx.$queryRaw.mock.calls.flat();
     expect(queryRawArgs.some((a: unknown) => String(a).includes("FOR UPDATE"))).toBe(true);
     expect(queryRawArgs.some((a: unknown) => String(a).includes("archivedAt"))).toBe(true);
     expect(tx.card.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: CARD_ID, archivedAt: { not: null } },
-        data: { archivedAt: null },
+        data: expect.objectContaining({ archivedAt: null, position: 16384 }),
       }),
     );
     expect(tx.cardHistoryEvent.createMany).toHaveBeenCalledTimes(1);
@@ -338,7 +361,7 @@ describe("restoreListAction — the undo-list path stays on the existing contrac
     const r = await restoreListAction(form());
 
     expect(r).toEqual({ success: true });
-    expect(h.restoreList).toHaveBeenCalledWith(LIST_ID);
+    expect(h.restoreList).toHaveBeenCalledWith(LIST_ID, WS_A);
     expect(h.emit.emitListRestored).toHaveBeenCalledWith(fixture.board.id, {
       list: {
         id: LIST_ID,

@@ -2,19 +2,13 @@
 /**
  * Demo-board seeder (local UI/UX review only — NOT a migration, NOT a fixture).
  *
- * Builds one workspace + a realistic "Product Roadmap" board that exercises
- * every card surface the UI renders: priorities, colored labels, due dates
- * (overdue / today / upcoming), descriptions, multiple assigned members,
- * checklists with partial progress, comments, and a couple of archived cards.
- * The point is to populate the board densely enough that a browser walkthrough
- * shows the real, lived-in UI rather than empty columns.
+ * Builds one workspace + a "Product Roadmap" board dense enough for a browser
+ * walkthrough: priorities, colored labels, due dates (overdue/today/upcoming),
+ * descriptions, multiple members, checklists, comments, archived cards.
  *
- * Usage:
- *   npx tsx --require dotenv/config scripts/seed-demo-board.ts --email <user> [--slug demo]
- *
- * The --email user must already exist (sign up via the UI first). Any other
- * existing users are pulled in as extra workspace + card members so member
- * avatars have variety. Idempotent per slug: re-running wipes + recreates.
+ * Usage: npx tsx --require dotenv/config scripts/seed-demo-board.ts --email <user> [--slug demo]
+ * The --email user must already exist; other users join as members for avatar variety.
+ * Idempotent per slug: re-running wipes + recreates.
  */
 import { randomUUID } from "node:crypto";
 

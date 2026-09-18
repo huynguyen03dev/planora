@@ -160,8 +160,6 @@ export async function inviteMemberAction(
   }
 }
 
-// ─── Workspace Analytics Settings ─────────────────────────────────
-
 type UpdateWorkspaceTimezoneResult =
   | { success: true }
   | { success: false; error: string };

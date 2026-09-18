@@ -21,6 +21,10 @@ export function WorkspaceDashboardClient({
 }: WorkspaceDashboardClientProps) {
   const router = useRouter();
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks whether the socket was already connected at mount, so a later
+  // reconnect-after-drop resyncs the dashboard (F5 round-2 — mirrors the board
+  // provider's reconnect resync).
+  const connectedRef = useRef(false);
 
   useEffect(() => {
     const socket = initSocket();
@@ -41,10 +45,17 @@ export function WorkspaceDashboardClient({
 
     function handleConnect() {
       joinWorkspace(workspaceId);
+      // A reconnect after a drop may have missed analytics events — pull the
+      // authoritative data back through the same debounced refresh path.
+      if (connectedRef.current) {
+        scheduleRefresh({ workspaceId } as AnalyticsRefreshPayload);
+      }
+      connectedRef.current = true;
     }
 
     if (socket.connected) {
       joinWorkspace(workspaceId);
+      connectedRef.current = true;
     }
 
     socket.on("connect", handleConnect);

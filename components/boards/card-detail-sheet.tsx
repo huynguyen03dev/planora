@@ -1,17 +1,14 @@
 "use client";
 
-import { useState, useTransition, useRef } from "react";
+import { useEffect, useMemo, useState, useTransition, useRef } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Archive02Icon,
-  Attachment01Icon,
   Calendar03Icon,
   Cancel01Icon,
-  Flag03Icon,
   Image01Icon,
-  Tag01Icon,
-  Task01Icon,
+  PlusSignIcon,
   UserMultipleIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -19,7 +16,9 @@ import { format } from "date-fns";
 
 import {
   assignCardMemberAction,
+  createChecklistAction,
   createCommentAction,
+  loadMoreCardDetailAction,
   removeCardMemberAction,
   updateCardCoverAction,
   setCardCoverAction,
@@ -27,10 +26,18 @@ import {
   updateCardDueDateAction,
   updateCardEstimateAction,
   updateCardPriorityAction,
+  uploadAttachmentAction,
 } from "@/app/(authenticated)/(dashboard)/boards/[boardId]/actions";
 import { MemberAvatar } from "@/components/member-avatar";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
@@ -41,6 +48,8 @@ import {
   DialogClose,
   DialogContent,
   DialogDescription,
+  DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -68,6 +77,7 @@ import { useBoardStore } from "@/app/(authenticated)/(dashboard)/boards/[boardId
 import { useMentionAutocomplete } from "./use-mention-autocomplete";
 
 const estimateOptions = ["", "1", "2", "4", "8", "16"] as const;
+type OptionalCardSection = "description" | "checklist" | "attachment";
 
 function toDateInputValue(date: Date | null): string {
   return date ? date.toISOString().slice(0, 10) : "";
@@ -85,6 +95,16 @@ function parseDateInputValue(value: string): Date | undefined {
 
 function toDueDateValue(date: Date): string {
   return format(date, "yyyy-MM-dd");
+}
+
+function normalizeMemberSearch(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLocaleLowerCase()
+    .trim();
 }
 
 
@@ -109,7 +129,11 @@ type CardDetailSheetProps = {
   open: boolean;
   card: CardDetailRecord | null;
   comments: CommentRecord[];
+  /** True when more comments exist behind the seeded page (server-derived). */
+  commentsHasMore: boolean;
   activity: ActivityRecord[];
+  /** True when more activity exists behind the seeded page (server-derived). */
+  activityHasMore: boolean;
   attachments: AttachmentRecord[];
   assignees: CardMemberRecord[];
   assignableMembers: AssignableWorkspaceMemberRecord[];
@@ -126,7 +150,9 @@ export function CardDetailSheet({
   open,
   card,
   comments: initialComments,
+  commentsHasMore,
   activity: initialActivity,
+  activityHasMore,
   attachments,
   assignees,
   assignableMembers,
@@ -145,6 +171,17 @@ export function CardDetailSheet({
   const storeSelectedCard = useBoardStore((state) => state.selectedCard);
   const [dismissedCardId, setDismissedCardId] = useState<string | null>(null);
 
+  // The URL is the authority for whether a card is selected. The server-derived
+  // `open`/`card` props can lag reality (a stale in-flight router.refresh()
+  // payload can land after the close navigation and remount this sheet with
+  // open=true), so the urlCardId check keeps the dialog closed across that
+  // remount (close-flash).
+  const urlCardId = searchParams.get("cardId");
+
+  if (dismissedCardId !== null && dismissedCardId !== urlCardId) {
+    setDismissedCardId(null);
+  }
+
   const liveComments: UIComment[] =
     storeSelectedCard && card && storeSelectedCard.card.id === card.id
       ? storeSelectedCard.comments
@@ -153,9 +190,9 @@ export function CardDetailSheet({
     storeSelectedCard && card && storeSelectedCard.card.id === card.id
       ? storeSelectedCard.activity
       : initialActivity;
-  // Members render only here (not on the card face), so they live-update from
-  // the store's selectedCard when this is the open card — mirroring comments.
-  // This is what makes a remote assign/remove appear without a reload (US-011).
+  // Members render only here, so they live-update from the store's selectedCard
+  // when this is the open card — a remote assign/remove appears without a reload
+  // (US-011).
   const liveAssignees =
     storeSelectedCard && card && storeSelectedCard.card.id === card.id
       ? storeSelectedCard.assignees
@@ -164,23 +201,49 @@ export function CardDetailSheet({
     storeSelectedCard && card && storeSelectedCard.card.id === card.id
       ? storeSelectedCard.assignableMembers.map((m) => ({ ...m, role: "" }))
       : assignableMembers;
+  // When this is the open card, merge the store's label set so a remote
+  // attach/detach (or rename/recolor fan-out) reaches the sheet live; the
+  // page.tsx seed stays authoritative for the fresh-open case.
+  const storeLabels =
+    storeSelectedCard && card && storeSelectedCard.card.id === card.id
+      ? storeSelectedCard.labels
+      : null;
+  const liveLabelIds: string[] = storeLabels
+    ? storeLabels.map((label) => label.id)
+    : cardLabelIds;
+  // Render chips from the live store snapshot so a remote rename/recolor
+  // updates chip text/color, and union labels created remotely while open.
+  const liveBoardLabels: LabelChip[] = storeLabels
+    ? [
+        ...boardLabels.map(
+          (label) => storeLabels.find((s) => s.id === label.id) ?? label,
+        ),
+        ...storeLabels.filter((s) => !boardLabels.some((b) => b.id === s.id)),
+      ]
+    : boardLabels;
 
   if (!card) {
     return null;
   }
 
   const currentCard = card;
-  const isOpen = open && dismissedCardId !== currentCard.id;
+  const isOpen =
+    open &&
+    urlCardId === currentCard.id &&
+    dismissedCardId !== currentCard.id;
 
-  // Bind the hero title/description to the live store value (not the stale server
-  // prop) so a remote rename or description edit isn't clobbered when the field
-  // blurs (US-043). Comments/activity/members already merge from the store above.
+  // Bind title/description drafts to the live store value so a remote edit
+  // isn't clobbered on blur (US-043); due date/priority/estimate merge the same
+  // way (F3), reconciling drafts to the live card instead of a stale prop.
   const liveCard: CardDetailRecord =
     storeSelectedCard && storeSelectedCard.card.id === currentCard.id
       ? {
           ...currentCard,
           title: storeSelectedCard.card.title,
           description: storeSelectedCard.card.description,
+          dueDate: storeSelectedCard.card.dueDate,
+          priority: storeSelectedCard.card.priority,
+          estimateHours: storeSelectedCard.card.estimateHours,
         }
       : currentCard;
 
@@ -206,10 +269,9 @@ export function CardDetailSheet({
       <DialogContent
         className="h-[min(90vh,820px)] max-w-[min(96vw,768px)] overflow-hidden bg-popover p-0"
         onEscapeKeyDown={(e) => {
-          // While the hero title is being edited, Escape reverts the field
-          // (handled on the input) and must NOT close the dialog. Cancel Radix's
-          // dismiss here — the supported API — only when the title input holds an
-          // unsaved edit; otherwise Escape closes the dialog as usual (US-043).
+          // With an unsaved title edit, Escape reverts the field (handled on the
+          // input) and must not close the dialog — cancel Radix's dismiss here,
+          // the supported API (US-043).
           const active = document.activeElement as HTMLInputElement | null;
           if (
             active?.id === "card-detail-title" &&
@@ -223,13 +285,15 @@ export function CardDetailSheet({
           key={currentCard.id}
           card={liveCard}
           comments={liveComments}
+          commentsHasMore={commentsHasMore}
           activity={liveActivity}
+          activityHasMore={activityHasMore}
           attachments={attachments}
           assignees={liveAssignees}
           assignableMembers={liveAssignableMembers}
           boardId={boardId}
-          boardLabels={boardLabels}
-          cardLabelIds={cardLabelIds}
+          boardLabels={liveBoardLabels}
+          cardLabelIds={liveLabelIds}
           checklists={checklists}
           canEdit={canEdit}
           canArchive={canArchive}
@@ -243,12 +307,15 @@ export function CardDetailSheet({
 type CardDetailDialogBodyProps = {
   card: CardDetailRecord;
   comments: UIComment[];
+  /** True when more comments exist behind the seeded page (server-derived). */
+  commentsHasMore: boolean;
   activity: UIActivity[];
+  /** True when more activity exists behind the seeded page (server-derived). */
+  activityHasMore: boolean;
   attachments: AttachmentRecord[];
   assignees: CardMemberRecord[];
-  // Role-less: the dropdown renders name/email only, and the live store snapshot
-  // (selectedCard.assignableMembers) carries no role. AssignableWorkspaceMemberRecord
-  // from the server prop is structurally assignable here (US-011).
+  // The live store snapshot carries no role; the server prop's
+  // AssignableWorkspaceMemberRecord is structurally assignable here (US-011).
   assignableMembers: AssignableWorkspaceMemberRecord[];
   boardId: string;
   boardLabels: LabelChip[];
@@ -262,7 +329,9 @@ type CardDetailDialogBodyProps = {
 function CardDetailDialogBody({
   card,
   comments,
+  commentsHasMore,
   activity,
+  activityHasMore,
   attachments,
   assignees,
   assignableMembers,
@@ -284,18 +353,48 @@ function CardDetailDialogBody({
   const [dueDateOpen, setDueDateOpen] = useState(false);
   const [draftPriority, setDraftPriority] = useState(card.priority ?? "NONE");
   const coverInputRef = useRef<HTMLInputElement>(null);
+  const [coverPopoverOpen, setCoverPopoverOpen] = useState(false);
+  const [coverUploadName, setCoverUploadName] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [isPending, startTransition] = useTransition();
+  // Save lifecycle (U2/U3): "saving" while a queued save drains, "saved" for
+  // a ~1.5s confirmation after the last successful save, "idle" otherwise.
+  // Failures surface through `error` (full text, no truncation).
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
-
+  // Server-seeded first page + pages appended via "Load more"; the body is keyed
+  // by card id so this resets on card change. `hasMore` seeds from the server
+  // flag and updates from each action response.
+  const [extraComments, setExtraComments] = useState<UIComment[]>([]);
+  const [extraActivity, setExtraActivity] = useState<UIActivity[]>([]);
+  const [commentsHasMoreState, setCommentsHasMoreState] = useState(commentsHasMore);
+  const [activityHasMoreState, setActivityHasMoreState] = useState(activityHasMore);
+  const [commentsPending, startCommentsTransition] = useTransition();
+  const [activityPending, startActivityTransition] = useTransition();
+  const [creatorSection, setCreatorSection] = useState<OptionalCardSection | null>(null);
+  const [memberSearch, setMemberSearch] = useState("");
+  const [createdChecklists, setCreatedChecklists] = useState<ChecklistData[]>([]);
+  const [deletedChecklistIds, setDeletedChecklistIds] = useState<string[]>([]);
+  const [descriptionOpen, setDescriptionOpen] = useState(Boolean(card.description?.trim()));
+  const [attachmentsOpen, setAttachmentsOpen] = useState(attachments.length > 0);
+  const displayedChecklists = useMemo(() => {
+    const serverIds = new Set(checklists.map((checklist) => checklist.id));
+    const hiddenChecklistIds = new Set(deletedChecklistIds);
+    return [
+      ...checklists.filter((checklist) => !hiddenChecklistIds.has(checklist.id)),
+      ...createdChecklists.filter(
+        (checklist) =>
+          !serverIds.has(checklist.id) && !hiddenChecklistIds.has(checklist.id),
+      ),
+    ];
+  }, [checklists, createdChecklists, deletedChecklistIds]);
+  const checklistOpen = displayedChecklists.length > 0;
+  const hasMissingOptionalSection =
+    !descriptionOpen || !checklistOpen || !attachmentsOpen;
   const selectedDueDate = parseDateInputValue(draftDueDate);
 
-  // The hero title/description bind to the live store value (passed in via
-  // `card`). Reflect a remote edit into the draft whenever the local user isn't
-  // actively typing that field, so the next blur can't clobber a remote rename
-  // (US-043). This is the React "adjust state during render" pattern (guarded by
-  // a baseline so it can't loop) — not an effect — and the focus flags keep an
-  // in-progress local edit from being overwritten mid-keystroke.
+  // Reflect a remote edit into the draft unless the user is actively typing that
+  // field, so the next blur can't clobber it (US-043). Guarded "adjust state
+  // during render" baseline pattern — not an effect — so it can't loop.
   const [titleEditing, setTitleEditing] = useState(false);
   const [descriptionEditing, setDescriptionEditing] = useState(false);
 
@@ -312,53 +411,310 @@ function CardDetailDialogBody({
     if (!descriptionEditing) setDraftDescription(liveDescription);
   }
 
-  // Action-row affordances scroll the matching editor into view inside the left
-  // column and move focus to its primary control, so the document-style "Add to
-  // card" row is keyboard-operable and every editor stays reachable (US-043).
-  function focusSection(sectionId: string, focusId?: string) {
-    const section = document.getElementById(sectionId);
-    if (!section) return;
-    section.scrollIntoView({ behavior: "smooth", block: "start" });
-    const target = focusId
-      ? document.getElementById(focusId)
-      : section.querySelector<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-        );
-    target?.focus({ preventScroll: true });
+  // Optional document blocks become visible as soon as realtime/server data
+  // arrives, but stay collapsed when they are genuinely empty. Once a user
+  // opens a block, clearing its content does not unexpectedly hide the editor
+  // they are working in.
+  useEffect(() => {
+    if (liveDescription.trim()) {
+      setDescriptionOpen(true);
+    }
+  }, [liveDescription]);
+
+  useEffect(() => {
+    if (attachments.length > 0) {
+      setAttachmentsOpen(true);
+    }
+  }, [attachments.length]);
+
+  // Meta drafts reconcile to the live card like title/description: a remote
+  // change is reflected unless the picker is open (a pick made there is the
+  // user's own intent and is never overwritten); closing without a pick resyncs
+  // so the draft can't stay stale. Same guarded baseline pattern as above.
+  const [priorityOpen, setPriorityOpen] = useState(false);
+  const [estimateOpen, setEstimateOpen] = useState(false);
+  const priorityPickedRef = useRef(false);
+  const estimatePickedRef = useRef(false);
+  const dueDatePickedRef = useRef(false);
+
+  const [priorityBaseline, setPriorityBaseline] = useState(card.priority ?? "NONE");
+  if ((card.priority ?? "NONE") !== priorityBaseline) {
+    setPriorityBaseline(card.priority ?? "NONE");
+    if (!priorityOpen) setDraftPriority(card.priority ?? "NONE");
   }
+
+  const [estimateBaseline, setEstimateBaseline] = useState(
+    card.estimateHours?.toString() ?? "",
+  );
+  if ((card.estimateHours?.toString() ?? "") !== estimateBaseline) {
+    setEstimateBaseline(card.estimateHours?.toString() ?? "");
+    if (!estimateOpen) setDraftEstimateHours(card.estimateHours?.toString() ?? "");
+  }
+
+  const [dueDateBaseline, setDueDateBaseline] = useState(toDateInputValue(card.dueDate));
+  if (toDateInputValue(card.dueDate) !== dueDateBaseline) {
+    setDueDateBaseline(toDateInputValue(card.dueDate));
+    if (!dueDateOpen) setDraftDueDate(toDateInputValue(card.dueDate));
+  }
+
+  // Closing without a pick commits no intent: resync the draft to the live value
+  // so a mid-interaction remote change can't stay stale; a pick already
+  // committed via the ref, so closing never overwrites the user's selection.
+  function handlePriorityOpenChange(open: boolean) {
+    setPriorityOpen(open);
+    if (!open) {
+      if (!priorityPickedRef.current) {
+        setDraftPriority(card.priority ?? "NONE");
+      }
+      priorityPickedRef.current = false;
+    }
+  }
+
+  function handleEstimateOpenChange(open: boolean) {
+    setEstimateOpen(open);
+    if (!open) {
+      if (!estimatePickedRef.current) {
+        setDraftEstimateHours(card.estimateHours?.toString() ?? "");
+      }
+      estimatePickedRef.current = false;
+    }
+  }
+
+  function handleDueDateOpenChange(open: boolean) {
+    setDueDateOpen(open);
+    if (!open) {
+      if (!dueDatePickedRef.current) {
+        setDraftDueDate(toDateInputValue(card.dueDate));
+      }
+      dueDatePickedRef.current = false;
+    }
+  }
+
+  // Queue saves that land while one is in flight and drain when it finishes
+  // (U2) — the old isPending-return silently dropped them; no control is
+  // disabled by another field's save.
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const queueRef = useRef<Array<() => Promise<boolean>>>([]);
+  const drainingRef = useRef(false);
+  // Last values successfully persisted for title+description, so a queued
+  // no-op blur after a save completes doesn't rewrite identical data.
+  const lastSavedDetailsRef = useRef({
+    title: card.title,
+    description: card.description ?? "",
+  });
+
+  function showSaved() {
+    setSaveStatus("saved");
+    if (savedTimerRef.current) {
+      clearTimeout(savedTimerRef.current);
+    }
+    savedTimerRef.current = setTimeout(() => {
+      setSaveStatus("idle");
+    }, 1500);
+  }
+
+  function queueSave(action: () => Promise<boolean>) {
+    queueRef.current.push(action);
+    setSaveStatus("saving");
+    if (drainingRef.current) {
+      return;
+    }
+    drainingRef.current = true;
+    void (async () => {
+      let savedAny = false;
+      try {
+        while (queueRef.current.length > 0) {
+          const next = queueRef.current.shift()!;
+          try {
+            const ok = await next();
+            if (ok) {
+              savedAny = true;
+            }
+          } catch {
+            // A rejected save must not kill the drain: surface a generic error
+            // and keep draining; the outer finally resets ownership so later
+            // saves recover.
+            setError("Something went wrong. Please try again.");
+          }
+        }
+      } finally {
+        drainingRef.current = false;
+      }
+      if (savedAny) {
+        showSaved();
+      } else {
+        setSaveStatus("idle");
+      }
+    })();
+  }
+
+  // Clear the "Saved" timer on unmount so a late callback can't set state on
+  // an unmounted dialog body.
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current) {
+        clearTimeout(savedTimerRef.current);
+      }
+    };
+  }, []);
 
   const assignedMemberIds = new Set(assignees.map((member) => member.id));
   const availableMembers = assignableMembers.filter(
     (member) => !assignedMemberIds.has(member.id),
   );
+  const normalizedMemberSearch = normalizeMemberSearch(memberSearch);
+  const filteredAvailableMembers = normalizedMemberSearch
+    ? availableMembers.filter((member) =>
+        normalizeMemberSearch(`${member.name} ${member.email}`).includes(
+          normalizedMemberSearch,
+        ),
+      )
+    : availableMembers;
 
   // Covers may only be sourced from this card's own image attachments
   // (the server rejects anything else — US-018 anti-tracking-pixel contract).
-  const imageAttachments = attachments.filter((attachment) =>
-    attachment.fileType.startsWith("image/"),
-  );
+    const imageAttachments = attachments.filter((attachment) =>
+      attachment.fileType.startsWith("image/"),
+    );
+    // A directly uploaded cover is persisted as an attachment so Cloudinary
+    // metadata remains available, but presenting the same image again in the
+    // Attachments section makes the user's single cover action look like two
+    // separate additions.
+    const visibleAttachments = card.coverImage
+      ? attachments.filter((attachment) => attachment.fileUrl !== card.coverImage)
+      : attachments;
 
-  function submitCover(coverImage: string) {
-    setError("");
-    const fd = new FormData();
-    fd.set("cardId", card.id);
-    fd.set("coverImage", coverImage);
-    startTransition(async () => {
-      const result = await updateCardCoverAction(fd);
-      if (!result.success) setError(result.error);
-      else router.refresh();
+  // One canonical list per section: seeded items + loaded pages, deduped by id
+  // and sorted by the cursor keys (comments oldest-first, activity newest-first)
+  // so realtime-appended rows interleave correctly instead of drifting to the
+  // wrong end.
+  const displayedComments = useMemo(() => {
+    const seen = new Set<string>();
+    return [...comments, ...extraComments]
+      .sort(
+        (a, b) =>
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() ||
+          a.id.localeCompare(b.id),
+      )
+      .filter((item) => {
+        if (seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      });
+  }, [comments, extraComments]);
+
+  const displayedActivity = useMemo(() => {
+    const seen = new Set<string>();
+    return [...activity, ...extraActivity]
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() ||
+          b.id.localeCompare(a.id),
+      )
+      .filter((item) => {
+        if (seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      });
+  }, [activity, extraActivity]);
+
+  // Fetches the next page after the last displayed row; the cursor matches the
+  // server order so realtime appends never shift or duplicate pages (id-dedupe
+  // as a safety net).
+  function loadMoreComments() {
+    const cursor = displayedComments[displayedComments.length - 1];
+    if (!cursor) return;
+    startCommentsTransition(async () => {
+      const formData = new FormData();
+      formData.set("cardId", card.id);
+      formData.set("section", "comments");
+      formData.set("cursorCreatedAt", new Date(cursor.createdAt).toISOString());
+      formData.set("cursorId", cursor.id);
+      const result = await loadMoreCardDetailAction(formData);
+      if (!result.success) {
+        setError(result.error);
+        return;
+      }
+      if (result.section !== "comments") {
+        // Defensive: the action must echo the requested section.
+        return;
+      }
+      setError("");
+      setExtraComments((prev) => {
+        const seen = new Set(prev.map((item) => item.id));
+        const additions = result.items
+          .map((item) => ({
+            id: item.id,
+            content: item.content,
+            createdAt: new Date(item.createdAt),
+            user: item.user,
+          }))
+          .filter((item) => !seen.has(item.id));
+        return [...prev, ...additions];
+      });
+      setCommentsHasMoreState(result.hasMore);
     });
   }
 
-  // Unified save model (US-032): every field autosaves, so the three competing
-  // save surfaces (Save changes/Reset, Save estimate, Save due date) are gone.
-  // Title + description persist on blur; estimate, due date, and priority commit
-  // on change — matching the Priority control that already autosaved.
-  function saveDetails(nextTitle: string, nextDescription: string) {
-    if (isPending) {
-      return;
-    }
+  function loadMoreActivity() {
+    const cursor = displayedActivity[displayedActivity.length - 1];
+    if (!cursor) return;
+    startActivityTransition(async () => {
+      const formData = new FormData();
+      formData.set("cardId", card.id);
+      formData.set("section", "activity");
+      formData.set("cursorCreatedAt", new Date(cursor.createdAt).toISOString());
+      formData.set("cursorId", cursor.id);
+      const result = await loadMoreCardDetailAction(formData);
+      if (!result.success) {
+        setError(result.error);
+        return;
+      }
+      if (result.section !== "activity") {
+        // Defensive: the action must echo the requested section.
+        return;
+      }
+      setError("");
+      setExtraActivity((prev) => {
+        const seen = new Set(prev.map((item) => item.id));
+        const additions = result.items
+          .map((item) => ({
+            id: item.id,
+            action: item.action,
+            entityType: item.entityType,
+            createdAt: new Date(item.createdAt),
+            user: item.user,
+            metadata: item.metadata,
+          }))
+          .filter((item) => !seen.has(item.id));
+        return [...prev, ...additions];
+      });
+      setActivityHasMoreState(result.hasMore);
+    });
+  }
 
+  function submitCover(coverImage: string) {
+    if (coverUploadName) return;
+    setError("");
+    queueSave(async () => {
+      const fd = new FormData();
+      fd.set("cardId", card.id);
+      fd.set("coverImage", coverImage);
+      const result = await updateCardCoverAction(fd);
+      if (!result.success) {
+        setError(result.error);
+        return false;
+      }
+      setError("");
+      router.refresh();
+      return true;
+    });
+  }
+
+  // Unified autosave (US-032): title+description persist on blur; estimate, due
+  // date, and priority commit on change. Blurs landing mid-save are queued,
+  // never dropped (U2).
+  function queueSaveDetails(nextTitle: string, nextDescription: string) {
     const trimmedTitle = nextTitle.trim();
     if (!trimmedTitle) {
       // Title is required — revert to the last persisted value rather than
@@ -368,82 +724,110 @@ function CardDetailDialogBody({
       return;
     }
 
-    if (
-      trimmedTitle === card.title &&
-      nextDescription === (card.description ?? "")
-    ) {
-      return;
-    }
-
     setError("");
 
-    const formData = new FormData();
-    formData.set("cardId", card.id);
-    formData.set("title", trimmedTitle);
-    formData.set("description", nextDescription);
+    queueSave(async () => {
+      if (
+        lastSavedDetailsRef.current.title === trimmedTitle &&
+        lastSavedDetailsRef.current.description === nextDescription
+      ) {
+        // Nothing changed since the last successful save — no write, and no
+        // "Saved" flash for a pure focus/blur.
+        return false;
+      }
 
-    startTransition(async () => {
+      const formData = new FormData();
+      formData.set("cardId", card.id);
+      formData.set("title", trimmedTitle);
+      formData.set("description", nextDescription);
+
       const result = await updateCardDetailsAction(formData);
       if (!result.success) {
         setError(result.error);
+        return false;
       }
+      setError("");
+      lastSavedDetailsRef.current = {
+        title: trimmedTitle,
+        description: nextDescription,
+      };
+      return true;
     });
   }
 
-  function saveEstimate(nextEstimate: string) {
-    if (!canEdit || isPending) {
+  function queueSaveEstimate(nextEstimate: string) {
+    if (!canEdit) {
       return;
     }
 
-    const formData = new FormData();
-    formData.set("cardId", card.id);
-    if (nextEstimate) {
-      formData.set("estimateHours", nextEstimate);
-    }
+    queueSave(async () => {
+      const formData = new FormData();
+      formData.set("cardId", card.id);
+      if (nextEstimate) {
+        formData.set("estimateHours", nextEstimate);
+      }
 
-    startTransition(async () => {
       const result = await updateCardEstimateAction(formData);
       if (!result.success) {
         setError(result.error);
         setDraftEstimateHours(card.estimateHours?.toString() ?? "");
-        return;
+        return false;
       }
       setError("");
       router.refresh();
+      return true;
     });
   }
 
-  function saveDueDate(nextDueDate: string) {
-    if (!canEdit || isPending) {
+  function queueSaveDueDate(nextDueDate: string) {
+    if (!canEdit) {
       return;
     }
 
-    const formData = new FormData();
-    formData.set("cardId", card.id);
-    if (nextDueDate) {
-      formData.set("dueDate", nextDueDate);
-    }
+    queueSave(async () => {
+      const formData = new FormData();
+      formData.set("cardId", card.id);
+      if (nextDueDate) {
+        formData.set("dueDate", nextDueDate);
+      }
 
-    startTransition(async () => {
       const result = await updateCardDueDateAction(formData);
       if (!result.success) {
         setError(result.error);
         setDraftDueDate(toDateInputValue(card.dueDate));
-        return;
+        return false;
       }
       setError("");
       router.refresh();
+      return true;
     });
   }
 
-  async function handleAssignMember(userId: string) {
-    if (!canEdit || isPending) {
+  function queueSavePriority(nextPriority: string) {
+    queueSave(async () => {
+      const fd = new FormData();
+      fd.set("cardId", card.id);
+      fd.set("priority", nextPriority);
+      const result = await updateCardPriorityAction(fd);
+      if (!result.success) {
+        setError(result.error);
+        setDraftPriority(card.priority ?? "NONE");
+        return false;
+      }
+      setError("");
+      router.refresh();
+      return true;
+    });
+  }
+
+  function handleAssignMember(userId: string) {
+    if (!canEdit) {
       return;
     }
 
     setError("");
 
-    startTransition(async () => {
+    queueSave(async () => {
       const formData = new FormData();
       formData.set("cardId", card.id);
       formData.set("userId", userId);
@@ -451,23 +835,24 @@ function CardDetailDialogBody({
       const result = await assignCardMemberAction(formData);
       if (!result.success) {
         setError(result.error);
-      } else {
-        if (result.changed) {
-          router.refresh();
-        }
-        setError("");
+        return false;
       }
+      if (result.changed) {
+        router.refresh();
+      }
+      setError("");
+      return true;
     });
   }
 
-  async function handleRemoveMember(userId: string) {
-    if (!canEdit || isPending) {
+  function handleRemoveMember(userId: string) {
+    if (!canEdit) {
       return;
     }
 
     setError("");
 
-    startTransition(async () => {
+    queueSave(async () => {
       const formData = new FormData();
       formData.set("cardId", card.id);
       formData.set("userId", userId);
@@ -475,22 +860,20 @@ function CardDetailDialogBody({
       const result = await removeCardMemberAction(formData);
       if (!result.success) {
         setError(result.error);
-      } else {
-        if (result.changed) {
-          router.refresh();
-        }
-        setError("");
+        return false;
       }
+      if (result.changed) {
+        router.refresh();
+      }
+      setError("");
+      return true;
     });
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Document-style header: the title is the hero (inline-editable), with an
-          "Add to card" action row beneath it — no breadcrumb, no "Edit card"
-          heading, no uppercase TITLE label (US-043). The Dialog still needs an
-          accessible name/description for Radix + screen readers, supplied
-          visually-hidden below. */}
+      {/* Document-style header: the title is the hero. The visually-hidden
+          DialogTitle supplies the accessible name Radix + screen readers need. */}
       <DialogTitle className="sr-only">{card.title || "Card details"}</DialogTitle>
       <DialogDescription className="sr-only">
         Card details and editors. Edit the title, description, labels, dates,
@@ -511,6 +894,8 @@ function CardDetailDialogBody({
             <input
               id="card-detail-title"
               aria-label="Card title"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "card-detail-title-status" : undefined}
               value={draftTitle}
               onChange={(e) => {
                 setDraftTitle(e.target.value);
@@ -518,10 +903,10 @@ function CardDetailDialogBody({
               }}
               onFocus={(e) => {
                 setTitleEditing(true);
-                // Radix's auto-focus-on-open (and a Tab into the field) selects
-                // the whole title, so a stray keystroke would wipe it. After the
-                // browser settles, collapse a full selection to the caret-at-end;
-                // a click that places its own caret is left untouched (US-043).
+                // Radix's auto-focus selects the whole title; after the browser
+                // settles, collapse a full selection to the caret-at-end so a
+                // stray keystroke can't wipe it (a click-placed caret is left
+                // untouched) (US-043).
                 const el = e.currentTarget;
                 requestAnimationFrame(() => {
                   if (
@@ -536,7 +921,7 @@ function CardDetailDialogBody({
               }}
               onBlur={() => {
                 setTitleEditing(false);
-                saveDetails(draftTitle, draftDescription);
+                queueSaveDetails(draftTitle, draftDescription);
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
@@ -550,9 +935,8 @@ function CardDetailDialogBody({
                   setError("");
                 }
               }}
-              disabled={isPending}
               // card-title token: 22px / weight 500 / 1.25 / -0.4px tracking
-              // (DESIGN.md §244 / §335), not the old text-2xl/600.
+              // (DESIGN.md §244 / §335).
               className="-mx-2 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2 py-1 text-[22px] font-medium leading-[1.25] tracking-[-0.4px] outline-none hover:bg-muted/50 focus-visible:border-ring focus-visible:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-60"
             />
           ) : (
@@ -562,18 +946,33 @@ function CardDetailDialogBody({
           )}
 
           <div className="flex shrink-0 items-center gap-2 pt-1.5">
-            {/* Save/error status lives inline in the header (Google-Docs style) so
-                it takes no vertical room — it used to be an empty min-h spacer at
-                the top of the column that pushed the Description down (US-043). */}
+            {/* Save/error status lives inline in the header so it takes no
+                vertical room (US-043). */}
             <span
+              id="card-detail-title-status"
               aria-live="polite"
-              title={error || (isPending ? "Saving…" : undefined)}
+              title={
+                error ||
+                (saveStatus === "saving"
+                  ? "Saving…"
+                  : saveStatus === "saved"
+                    ? "Saved"
+                    : undefined)
+              }
+              // No truncate on errors: a failure message must read in full
+              // (U3). Status text is short and wraps harmlessly within the cap.
               className={cn(
-                "max-w-56 truncate text-xs",
+                "max-w-56 text-xs",
                 error ? "text-destructive" : "text-muted-foreground",
               )}
             >
-              {error ? error : isPending ? "Saving…" : null}
+              {error
+                ? error
+                : saveStatus === "saving"
+                  ? "Saving…"
+                  : saveStatus === "saved"
+                    ? "Saved"
+                    : null}
             </span>
 
             {canArchive ? (
@@ -600,9 +999,8 @@ function CardDetailDialogBody({
               </Button>
             </DialogClose>
 
-            {/* Archive confirm (portal — in-tree position is irrelevant). Any
-                card is archivable from here regardless of completion state; the
-                board face only offers archive on completed cards (US-069). */}
+            {/* Any card is archivable from here regardless of completion state;
+                the board face only offers archive on completed cards (US-069). */}
             {canArchive ? (
               <ArchiveCardDialog
                 cardId={card.id}
@@ -616,74 +1014,57 @@ function CardDetailDialogBody({
         </div>
 
         {canEdit ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="mr-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Add to card
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => focusSection("card-section-labels")}
-            >
-              <HugeiconsIcon icon={Tag01Icon} size={16} strokeWidth={2} />
-              Labels
-            </Button>
-            {/* Order mirrors the body section order (Labels → Checklist →
-                Priority → Dates) so clicking the row left-to-right scrolls
-                monotonically down, never up-then-down (US-043). */}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => focusSection("card-section-checklist")}
-            >
-              <HugeiconsIcon icon={Task01Icon} size={16} strokeWidth={2} />
-              Checklist
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => focusSection("card-section-priority", "card-priority")}
-            >
-              <HugeiconsIcon icon={Flag03Icon} size={16} strokeWidth={2} />
-              Priority
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => focusSection("card-section-dates", "card-due-date")}
-            >
-              <HugeiconsIcon icon={Calendar03Icon} size={16} strokeWidth={2} />
-              Dates
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => focusSection("card-section-members")}
-            >
-              <HugeiconsIcon icon={UserMultipleIcon} size={16} strokeWidth={2} />
-              Members
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => focusSection("card-section-attachments")}
-            >
-              <HugeiconsIcon icon={Attachment01Icon} size={16} strokeWidth={2} />
-              Attachment
-            </Button>
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-3">
+            {hasMissingOptionalSection ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" variant="ghost" size="sm">
+                    <HugeiconsIcon
+                      icon={PlusSignIcon}
+                      size={16}
+                      strokeWidth={2}
+                    />
+                    Add to card
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-44">
+                  {!descriptionOpen ? (
+                    <DropdownMenuItem
+                      onSelect={() => setCreatorSection("description")}
+                    >
+                      Description
+                    </DropdownMenuItem>
+                  ) : null}
+                  {!checklistOpen ? (
+                    <DropdownMenuItem
+                      onSelect={() => setCreatorSection("checklist")}
+                    >
+                      Checklist
+                    </DropdownMenuItem>
+                  ) : null}
+                  {!attachmentsOpen ? (
+                    <DropdownMenuItem
+                      onSelect={() => setCreatorSection("attachment")}
+                    >
+                      Attachment
+                    </DropdownMenuItem>
+                  ) : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
 
-            {/* Cover demoted from a top-of-column panel to a secondary action
-                (US-043). Both paths preserved: pick an existing image attachment
-                or upload a new one, including the zero-attachments case. */}
-            <Popover>
+            {/* Cover is a real secondary action: pick an existing image
+                attachment or upload a new one, including the zero-attachments
+                case. It never scrolls the document. */}
+            <Popover
+              open={coverPopoverOpen}
+              onOpenChange={(open) => {
+                if (!open && coverUploadName) return;
+                setCoverPopoverOpen(open);
+              }}
+            >
               <PopoverTrigger asChild>
-                <Button type="button" variant="outline" size="sm">
+                <Button type="button" variant="ghost" size="sm">
                   <HugeiconsIcon icon={Image01Icon} size={16} strokeWidth={2} />
                   Cover
                 </Button>
@@ -696,7 +1077,7 @@ function CardDetailDialogBody({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      disabled={isPending}
+                      disabled={Boolean(coverUploadName)}
                       onClick={() => submitCover("")}
                     >
                       Remove
@@ -724,11 +1105,11 @@ function CardDetailDialogBody({
                           <button
                             key={attachment.id}
                             type="button"
-                            disabled={isPending}
                             title={attachment.fileName}
+                            disabled={Boolean(coverUploadName)}
                             onClick={() => submitCover(attachment.fileUrl)}
                             className={cn(
-                              "relative aspect-video overflow-hidden rounded border-2 transition",
+                              "relative aspect-video overflow-hidden rounded border-2 transition disabled:cursor-not-allowed disabled:opacity-50",
                               isCurrent
                                 ? "border-primary"
                                 : "border-transparent hover:border-muted-foreground/40",
@@ -754,34 +1135,84 @@ function CardDetailDialogBody({
                   type="file"
                   ref={coverInputRef}
                   accept="image/*"
+                  disabled={Boolean(coverUploadName)}
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (!file) return;
+                    if (!file || coverUploadName) return;
                     setError("");
-                    const fd = new FormData();
-                    fd.set("cardId", card.id);
-                    fd.set("file", file);
-                    startTransition(async () => {
-                      const result = await setCardCoverAction(fd);
-                      if (!result.success) setError(result.error);
-                      else router.refresh();
+                    setCoverUploadName(file.name);
+                    queueSave(async () => {
+                      try {
+                        const fd = new FormData();
+                        fd.set("cardId", card.id);
+                        fd.set("file", file);
+                        const result = await setCardCoverAction(fd);
+                        if (!result.success) {
+                          setError(result.error);
+                          return false;
+                        }
+                        setError("");
+                        router.refresh();
+                        return true;
+                      } finally {
+                        setCoverUploadName(null);
+                        if (coverInputRef.current) {
+                          coverInputRef.current.value = "";
+                        }
+                      }
                     });
-                    e.target.value = "";
                   }}
                 />
+                {coverUploadName ? (
+                  <p role="status" className="text-xs text-muted-foreground">
+                    Uploading {coverUploadName}… Keep this window open.
+                  </p>
+                ) : null}
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   className="w-full"
-                  disabled={isPending}
+                  disabled={Boolean(coverUploadName)}
                   onClick={() => coverInputRef.current?.click()}
                 >
-                  Upload new image
+                  {coverUploadName ? (
+                    <>
+                      <span
+                        aria-hidden="true"
+                        className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+                      />
+                      Uploading…
+                    </>
+                  ) : (
+                    "Upload new image"
+                  )}
                 </Button>
               </PopoverContent>
             </Popover>
+
+            {creatorSection ? (
+              <CreateCardSectionDialog
+                section={creatorSection}
+                cardId={card.id}
+                cardTitle={draftTitle}
+                onOpenChange={(open) => {
+                  if (!open) setCreatorSection(null);
+                }}
+                onDescriptionCreated={(description) => {
+                  setDraftDescription(description);
+                  lastSavedDetailsRef.current = {
+                    title: draftTitle.trim(),
+                    description,
+                  };
+                  setDescriptionOpen(true);
+                }}
+                onChecklistCreated={(checklist) => {
+                  setCreatedChecklists((current) => [...current, checklist]);
+                }}
+              />
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -793,25 +1224,22 @@ function CardDetailDialogBody({
             alt="Card cover"
             className="h-48 w-full object-cover"
           />
-          {/* US-053: kept intentionally. This is a bottom-edge fade over an
-              arbitrary user-supplied cover image so it blends into the document
-              surface below — a legibility scrim over user content, not a
-              decorative chrome gradient. The §389 ban targets atmospheric chrome
-              gradients; a solid bg-background/80 here would wash out the cover. */}
+          {/* Kept intentionally (US-053): a legibility scrim over arbitrary
+              user-supplied cover art, not decorative chrome — the §389 ban
+              targets atmospheric gradients; a solid bg-background/80 here would
+              wash out the cover. */}
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background via-background/10 to-transparent" />
         </div>
       ) : null}
 
       {/* Single ~720px reading column (the modal width is the document measure)
-          with 32px padding. Sub-sections are divided by border hairlines, not
-          boxed sub-cards, and the former right rail collapses into the stack
-          (US-052 / DESIGN.md §103–110 / §332–340). */}
+          with 32px padding; sub-sections are hairline-divided, not boxed
+          sub-cards, and the former right rail collapses into the stack
+          (US-052 / DESIGN.md §103–110). */}
       <div className="min-h-0 flex-1 overflow-y-auto px-8 py-8">
-        {/* Properties (meta row): the relocated right-rail controls + the former
-            priority/dates sub-card boxes collapse into one compact, de-boxed
-            property strip under the title. Property labels/controls stay
-            body-sm (14px); only the document body (description, comments) steps
-            to body (16px) — DESIGN.md §256–258. */}
+        {/* Properties (meta row): the relocated right-rail controls collapse
+            into one compact, de-boxed property strip; labels stay body-sm, only
+            the document body steps to 16px (DESIGN.md §256–258). */}
         <div className="space-y-3">
           <div id="card-section-members" className="flex items-start gap-3">
             <span className="w-20 shrink-0 pt-1.5 text-sm text-muted-foreground">
@@ -833,7 +1261,6 @@ function CardDetailDialogBody({
                         size="icon"
                         aria-label={`Remove ${member.name}`}
                         className="h-4 w-4 p-0 rounded-full text-muted-foreground hover:text-foreground hover:bg-transparent"
-                        disabled={isPending}
                         onClick={() => handleRemoveMember(member.id)}
                       >
                         ×
@@ -847,39 +1274,66 @@ function CardDetailDialogBody({
                 </span>
               )}
               {canEdit ? (
-                <Popover>
+                <Popover
+                  onOpenChange={(open) => {
+                    if (!open) setMemberSearch("");
+                  }}
+                >
                   <PopoverTrigger asChild>
                     <Button type="button" variant="outline" size="sm">
                       <HugeiconsIcon icon={UserMultipleIcon} size={16} strokeWidth={2} />
                       Add
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent align="start" className="w-72 space-y-2">
+                  <PopoverContent align="start" className="w-72 space-y-3">
                     <p className="text-sm font-semibold">Assign members</p>
                     {availableMembers.length === 0 ? (
                       <p className="text-sm text-muted-foreground">
                         All workspace members are already assigned to this card.
                       </p>
                     ) : (
-                      <div className="space-y-1">
-                        {availableMembers.map((member) => (
-                          <Button
-                            key={member.id}
-                            variant="ghost"
-                            className="h-auto w-full justify-start gap-3 py-1.5"
-                            disabled={isPending}
-                            onClick={() => handleAssignMember(member.id)}
-                          >
-                            <MemberAvatar seed={member.id} name={member.name} image={member.image} size="sm" />
-                            <span className="flex min-w-0 flex-col text-left">
-                              <span className="truncate text-sm font-medium">{member.name}</span>
-                              <span className="truncate text-xs font-normal text-muted-foreground">
-                                {member.email}
-                              </span>
-                            </span>
-                          </Button>
-                        ))}
-                      </div>
+                      <>
+                        <Input
+                          autoFocus
+                          type="search"
+                          value={memberSearch}
+                          onChange={(event) => setMemberSearch(event.target.value)}
+                          placeholder="Search by name or email..."
+                          aria-label="Search members"
+                        />
+                        {filteredAvailableMembers.length === 0 ? (
+                          <p className="py-3 text-center text-sm text-muted-foreground">
+                            No members match your search.
+                          </p>
+                        ) : (
+                          <div className="max-h-64 space-y-1 overflow-y-auto">
+                            {filteredAvailableMembers.map((member) => (
+                              <Button
+                                key={member.id}
+                                type="button"
+                                variant="ghost"
+                                className="h-auto w-full justify-start gap-3 py-1.5"
+                                onClick={() => handleAssignMember(member.id)}
+                              >
+                                <MemberAvatar
+                                  seed={member.id}
+                                  name={member.name}
+                                  image={member.image}
+                                  size="sm"
+                                />
+                                <span className="flex min-w-0 flex-col text-left">
+                                  <span className="truncate text-sm font-medium">
+                                    {member.name}
+                                  </span>
+                                  <span className="truncate text-xs font-normal text-muted-foreground">
+                                    {member.email}
+                                  </span>
+                                </span>
+                              </Button>
+                            ))}
+                          </div>
+                        )}
+                      </>
                     )}
                   </PopoverContent>
                 </Popover>
@@ -907,20 +1361,13 @@ function CardDetailDialogBody({
             <Select
               value={draftPriority}
               onValueChange={(value) => {
+                priorityPickedRef.current = true;
                 setDraftPriority(value);
                 setError("");
-                const fd = new FormData();
-                fd.set("cardId", card.id);
-                fd.set("priority", value);
-                startTransition(async () => {
-                  const result = await updateCardPriorityAction(fd);
-                  if (!result.success) {
-                    setError(result.error);
-                    setDraftPriority(card.priority ?? "NONE");
-                  } else router.refresh();
-                });
+                queueSavePriority(value);
               }}
-              disabled={!canEdit || isPending}
+              onOpenChange={handlePriorityOpenChange}
+              disabled={!canEdit}
             >
               <SelectTrigger id="card-priority" className="w-full max-w-60">
                 <SelectValue placeholder="No priority" />
@@ -939,13 +1386,13 @@ function CardDetailDialogBody({
             <span id="card-due-date-label" className="w-20 shrink-0 text-sm text-muted-foreground">
               Due date
             </span>
-            <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
+            <Popover open={dueDateOpen} onOpenChange={handleDueDateOpenChange}>
               <PopoverTrigger asChild>
                 <Button
                   id="card-due-date"
                   type="button"
                   variant="outline"
-                  disabled={!canEdit || isPending}
+                  disabled={!canEdit}
                   aria-labelledby="card-due-date-label card-due-date"
                   aria-label={
                     selectedDueDate
@@ -976,10 +1423,11 @@ function CardDetailDialogBody({
                     if (!date) {
                       return;
                     }
+                    dueDatePickedRef.current = true;
                     const next = toDueDateValue(date);
                     setDraftDueDate(next);
                     setError("");
-                    saveDueDate(next);
+                    queueSaveDueDate(next);
                     setDueDateOpen(false);
                   }}
                 />
@@ -990,11 +1438,12 @@ function CardDetailDialogBody({
                       variant="ghost"
                       size="sm"
                       className="w-full justify-center"
-                      disabled={!canEdit || isPending}
+                      disabled={!canEdit}
                       onClick={() => {
+                        dueDatePickedRef.current = true;
                         setDraftDueDate("");
                         setError("");
-                        saveDueDate("");
+                        queueSaveDueDate("");
                         setDueDateOpen(false);
                       }}
                     >
@@ -1014,12 +1463,14 @@ function CardDetailDialogBody({
               <Select
                 value={draftEstimateHours === "" ? "none" : draftEstimateHours}
                 onValueChange={(value) => {
+                  estimatePickedRef.current = true;
                   const next = value === "none" ? "" : value;
                   setDraftEstimateHours(next);
                   setError("");
-                  saveEstimate(next);
+                  queueSaveEstimate(next);
                 }}
-                disabled={!canEdit || isPending}
+                onOpenChange={handleEstimateOpenChange}
+                disabled={!canEdit}
               >
                 <SelectTrigger id="card-estimate-hours" className="w-full max-w-40">
                   <SelectValue placeholder="No estimate" />
@@ -1036,87 +1487,304 @@ function CardDetailDialogBody({
           </div>
         </div>
 
-        {/* Document body — hairline-divided sections (no boxed sub-cards).
-            Description + comment body read at 16px / 1.55 leading. */}
-        <section className="mt-6 space-y-3 border-t border-border pt-6">
-          <h3 className="text-base font-semibold">Description</h3>
+        {/* Document body — optional blocks stay collapsed until they have data
+            or the user explicitly creates/reveals them. Comments remain the
+            default conversation surface. */}
+        {descriptionOpen ? (
+          <section className="mt-6 space-y-3 border-t border-border pt-6">
+            <h3 className="text-base font-semibold">Description</h3>
 
-          {canEdit ? (
-            <Textarea
-              id="card-detail-description"
-              value={draftDescription}
-              onChange={(e) => {
-                setDraftDescription(e.target.value);
-                setError("");
-              }}
-              onFocus={() => setDescriptionEditing(true)}
-              onBlur={() => {
-                setDescriptionEditing(false);
-                saveDetails(draftTitle, draftDescription);
-              }}
-              disabled={isPending}
-              rows={8}
-              placeholder="Add a more detailed description..."
-              className="min-h-40 text-base leading-[1.55] md:text-base"
-            />
-          ) : (
-            <div className="min-h-[3rem] whitespace-pre-wrap text-base leading-[1.55]">
-              {card.description || (
-                <span className="text-muted-foreground">No description yet.</span>
-              )}
+            {canEdit ? (
+              <Textarea
+                id="card-detail-description"
+                value={draftDescription}
+                onChange={(e) => {
+                  setDraftDescription(e.target.value);
+                  setError("");
+                }}
+                onFocus={() => setDescriptionEditing(true)}
+                onBlur={() => {
+                  setDescriptionEditing(false);
+                  queueSaveDetails(draftTitle, draftDescription);
+                }}
+                rows={8}
+                placeholder="Add a more detailed description..."
+                className="min-h-40 text-base leading-[1.55] md:text-base"
+              />
+            ) : (
+              <div className="min-h-[3rem] whitespace-pre-wrap text-base leading-[1.55]">
+                {card.description || (
+                  <span className="text-muted-foreground">No description yet.</span>
+                )}
+              </div>
+            )}
+          </section>
+        ) : null}
+
+        {checklistOpen ? (
+          <div id="card-section-checklist" className="mt-6 border-t border-border pt-6">
+              <CardChecklistsSection
+                cardId={card.id}
+                checklists={displayedChecklists}
+                canEdit={canEdit}
+                onChecklistDeleted={(checklistId) => {
+                  setDeletedChecklistIds((current) =>
+                    current.includes(checklistId) ? current : [...current, checklistId],
+                  );
+                  setCreatedChecklists((current) =>
+                    current.filter((checklist) => checklist.id !== checklistId),
+                  );
+                }}
+              />
             </div>
-          )}
-        </section>
-
-        <div id="card-section-checklist" className="mt-6 border-t border-border pt-6">
-          <CardChecklistsSection
-            cardId={card.id}
-            checklists={checklists}
-            canEdit={canEdit}
-          />
-        </div>
+          ) : null}
 
         <section className="mt-6 space-y-4 border-t border-border pt-6">
           <h3 className="text-base font-semibold">Comments and activity</h3>
 
           <CommentComposer cardId={card.id} canComment={canComment} assignableMembers={assignableMembers} />
 
-          {comments.length === 0 && activity.length === 0 ? (
+          {displayedComments.length === 0 && displayedActivity.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No comments or activity yet. Start the conversation!
             </p>
           ) : (
             <div className="space-y-5">
-              {comments.length > 0 && (
+              {displayedComments.length > 0 && (
                 <div className="space-y-3">
                   <h4 className="text-sm font-medium text-muted-foreground">Comments</h4>
-                  {comments.map((comment) => (
+                  {displayedComments.map((comment) => (
                     <CommentItem key={comment.id} comment={comment} memberNames={assignableMembers.map((m) => m.name)} />
                   ))}
+                  {commentsHasMoreState && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={loadMoreComments}
+                      disabled={commentsPending}
+                    >
+                      {commentsPending ? "Loading..." : "Load more comments"}
+                    </Button>
+                  )}
                 </div>
               )}
 
-              {activity.length > 0 && (
+              {displayedActivity.length > 0 && (
                 <div className="space-y-3">
                   <h4 className="text-sm font-medium text-muted-foreground">Activity</h4>
-                  {activity.map((entry) => (
+                  {displayedActivity.map((entry) => (
                     <ActivityItem key={entry.id} activity={entry} />
                   ))}
+                  {activityHasMoreState && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={loadMoreActivity}
+                      disabled={activityPending}
+                    >
+                      {activityPending ? "Loading..." : "Load more activity"}
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
           )}
         </section>
 
-        <div id="card-section-attachments" className="mt-6 border-t border-border pt-6">
-          <CardAttachments
-            cardId={card.id}
-            attachments={attachments}
-            canEdit={canEdit}
-          />
-        </div>
+        {attachmentsOpen ? (
+          <div id="card-section-attachments" className="mt-6 border-t border-border pt-6">
+              <CardAttachments
+                cardId={card.id}
+                attachments={visibleAttachments}
+                canEdit={canEdit}
+              />
+          </div>
+        ) : null}
       </div>
     </div>
+  );
+}
+
+type CreateCardSectionDialogProps = {
+  section: OptionalCardSection;
+  cardId: string;
+  cardTitle: string;
+  onOpenChange: (open: boolean) => void;
+  onDescriptionCreated: (description: string) => void;
+  onChecklistCreated: (checklist: ChecklistData) => void;
+};
+
+function CreateCardSectionDialog({
+  section,
+  cardId,
+  cardTitle,
+  onOpenChange,
+  onDescriptionCreated,
+  onChecklistCreated,
+}: CreateCardSectionDialogProps) {
+  const router = useRouter();
+  const [description, setDescription] = useState("");
+  const [checklistTitle, setChecklistTitle] = useState("");
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [error, setError] = useState("");
+  const [isPending, startTransition] = useTransition();
+
+  function close() {
+    setDescription("");
+    setChecklistTitle("");
+    setAttachment(null);
+    setError("");
+    onOpenChange(false);
+  }
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isPending) return;
+
+    const trimmedDescription = description.trim();
+    const trimmedChecklistTitle = checklistTitle.trim();
+    if (section === "description" && !trimmedDescription) {
+      setError("Description cannot be empty.");
+      return;
+    }
+    if (section === "checklist" && !trimmedChecklistTitle) {
+      setError("Checklist title cannot be empty.");
+      return;
+    }
+    if (section === "attachment" && !attachment) {
+      setError("Choose a file to upload.");
+      return;
+    }
+
+    setError("");
+    startTransition(async () => {
+      try {
+        if (section === "description") {
+          const formData = new FormData();
+          formData.set("cardId", cardId);
+          formData.set("title", cardTitle.trim());
+          formData.set("description", trimmedDescription);
+          const result = await updateCardDetailsAction(formData);
+          if (!result.success) {
+            setError(result.error);
+            return;
+          }
+          onDescriptionCreated(trimmedDescription);
+        } else if (section === "checklist") {
+          const formData = new FormData();
+          formData.set("cardId", cardId);
+          formData.set("title", trimmedChecklistTitle);
+          const result = await createChecklistAction(formData);
+          if (!result.success) {
+            setError(result.error);
+            return;
+          }
+          onChecklistCreated(result.checklist);
+        } else {
+          const formData = new FormData();
+          formData.set("cardId", cardId);
+          formData.set("file", attachment!);
+          const result = await uploadAttachmentAction(formData);
+          if (!result.success) {
+            setError(result.error);
+            return;
+          }
+        }
+
+        close();
+        router.refresh();
+      } catch {
+        setError("Something went wrong. Please try again.");
+      }
+    });
+  }
+
+  const title =
+    section === "description"
+      ? "Add description"
+      : section === "checklist"
+        ? "Create checklist"
+        : "Upload attachment";
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (isPending) return;
+        if (!open) {
+          close();
+        }
+      }}
+    >
+      <DialogContent
+        className="max-w-md"
+        onEscapeKeyDown={(event) => isPending && event.preventDefault()}
+      >
+        <form onSubmit={submit}>
+          <DialogHeader>
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>
+              Create it here. The section will appear on the card only after this succeeds.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-4">
+            {section === "description" ? (
+              <Textarea
+                autoFocus
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                placeholder="Write a description..."
+                rows={6}
+                disabled={isPending}
+              />
+            ) : section === "checklist" ? (
+              <Input
+                autoFocus
+                value={checklistTitle}
+                onChange={(event) => setChecklistTitle(event.target.value)}
+                placeholder="Checklist title"
+                disabled={isPending}
+              />
+            ) : section === "attachment" ? (
+              <Input
+                type="file"
+                aria-label="Attachment file"
+                onChange={(event) => setAttachment(event.target.files?.[0] ?? null)}
+                accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                disabled={isPending}
+              />
+            ) : null}
+            {error ? (
+              <p role="alert" className="mt-2 text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="ghost" disabled={isPending} onClick={close}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                isPending ||
+                (section === "description" && !description.trim()) ||
+                (section === "checklist" && !checklistTitle.trim()) ||
+                (section === "attachment" && !attachment)
+              }
+            >
+              {isPending ? "Creating..." : title}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1131,6 +1799,10 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Same-tick single-flight: isPending only flips on the next render, so the
+  // ref drops a double Enter/submit immediately and releases on completion or
+  // failure so a retry always works.
+  const submittingRef = useRef(false);
 
   const {
     open: isMentionOpen,
@@ -1158,6 +1830,10 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
       setError("Comment cannot be empty");
       return;
     }
+    if (submittingRef.current) {
+      return;
+    }
+    submittingRef.current = true;
 
     setError("");
 
@@ -1166,26 +1842,64 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
     formData.set("content", content.trim());
 
     startTransition(async () => {
-      const result = await createCommentAction(formData);
-      if (result.success) {
-        setContent("");
-      } else {
-        setError(result.error);
+      try {
+        const result = await createCommentAction(formData);
+        if (result.success) {
+          setContent("");
+        } else {
+          setError(result.error);
+        }
+      } catch {
+        // A thrown/rejected action (network blip, unexpected server failure)
+        // surfaces a generic actionable error instead of an unhandled
+        // rejection; the guard still releases so a retry always works.
+        setError("Something went wrong. Please try again.");
+      } finally {
+        submittingRef.current = false;
       }
     });
   }
 
+  // A textarea doesn't implicitly submit its form, so Enter routes here
+  // (Shift+Enter stays a newline). While the mention list is open, Enter/Tab
+  // select a mention — the hook preventDefaults, which also stops submission,
+  // so a mention pick never posts.
+  function handleFormSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    handleSubmit();
+  }
+
+  function handleCommentKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey && !isMentionOpen) {
+      event.preventDefault();
+      handleSubmit();
+      return;
+    }
+    // Delegate arrows/Enter/Escape to the mention combobox while its list is
+    // open (and let plain typing fall through to the browser).
+    mentionComboboxProps.onKeyDown?.(event);
+  }
+
   return (
     <div className="space-y-2">
-      <Textarea
-        ref={textareaRef}
-        value={content}
-        disabled={isPending || !canComment}
-        rows={3}
-        placeholder={canComment ? "Write a comment..." : "You do not have permission to comment on this card."}
-        className="min-h-20"
-        {...mentionComboboxProps}
-      />
+      <form onSubmit={handleFormSubmit} className="space-y-2">
+        <Textarea
+          ref={textareaRef}
+          value={content}
+          disabled={isPending || !canComment}
+          rows={3}
+          placeholder={canComment ? "Write a comment..." : "You do not have permission to comment on this card."}
+          className="min-h-20"
+          {...mentionComboboxProps}
+          onKeyDown={handleCommentKeyDown}
+        />
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        {canComment && (
+          <Button type="submit" disabled={isPending || !content.trim()}>
+            {isPending ? "Posting..." : "Post comment"}
+          </Button>
+        )}
+      </form>
       {isMentionOpen
         ? createPortal(
             <div
@@ -1194,9 +1908,9 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
               id={mentionListboxId}
               role="listbox"
               aria-label="Mention a member"
-              // pointer-events-auto: the list is portaled to <body>, which Radix
-              // Dialog marks pointer-events:none while open; re-enable it here or
-              // clicks fall through to the textarea behind the (inert) backdrop.
+              // The list is portaled to <body>, which Radix Dialog marks
+              // pointer-events:none while open — re-enable it here or clicks fall
+              // through to the textarea.
               className="pointer-events-auto z-50 w-56 overflow-y-auto rounded-lg border bg-popover text-popover-foreground shadow-lg"
             >
               {mentionItems.length === 0 ? (
@@ -1230,16 +1944,6 @@ function CommentComposer({ cardId, canComment, assignableMembers }: CommentCompo
             document.body,
           )
         : null}
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      {canComment && (
-        <Button
-          type="button"
-          disabled={isPending || !content.trim()}
-          onClick={handleSubmit}
-        >
-          {isPending ? "Posting..." : "Post comment"}
-        </Button>
-      )}
     </div>
   );
 }
@@ -1253,7 +1957,7 @@ function renderMentionContent(content: string, memberNames: string[]) {
   if (!memberNames.length) return content;
 
   // Share the single mention resolver (lib/mention.ts) with the notify path so
-  // what is highlighted and what is notified never diverge.
+  // highlight and notification never diverge.
   const matches = resolveMentions(
     content,
     memberNames.map((name) => ({ name })),
@@ -1337,7 +2041,6 @@ function ActivityItem({ activity }: ActivityItemProps) {
 }
 
 function getActivityLabel(action: string, entityType: string, metadata: Record<string, unknown> | null): string {
-  // Handle member assignment activities
   if (metadata && typeof metadata === "object" && "actionType" in metadata) {
     const actionType = (metadata as { actionType: string }).actionType;
     const targetName = (metadata as { targetUserName?: string }).targetUserName || "a member";

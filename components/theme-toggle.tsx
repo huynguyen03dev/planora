@@ -31,7 +31,7 @@ export function ThemeToggle() {
       <DropdownMenuTrigger
         // Matches the notification bell's hit target and hover treatment so the
         // two header controls read as a set.
-        className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        className="flex size-9 pointer-coarse:size-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         aria-label="Switch theme"
       >
         {/* Sun in light, moon in dark — the icon swaps via the .dark class so it

@@ -1,4 +1,3 @@
-// lib/schemas/automation.ts
 import { z } from "zod";
 
 import { workspaceIdSchema } from "./invitation";
@@ -12,8 +11,6 @@ const userIdSchema = z
   .trim()
   .min(1, "Member is required")
   .max(255);
-
-// ─── Trigger types ────────────────────────────────────────────────
 
 export const TRIGGER_TYPES = [
   "card-created",
@@ -29,8 +26,7 @@ export const triggerTypeSchema = z.enum(TRIGGER_TYPES);
 
 export type TriggerType = z.infer<typeof triggerTypeSchema>;
 
-// ─── Trigger config (all optional; empty object = match everything) ──
-
+// Trigger config: all optional; an empty object matches everything.
 const priorityValues = z.enum(["URGENT", "HIGH", "MEDIUM", "LOW"]);
 
 export const triggerConfigSchema = z.object({
@@ -44,8 +40,6 @@ export const triggerConfigSchema = z.object({
 
 export type TriggerConfig = z.infer<typeof triggerConfigSchema>;
 
-// ─── Dynamic target tokens (decision 0022 R2) ─────────────────────
-
 const recipientTokenSchema = z.union([
   z.literal("card-assignees"),
   z.literal("card-creator"),
@@ -56,8 +50,6 @@ const removeScopeSchema = z.union([
   z.literal("all"),
   userIdSchema,
 ]);
-
-// ─── Action steps (discriminated union on `type`) ──────────────────
 
 const moveCardToListStepSchema = z.object({
   type: z.literal("move-card-to-list"),
@@ -113,16 +105,13 @@ export const actionStepSchema = z.discriminatedUnion("type", [
 
 export type ActionStep = z.infer<typeof actionStepSchema>;
 
-// ─── Actions array (R1: ordered non-empty sequence) ────────────────
-
+// Actions array (R1: ordered non-empty sequence).
 export const actionsSchema = z
   .array(actionStepSchema)
   .min(1, "A rule must have at least one action")
   .max(20, "A rule cannot have more than 20 actions");
 
 export type Actions = z.infer<typeof actionsSchema>;
-
-// ─── Create / Update Rule inputs ───────────────────────────────────
 
 const MAX_RULE_NAME_LENGTH = 200;
 const MAX_RULE_DESCRIPTION_LENGTH = 2000;
@@ -158,8 +147,6 @@ export const updateRuleSchema = z.object({
 
 export type UpdateRuleInput = z.infer<typeof updateRuleSchema>;
 
-// ─── Rule id-only / query inputs ───────────────────────────────────
-
 export const deleteRuleSchema = z.object({
   id: z.string().uuid("Invalid rule ID"),
 });
@@ -182,6 +169,11 @@ export type ListRulesInput = z.infer<typeof listRulesSchema>;
 export const ruleExecutionLogSchema = z.object({
   workspaceId: workspaceIdSchema,
   ruleId: z.string().uuid("Invalid rule ID").optional(),
+  // US-066 cursor pagination: `cursor` is the id of the last log of the
+  // previous page; `take` overrides the default page size (100). Omitting both
+  // keeps the legacy behavior (the 100 newest logs).
+  cursor: z.string().uuid("Invalid cursor").optional(),
+  take: z.number().int().min(1).max(200).optional(),
 });
 
 export type RuleExecutionLogInput = z.infer<typeof ruleExecutionLogSchema>;
@@ -194,10 +186,9 @@ export const boardAutomationDataSchema = z.object({
 
 export type BoardAutomationDataInput = z.infer<typeof boardAutomationDataSchema>;
 
-// ─── Dry-run input ─────────────────────────────────────────────────
-// Mirrors the RuleEventPayload fields a user can plausibly supply to preview
-// which enabled rules would fire (no mutation). All event fields are optional;
-// the matcher decides based on what's present.
+// Dry-run input: mirrors the RuleEventPayload fields a user can plausibly
+// supply to preview which enabled rules would fire (no mutation). All event
+// fields are optional; the matcher decides based on what's present.
 
 export const dryRunEventSchema = z.object({
   cardId: z.string().uuid("Invalid card ID").optional(),

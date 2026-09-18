@@ -88,10 +88,10 @@ export function NotificationDropdown({
         anyFailure = true;
       }
 
-      // Commit state atomically — only replace populated data when both
-      // endpoints succeeded and this fetch wasn't superseded, preventing a
-      // partial failure (or a stale in-flight response) from stitching fresh
-      // data onto stale.
+      // Commit state atomically: replace populated data only when both
+      // endpoints succeeded and this fetch wasn't superseded, so a partial
+      // failure (or a stale in-flight response) can't stitch fresh data onto
+      // stale.
       if (!anyFailure && !controller.signal.aborted) {
         setNotifications(nextNotifications ?? []);
         setInvitations(nextInvitations ?? []);
@@ -104,9 +104,8 @@ export function NotificationDropdown({
       // A superseded (aborted) fetch must not touch shared state — the fetch
       // that replaced it owns the loading/error/data now.
       if (!controller.signal.aborted) {
-        // Surface error on first load for both network errors (catch) and
-        // non-OK HTTP responses (anyFailure set from ok checks above).
-        // When already loaded once, stay quiet — don't replace populated data.
+        // First-load errors surface (network catch or non-OK response); once
+        // loaded, stay quiet rather than replace populated data.
         if (anyFailure && !hasLoadedOnceRef.current) {
           setFetchError("Failed to load notifications. Please try again.");
         }

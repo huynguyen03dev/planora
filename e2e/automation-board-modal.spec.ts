@@ -46,7 +46,7 @@ test("board automation modal — create rule, trigger, verify log", async ({ bro
   const ctx = await browser.newContext();
   page = await ctx.newPage();
 
-  // ── Step 1: Sign up, create workspace + board + list ──────────────────
+  // Step 1: sign up, create workspace + board + list
   console.log("Step 1: Sign up, create workspace, board, and list");
   await signUp(page, user);
   workspaceId = await createWorkspace(page, "Board Modal QA");
@@ -57,14 +57,14 @@ test("board automation modal — create rule, trigger, verify log", async ({ bro
   expect(listId, "list id should be resolved from the seeded list").toBeTruthy();
   console.log("✓ Step 1: workspace 'Board Modal QA', board 'Ops', list 'To Do' created");
 
-  // ── Step 2: Automation button is visible in the header ─────────────────
+  // Step 2: Automation button is visible in the header
   const boardUrl = page.url();
   console.log(`Step 2: On board page ${boardUrl}`);
   const automationButton = page.getByRole("button", { name: "Automation" });
   await expect(automationButton).toBeVisible();
   console.log("✓ Step 2: 'Automation' button visible in board header");
 
-  // ── Step 3: Click Automation → dialog opens, URL unchanged ────────────
+  // Step 3: Click Automation → dialog opens, URL unchanged
   console.log("Step 3: Click 'Automation', verify modal opens without navigation");
   await automationButton.click();
 
@@ -80,33 +80,27 @@ test("board automation modal — create rule, trigger, verify log", async ({ bro
     fullPage: true,
   });
 
-  // ── Step 4: New rule → builder opens, board scope = "Ops" ─────────────
+  // Step 4: New rule → builder opens, board scope = "Ops"
   console.log("Step 4: Click 'New rule', verify board scope defaults to 'Ops'");
-
-  // Click "New rule" scoped to the board modal (the visible dialog)
   await boardModal.getByRole("button", { name: "New rule" }).click();
 
   // Now the rule builder is the topmost dialog; the board modal becomes aria-hidden
   const builderDialog = page.getByRole("dialog", { name: "New automation rule" });
   await expect(builderDialog).toBeVisible({ timeout: 10_000 });
 
-  // Assert the Board scope select's displayed value is "Ops" (the current board)
   const boardScopeTrigger = builderDialog.locator("#rule-board");
   await expect(boardScopeTrigger).toContainText("Ops");
   console.log("✓ Step 4a: Board scope defaults to 'Ops' (not 'All boards in this workspace')");
 
-  // Fill rule name
   await page.locator("#rule-name").fill("Board Rule");
 
-  // Submit
   await page.getByRole("button", { name: "Create rule" }).click();
 
-  // Builder closes
   await expect(builderDialog).not.toBeVisible();
   console.log("✓ Step 4b: Rule 'Board Rule' created, builder closed");
 
-  // ── Step 5: Rules list shows "Board Rule" in the board modal ──────────
-  // The board modal is now the active dialog again (no longer aria-hidden)
+  // Step 5: Rules list shows "Board Rule" in the board modal
+  // The board modal is the active dialog again (no longer aria-hidden)
   console.log("Step 5: Verify rules list shows 'Board Rule'");
   await expect(boardModal.getByText("Board Rule", { exact: true })).toBeVisible({ timeout: 10_000 });
   console.log("✓ Step 5: 'Board Rule' appears in rules list inside the modal");
@@ -116,7 +110,7 @@ test("board automation modal — create rule, trigger, verify log", async ({ bro
     fullPage: true,
   });
 
-  // ── Step 6: Close modal, trigger the rule via card creation ───────────
+  // Step 6: Close modal, trigger the rule via card creation
   console.log("Step 6: Close modal, trigger the rule by creating a card");
   await page.keyboard.press("Escape");
   await expect(boardModal).not.toBeVisible();
@@ -125,10 +119,9 @@ test("board automation modal — create rule, trigger, verify log", async ({ bro
   await addCardToList(page, listId, "Trigger card");
   console.log("✓ Step 6: Card 'Trigger card' created — rule should have fired");
 
-  // ── Step 7: Reopen modal, verify execution log ────────────────────────
+  // Step 7: Reopen modal, verify execution log
   console.log("Step 7: Reopen Automation modal, verify execution log");
 
-  // Reopen the modal (re-fetches on open)
   await automationButton.click();
   await expect(boardModal).toBeVisible({ timeout: 10_000 });
 
@@ -137,18 +130,15 @@ test("board automation modal — create rule, trigger, verify log", async ({ bro
     "No rule executions yet. Runs appear here as rules fire.",
   );
 
-  // Give the log a moment; if still empty, click Refresh and try again
   try {
     await expect(emptyState).toHaveCount(0, { timeout: 4_000 });
   } catch {
     console.log("  Log initially empty, clicking Refresh...");
     await boardModal.getByRole("button", { name: "Refresh" }).click();
-    // Allow the refresh to complete
     await page.waitForTimeout(2000);
     await expect(emptyState).toHaveCount(0, { timeout: 8_000 });
   }
 
-  // Find a log entry containing the rule name and a success status
   const logEntry = boardModal
     .locator("div")
     .filter({ hasText: "Board Rule" })

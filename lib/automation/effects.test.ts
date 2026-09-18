@@ -1,10 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { fireDeferredEffects } from "./effects";
-import type { DeferredEffect } from "./executor";
 
 vi.mock("@/lib/prisma", () => ({
-  default: { card: { findUnique: vi.fn(async () => ({ title: "My Card", completedAt: new Date("2026-07-06T00:00:00.000Z") })) } },
+  default: {
+    card: {
+      findUnique: vi.fn(async () => ({
+        title: "My Card",
+        completedAt: new Date("2026-07-06T00:00:00.000Z"),
+        listId: "l2",
+        position: 100,
+        moveRevision: 7,
+      })),
+    },
+  },
 }));
 vi.mock("@/lib/label", () => ({
   getCardLabels: vi.fn(async () => [{ id: "lab1", boardId: "b1", name: "Bug", color: "red" }]),
@@ -35,11 +44,25 @@ import { notifyAutomation } from "@/lib/notification";
 beforeEach(() => vi.clearAllMocks());
 
 describe("fireDeferredEffects — descriptor → emitter mapping", () => {
-  it("card-moved emits the move event verbatim (no re-read)", async () => {
+  it("card-moved re-reads the card's COMMITTED list/position/moveRevision and emits the canonical snapshot (decision 0032)", async () => {
     await fireDeferredEffects([
-      { kind: "card-moved", boardId: "b1", cardId: "c1", listId: "l2", position: 100 },
+      {
+        kind: "card-moved",
+        boardId: "b1",
+        cardId: "c1",
+        listId: "l2",
+        position: 100,
+        moveRevision: 7,
+      },
     ]);
-    expect(emitCardMoved).toHaveBeenCalledWith("b1", { cardId: "c1", listId: "l2", position: 100 });
+    // The descriptor is only a trigger hint; the echo carries the committed
+    // values (a later rule step may have moved the card again) + the revision.
+    expect(emitCardMoved).toHaveBeenCalledWith("b1", {
+      cardId: "c1",
+      listId: "l2",
+      position: 100,
+      moveRevision: 7,
+    });
   });
 
   it("labels-updated re-reads the card's labels and emits the snapshot", async () => {
@@ -89,7 +112,14 @@ describe("fireDeferredEffects — descriptor → emitter mapping", () => {
       throw new Error("socket down");
     });
     await fireDeferredEffects([
-      { kind: "card-moved", boardId: "b1", cardId: "c1", listId: "l2", position: 1 },
+      {
+        kind: "card-moved",
+        boardId: "b1",
+        cardId: "c1",
+        listId: "l2",
+        position: 1,
+        moveRevision: 7,
+      },
       { kind: "card-updated", boardId: "b1", cardId: "c2" },
     ]);
     // The second effect still fired despite the first throwing.

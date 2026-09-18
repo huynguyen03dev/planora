@@ -194,7 +194,7 @@ describe("cron route processing", () => {
     // 2 recipients × 1 milestone = 2 skipped
     expect(body.skipped).toBe(2);
     expect(body.errors).toBe(0);
-    // notifyDueDate should NOT be called for skipped items
+    // notifyDueDate must NOT be called for skipped items
     expect(mockNotifyDueDate).not.toHaveBeenCalled();
   });
 
@@ -231,10 +231,8 @@ describe("cron route processing", () => {
     const response = await callRoute({ cronSecret: "test-secret", bearerToken: "test-secret" });
     const body = await response.json();
 
-    // Each card: 1 member + 1 creator = 2 recipients → 2 notifications per milestone
-    // Card 1: DUE_SOON (2 notifications)
-    // Card 2: OVERDUE (2 notifications)
-    // Total: 4 notifications
+    // Each card: 1 member + 1 creator = 2 recipients → 2 per milestone;
+    // card 1 DUE_SOON + card 2 OVERDUE = 4 notifications.
     expect(body.processed).toBe(2);
     expect(body.notified).toBe(4);
   });
@@ -247,7 +245,7 @@ describe("idempotency — two overlapping ticks", () => {
     const dueSoon = new Date(now.getTime() + 12 * 60 * 60 * 1000);
     const card = makeCard({ id: "card-1", dueDate: dueSoon });
 
-    // ── Tick 1: card found, reminder created, notified ──
+    // Tick 1: card found, reminder created, notified
     mockDb.card.findMany.mockResolvedValue([card]);
     mockDb.board.findMany.mockResolvedValue([makeBoard()]);
     mockDb.cardReminder.create.mockResolvedValue({ id: "r", cardId: "", userId: "", milestone: "", sentAt: new Date() });
@@ -259,7 +257,7 @@ describe("idempotency — two overlapping ticks", () => {
     expect(body.processed).toBe(1);
     const tick1Notified = body.notified;
 
-    // ── Tick 2: same card, but cardReminder.create now throws P2002 (already sent) ──
+    // Tick 2: same card, but cardReminder.create now throws P2002 (already sent)
     vi.clearAllMocks();
 
     mockDb.card.findMany.mockResolvedValue([card]);
@@ -290,7 +288,6 @@ describe("scheduled pass — US-074 Slice B2 (list archivedAt:null filter)", () 
     // Reset modules so the route re-imports the mocked scheduled module
     vi.resetModules();
 
-    // Set up mocks fresh for this test
     const scheduledCard = {
       id: "card-scheduled-1",
       dueDate: dueSoon,
@@ -307,13 +304,12 @@ describe("scheduled pass — US-074 Slice B2 (list archivedAt:null filter)", () 
       errors: 0,
     });
 
-    // First findMany (reminder scan) returns empty; second findMany (scheduled
-    // scan) returns one card. Use mockImplementation to track both calls.
+    // First findMany (reminder scan) is empty; the second (scheduled scan)
+    // returns one card. Track both calls via mockImplementation.
     const findManyCalls: Array<{ where: Record<string, unknown> }> = [];
     mockDb.card.findMany.mockImplementation(async (args: { where: Record<string, unknown> }) => {
       findManyCalls.push(args);
-      // First call (reminder scan) → empty
-      // Second call (scheduled scan) → one card
+      // First call (reminder scan) → empty; second (scheduled scan) → one card
       return findManyCalls.length === 1 ? [] : [scheduledCard];
     });
     mockDb.board.findMany.mockResolvedValue([{ id: "board-1", title: "Board" }]);
@@ -321,15 +317,14 @@ describe("scheduled pass — US-074 Slice B2 (list archivedAt:null filter)", () 
     const response = await callRoute({ cronSecret: "test-secret", bearerToken: "test-secret" });
     const body = await response.json();
 
-    // Assert the route ran and the scheduled pass produced results
     expect(body.processed).toBe(0); // reminder scan returned 0 cards
     expect(body.scheduledApplied).toBe(1); // scheduled pass applied
     expect(body.scheduledErrors).toBe(0);
 
-    // The second findMany call is the scheduled scan; it must include list archive filter
+    // The second findMany call is the scheduled scan; it must include the
+    // list archive filter
     const scheduledCall = findManyCalls[1];
     expect(scheduledCall).toBeDefined();
-    // The scheduled scan where clause must include list: { archivedAt: null }
     expect(scheduledCall.where).toHaveProperty("list");
     expect(scheduledCall.where.list).toEqual({ archivedAt: null });
 

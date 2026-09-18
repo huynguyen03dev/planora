@@ -9,6 +9,7 @@ type AutomationManagementProps = {
   rules: RuleRowData[];
   options: AutomationOptions;
   logs: LogEntry[];
+  logsHasMore: boolean;
   lastRunByRule: Record<string, { status: string; executedAt: string }>;
 };
 
@@ -23,6 +24,7 @@ export function AutomationManagement({
   rules,
   options,
   logs,
+  logsHasMore,
   lastRunByRule,
 }: AutomationManagementProps) {
   return (
@@ -34,6 +36,7 @@ export function AutomationManagement({
         rules={rules}
         options={options}
         logs={logs}
+        logsHasMore={logsHasMore}
         lastRunByRule={lastRunByRule}
       />
     </main>

@@ -113,13 +113,17 @@ a separate write outside the failed transaction (a log row written inside it
 would roll back with it). The Server Action returns a distinct error to the
 user: "automation rule <name> failed; no changes were applied."
 
-**Retry loops**: some trigger actions retry their transaction (e.g.
-`moveCardAction` re-runs `db.$transaction` on `StaleNeighborError` during
-float-gap renumbering). Rule evaluation lives inside each attempt; this is safe
-because an aborted attempt rolls back its rule effects too — exactly one
-application persists. Chain state (`chainId`, depth, dedup set) and the
-deferred-effect accumulator are constructed fresh per attempt and discarded on
-abort; deferred effects fire once, only after the final successful commit.
+**Ordering protocol**: decision 0032 supersedes the earlier retry-loop design.
+Human and automation moves share one workspace-gated transaction protocol with
+sorted board/list/card locks, a `moveRevision` check, and canonical committed
+effects. Stale revisions or contradictory anchors return `ORDER_CONFLICT` for
+resynchronization; they are not retried with a changed ordering hint. Rule
+evaluation and the central ordered action executor enter at the workspace gate
+before any action can mutate or lock the card. Recursive evaluations safely
+re-acquire that row in the shared transaction. The workspace gate is the
+deadlock-prevention boundary; `moveCardInTransaction` retains sorted
+board/list-before-card locking inside it. Deferred effects fire once after the
+successful commit.
 
 ### Recursive evaluation
 

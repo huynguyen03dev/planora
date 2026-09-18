@@ -8,7 +8,6 @@ import {
   Card,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 
 import { SignInForm } from "./sign-in-form";
@@ -32,7 +31,8 @@ export default async function SignInPage({
         <div className="flex flex-1 items-center justify-center px-4">
           <Card className="w-full max-w-sm">
             <CardHeader>
-              <CardTitle className="text-2xl">Welcome back</CardTitle>
+              {/* Real page-level heading (CardTitle is a div). */}
+              <h1 className="text-2xl leading-normal font-medium">Welcome back</h1>
               <CardDescription>Loading sign in form...</CardDescription>
             </CardHeader>
           </Card>

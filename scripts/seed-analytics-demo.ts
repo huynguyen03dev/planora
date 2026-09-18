@@ -1,16 +1,13 @@
 #!/usr/bin/env tsx
 /**
- * Analytics demo seeder (for local QA only — NOT a migration).
+ * Analytics demo seeder (local QA only — NOT a migration).
  *
- * Builds a workspace whose card-history event stream exercises every behavior
- * in story US-001: late / on-time / no-due-date completions, >100 current-period
- * completions (table truncation notice), rising overdue & completed-late counts
- * (regression coloring), a zero->nonzero reopen rate (the "New" state), and a
- * second empty board (the no-data state).
+ * Builds a workspace whose event stream exercises every US-001 behavior:
+ * late/on-time/no-due-date completions, >100 current-period completions
+ * (truncation notice), rising overdue & completed-late counts, a zero->nonzero
+ * reopen rate, and an empty board (no-data state).
  *
- * Usage:
- *   npx tsx --env-file=.env scripts/seed-analytics-demo.ts --email <user-email> [--slug analytics-demo]
- *
+ * Usage: npx tsx --env-file=.env scripts/seed-analytics-demo.ts --email <user-email> [--slug analytics-demo]
  * Idempotent: re-running deletes and recreates the workspace with the given slug.
  */
 
@@ -55,7 +52,6 @@ type CardScenario = {
   title: string;
   createdDaysAgo: number;
   estimateHours: number | null;
-  // completion
   completedDaysAgo: number | null; // null = still active
   dueDaysAgo: number | null; // due date relative to now; null = no due date
   reopenedDaysAgo: number | null; // null = not reopened
@@ -240,7 +236,6 @@ async function main() {
       updatedAt: now,
     });
 
-    // CARD_CREATED
     events.push({
       id: randomUUID(),
       workspaceId,
@@ -259,7 +254,6 @@ async function main() {
       },
     });
 
-    // CARD_COMPLETED
     if (completedAt) {
       events.push({
         id: randomUUID(),
@@ -279,7 +273,6 @@ async function main() {
       });
     }
 
-    // CARD_REOPENED (after completion)
     if (reopenedAt) {
       events.push({
         id: randomUUID(),

@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { ChainTracker, MAX_CHAIN_DEPTH } from "./loop-guard";
 
 describe("ChainTracker", () => {
-  // ─── root() ─────────────────────────────────────────────────────────
 
   describe("root", () => {
     it("returns depth 0", () => {
@@ -23,8 +22,6 @@ describe("ChainTracker", () => {
       expect(a.chainId).not.toBe(b.chainId);
     });
   });
-
-  // ─── child() ────────────────────────────────────────────────────────
 
   describe("child", () => {
     it("increments depth by 1", () => {
@@ -56,8 +53,6 @@ describe("ChainTracker", () => {
     });
   });
 
-  // ─── atDepthCap() ───────────────────────────────────────────────────
-
   describe("atDepthCap", () => {
     it("returns false when depth < MAX_CHAIN_DEPTH", () => {
       const tracker = ChainTracker.root();
@@ -85,8 +80,6 @@ describe("ChainTracker", () => {
     });
   });
 
-  // ─── hasFired / markFired ───────────────────────────────────────────
-
   describe("hasFired / markFired", () => {
     it("returns false for a pair that has not fired", () => {
       const tracker = ChainTracker.root();
@@ -112,8 +105,6 @@ describe("ChainTracker", () => {
     });
   });
 
-  // ─── from() ─────────────────────────────────────────────────────────
-
   describe("from", () => {
     it("round-trips chainId and depth", () => {
       const tracker = ChainTracker.from("my-chain-id", 3);
@@ -126,8 +117,6 @@ describe("ChainTracker", () => {
       expect(tracker.hasFired("rule-1", "card-1")).toBe(false);
     });
   });
-
-  // ─── MAX_CHAIN_DEPTH ────────────────────────────────────────────────
 
   it("MAX_CHAIN_DEPTH is 5", () => {
     expect(MAX_CHAIN_DEPTH).toBe(5);

@@ -85,6 +85,7 @@ export async function sendEmail({
         });
       } catch (error) {
         console.error("[email] SMTP (Mailpit) send failed:", error);
+        throw error;
       }
       return;
     }
@@ -93,24 +94,34 @@ export async function sendEmail({
   // Production (and any environment with a Resend key): real delivery.
   const resend = getResendClient();
   if (resend) {
+    let result;
     try {
-      const { error } = await resend.emails.send({
+      result = await resend.emails.send({
         from,
         to,
         subject,
         react,
       });
-
-      if (error) {
-        console.error("[email] Resend error:", error);
-      }
     } catch (error) {
       console.error("[email] Failed to send email:", error);
+      throw error;
+    }
+
+    if (result.error) {
+      console.error("[email] Resend error:", result.error);
+      throw new Error(
+        result.error.message ?? "Email provider rejected the request",
+      );
     }
     return;
   }
 
-  // No transport configured: log so the flow is observable in a bare setup.
+  if (isProd) {
+    throw new Error("No production email transport is configured");
+  }
+
+  // No non-production transport configured: log so a bare local setup remains
+  // observable. Production never takes this success-like fallback.
   console.log("[email] No mail transport (SMTP_HOST / RESEND_API_KEY). Logging instead.");
   console.log(`[email] To: ${to}, Subject: ${subject}`);
 }

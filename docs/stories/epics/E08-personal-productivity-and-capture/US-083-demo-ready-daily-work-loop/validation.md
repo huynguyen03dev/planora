@@ -1,5 +1,11 @@
 # Validation Plan — US-083 Demo-Ready Daily Work Loop
 
+**Update (2026-08-04):** the story merged to `dev` via **PR #94 on 2026-08-02**.
+All "branch-local" / "no commit, push, PR, or merge was performed" statements
+below describe the final-close pass's own scope (the close pass opened no PR; the
+merge went through the normal authorization gate afterward) and remain accurate
+as point-in-time records.
+
 ## Proof Strategy
 
 Every acceptance criterion below is observable (a command, an assertion, or a

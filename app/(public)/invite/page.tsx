@@ -11,7 +11,6 @@ import {
   CardDescription,
   CardFooter,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 
 interface InvitePageProps {
@@ -26,6 +25,14 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Real page-level heading: CardTitle renders a div, so the invite shell's
+// state titles are local h1s that keep the card-title visual classes.
+function PageHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <h1 className="text-2xl leading-normal font-medium">{children}</h1>
+  );
+}
+
 export default async function InvitePage({ searchParams }: InvitePageProps) {
   const { invitationId } = await searchParams;
 
@@ -35,7 +42,7 @@ export default async function InvitePage({ searchParams }: InvitePageProps) {
     return (
       <Shell>
         <CardHeader>
-          <CardTitle className="text-2xl">Invitation link invalid</CardTitle>
+          <PageHeading>Invitation link invalid</PageHeading>
           <CardDescription>
             This invitation link is missing its identifier.
           </CardDescription>
@@ -61,7 +68,7 @@ export default async function InvitePage({ searchParams }: InvitePageProps) {
     return (
       <Shell>
         <CardHeader>
-          <CardTitle className="text-2xl">Invitation unavailable</CardTitle>
+          <PageHeading>Invitation unavailable</PageHeading>
           <CardDescription>
             This invitation is no longer valid — it may have already been
             accepted or declined, or it has expired.
@@ -87,9 +94,9 @@ export default async function InvitePage({ searchParams }: InvitePageProps) {
     return (
       <Shell>
         <CardHeader>
-          <CardTitle className="text-2xl">
+          <PageHeading>
             You&apos;re invited to {invitation.workspaceName}
-          </CardTitle>
+          </PageHeading>
           <CardDescription>
             {invitation.inviterName} invited{" "}
             <span className="font-medium">{invitation.email}</span> to join as{" "}
@@ -117,7 +124,7 @@ export default async function InvitePage({ searchParams }: InvitePageProps) {
     return (
       <Shell>
         <CardHeader>
-          <CardTitle className="text-2xl">Different account</CardTitle>
+          <PageHeading>Different account</PageHeading>
           <CardDescription>
             This invitation was sent to{" "}
             <span className="font-medium">{invitation.email}</span>, but
@@ -141,7 +148,7 @@ export default async function InvitePage({ searchParams }: InvitePageProps) {
   return (
     <Shell>
       <CardHeader>
-        <CardTitle className="text-2xl">Join {invitation.workspaceName}</CardTitle>
+        <PageHeading>Join {invitation.workspaceName}</PageHeading>
         <CardDescription>
           {invitation.inviterName} invited you to join as {invitation.role}.
         </CardDescription>

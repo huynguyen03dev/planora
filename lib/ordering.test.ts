@@ -1,11 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   CARD_POSITION_GAP,
+  OrderConflictError,
   PositionSpaceExhaustedError,
-  StaleNeighborError,
+  normalizeCardPositions,
   renumberPositions,
-  resolveCardPosition,
+  resolveCardPositionIntent,
 } from "./ordering";
 
 const GAP = 16384;
@@ -14,7 +15,7 @@ type FakeCard = { id: string; listId: string; position: number };
 
 /**
  * A minimal in-memory stand-in for the subset of `Prisma.TransactionClient`
- * that `resolveCardPosition` touches (`card.findUnique` / `card.findFirst`).
+ * that `resolveCardPositionIntent` touches (`card.findUnique` / `card.findFirst`).
  * It honours the `position` gt/lt filter, the `id: { not }` exclusion, and
  * asc/desc ordering so we can reproduce the concurrent-drop scenarios.
  */
@@ -179,28 +180,64 @@ describe("renumberPositions", () => {
       { id: "b", position: GAP * 2 },
     ]);
   });
+
+  it("normalizes sibling positions without revision/event fields", async () => {
+    const update = vi.fn(async () => ({}));
+    const tx = {
+      card: {
+        findMany: vi.fn(async () => [
+          { id: "a", position: 10 },
+          { id: "b", position: 20 },
+        ]),
+        update,
+      },
+    } as never;
+
+    await normalizeCardPositions(tx, "list-1");
+
+    expect(update).toHaveBeenCalled();
+    const normalizationUpdates = (update as ReturnType<typeof vi.fn>).mock.calls;
+    expect(
+      normalizationUpdates.every((call) => {
+        const args = call[0] as { data?: Record<string, unknown> } | undefined;
+        if (!args?.data) {
+          return false;
+        }
+        return Object.keys(args.data).every((key) => key === "position");
+      }),
+    ).toBe(true);
+    expect(
+      normalizationUpdates.some((call) => {
+        const args = call[0] as { data?: Record<string, unknown> } | undefined;
+        return Boolean(args?.data && "moveRevision" in args.data);
+      }),
+    ).toBe(false);
+  });
 });
 
-describe("resolveCardPosition", () => {
+describe("resolveCardPositionIntent (decision 0032)", () => {
   const L = "list-1";
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const client = (cards: FakeCard[]) => makeClient(cards) as any;
 
-  it("appends after the last live card when only prev is given and prev is truly last", async () => {
+  it("end intent appends after the last live card (absolute, ignores a stale prev hint)", async () => {
+    // Explicit `end` is ABSOLUTE: it lands after the CURRENT last live card, so
+    // a stale prev hint can never block or misplace it (decision 0032).
     const cards: FakeCard[] = [
       { id: "a", listId: L, position: GAP },
       { id: "b", listId: L, position: GAP * 2 },
     ];
-    const pos = await resolveCardPosition(client(cards), {
+    const pos = await resolveCardPositionIntent(client(cards), {
       targetListId: L,
-      prevCardId: "b",
+      intent: "end",
+      prevCardId: "stale-hint", // not live in this list — still irrelevant
       excludeCardId: "mover",
     });
     expect(pos).toBe(GAP * 2 + CARD_POSITION_GAP);
   });
 
-  it("bisects against the real follower — the concurrent end-drop that used to loop forever (US-056 #10)", async () => {
+  it("between intent bisects against the real follower — the concurrent end-drop that used to loop forever (US-056 #10)", async () => {
     // A rival's card ("rival") has just committed immediately after the client's
     // prev hint ("b"). The old code returned b.position + GAP = rival's slot and
     // re-collided every retry. Anchored bisection must instead land BETWEEN b and
@@ -210,92 +247,142 @@ describe("resolveCardPosition", () => {
       { id: "b", listId: L, position: GAP * 2 },
       { id: "rival", listId: L, position: GAP * 3 },
     ];
-    const pos = await resolveCardPosition(client(cards), {
+    const pos = await resolveCardPositionIntent(client(cards), {
       targetListId: L,
+      intent: "between",
       prevCardId: "b",
+      nextCardId: "rival",
       excludeCardId: "mover",
     });
     expect(pos).toBe((GAP * 2 + GAP * 3) / 2);
     expect(pos).not.toBe(GAP * 2 + CARD_POSITION_GAP); // not the rival's slot
   });
 
-  it("ignores the card being moved when finding the follower", async () => {
+  it("between intent ignores the card being moved when finding the follower", async () => {
     // The mover currently sits right after prev; excluding it means prev is
     // treated as last, so we append rather than bisect against ourselves.
     const cards: FakeCard[] = [
       { id: "b", listId: L, position: GAP * 2 },
       { id: "mover", listId: L, position: GAP * 3 },
     ];
-    const pos = await resolveCardPosition(client(cards), {
+    const pos = await resolveCardPositionIntent(client(cards), {
       targetListId: L,
+      intent: "between",
       prevCardId: "b",
       excludeCardId: "mover",
     });
     expect(pos).toBe(GAP * 2 + CARD_POSITION_GAP);
   });
 
-  it("bisects before the real preceder for a start-drop (only next given)", async () => {
+    it("between intent rebases on the surviving NEXT anchor when prev is stale", async () => {
+    // A rival moved the client's prev anchor away, but the next anchor ("b")
+    // survives: bisect before b against the card currently preceding it.
     const cards: FakeCard[] = [
       { id: "rival", listId: L, position: GAP },
       { id: "b", listId: L, position: GAP * 2 },
     ];
-    const pos = await resolveCardPosition(client(cards), {
+    const pos = await resolveCardPositionIntent(client(cards), {
       targetListId: L,
+      intent: "between",
+      prevCardId: "gone", // stale → dropped
       nextCardId: "b",
       excludeCardId: "mover",
     });
-    expect(pos).toBe((GAP + GAP * 2) / 2);
-  });
+      expect(pos).toBe((GAP + GAP * 2) / 2);
+    });
 
-  it("places before first when next is truly first", async () => {
+    it("rejects between anchors that are both live but reversed", async () => {
+      const cards: FakeCard[] = [
+        { id: "prev", listId: L, position: GAP * 3 },
+        { id: "next", listId: L, position: GAP * 2 },
+      ];
+
+      const error = await resolveCardPositionIntent(client(cards), {
+        targetListId: L,
+        intent: "between",
+        prevCardId: "prev",
+        nextCardId: "next",
+        excludeCardId: "mover",
+      }).catch((cause: unknown) => cause);
+
+      expect(error).toBeInstanceOf(OrderConflictError);
+      expect((error as OrderConflictError).reason).toBe("ANCHORS_STALE");
+    });
+
+  it("between intent places before first when next is truly first", async () => {
     const cards: FakeCard[] = [{ id: "b", listId: L, position: GAP * 2 }];
-    const pos = await resolveCardPosition(client(cards), {
+    const pos = await resolveCardPositionIntent(client(cards), {
       targetListId: L,
+      intent: "between",
       nextCardId: "b",
       excludeCardId: "mover",
     });
     expect(pos).toBe(GAP * 2 - CARD_POSITION_GAP);
   });
 
-  it("throws PositionSpaceExhaustedError when neighbours are too close to split", async () => {
+  it("start intent places before the current first live card (absolute)", async () => {
+    const cards: FakeCard[] = [
+      { id: "rival", listId: L, position: GAP * 2 },
+      { id: "first", listId: L, position: GAP },
+    ];
+    const pos = await resolveCardPositionIntent(client(cards), {
+      targetListId: L,
+      intent: "start",
+      nextCardId: "stale-hint", // irrelevant — start is absolute
+      excludeCardId: "mover",
+    });
+    expect(pos).toBe(GAP - CARD_POSITION_GAP);
+  });
+
+  it("throws PositionSpaceExhaustedError when between neighbours are too close to split", async () => {
     const cards: FakeCard[] = [
       { id: "b", listId: L, position: 1000 },
       { id: "rival", listId: L, position: 1000.00005 }, // gap < MIN_POSITION_GAP
     ];
     await expect(
-      resolveCardPosition(client(cards), {
+      resolveCardPositionIntent(client(cards), {
         targetListId: L,
+        intent: "between",
         prevCardId: "b",
         excludeCardId: "mover",
       }),
     ).rejects.toBeInstanceOf(PositionSpaceExhaustedError);
   });
 
-  it("appends at CARD_POSITION_GAP into an empty list", async () => {
-    const pos = await resolveCardPosition(client([]), { targetListId: L });
+  it("end intent appends at CARD_POSITION_GAP into an empty list", async () => {
+    const pos = await resolveCardPositionIntent(client([]), {
+      targetListId: L,
+      intent: "end",
+    });
     expect(pos).toBe(CARD_POSITION_GAP);
   });
 
-  it("throws a retryable StaleNeighborError when a prev hint is not a live card in the list (US-062 mn2)", async () => {
-    // A prev hint pointing outside the target list (foreign id, or a rival
-    // concurrently moved it away) is no longer a hard failure — it surfaces as a
-    // StaleNeighborError the reorder loop recovers from by dropping the hint.
+  it("throws OrderConflictError(ANCHORS_STALE) when BOTH between anchors are stale — never a silent append", async () => {
+    // The client's explicit between placement is impossible on the current DB
+    // state (both neighbours moved away). decision 0032: typed conflict, the
+    // client resyncs — the resolver must NOT silently append.
     const cards: FakeCard[] = [{ id: "x", listId: "other-list", position: GAP }];
-    const err = await resolveCardPosition(client(cards), {
+    const err = await resolveCardPositionIntent(client(cards), {
       targetListId: L,
-      prevCardId: "x",
-    }).catch((e) => e);
-    expect(err).toBeInstanceOf(StaleNeighborError);
-    expect((err as StaleNeighborError).side).toBe("prev");
+      intent: "between",
+      prevCardId: "gone-a",
+      nextCardId: "gone-b",
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OrderConflictError);
+    expect((err as OrderConflictError).reason).toBe("ANCHORS_STALE");
   });
 
-  it("throws a StaleNeighborError tagged 'next' when the next hint is stale", async () => {
-    const cards: FakeCard[] = [{ id: "x", listId: "other-list", position: GAP }];
-    const err = await resolveCardPosition(client(cards), {
+  it("rebases on the surviving PREV anchor when only the next hint is stale", async () => {
+    // prev survives and is genuinely last → append after it (rebase), not a
+    // conflict and not a failure.
+    const cards: FakeCard[] = [{ id: "b", listId: L, position: GAP * 2 }];
+    const pos = await resolveCardPositionIntent(client(cards), {
       targetListId: L,
-      nextCardId: "x",
-    }).catch((e) => e);
-    expect(err).toBeInstanceOf(StaleNeighborError);
-    expect((err as StaleNeighborError).side).toBe("next");
+      intent: "between",
+      prevCardId: "b",
+      nextCardId: "gone", // stale → dropped
+      excludeCardId: "mover",
+    });
+    expect(pos).toBe(GAP * 2 + CARD_POSITION_GAP);
   });
 });

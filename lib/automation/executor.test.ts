@@ -8,14 +8,13 @@ import type { RuleEventPayload } from "./types";
 import { RuleExecutionError } from "./types";
 import { CARD_POSITION_GAP } from "@/lib/ordering";
 
-// ─── Mocks ───────────────────────────────────────────────────────────
-
 vi.mock("@/lib/card", () => ({
   updateCardPriority: vi.fn().mockResolvedValue({}),
   setCardCompletion: vi.fn().mockResolvedValue({
     card: { id: "card-1", listId: "list-1" },
     transitioned: true,
   }),
+  moveCardInTransaction: vi.fn(),
 }));
 
 vi.mock("@/lib/label", () => ({
@@ -86,10 +85,14 @@ vi.mock("@/lib/automation/resolver", () => ({
   },
 }));
 
-// ─── Imports (after mocks) ───────────────────────────────────────────
+// Imports for the mocked modules, grouped after the vi.mock block.
 
 import { executeRuleActions } from "./executor";
-import { updateCardPriority, setCardCompletion } from "@/lib/card";
+import {
+  updateCardPriority,
+  setCardCompletion,
+  moveCardInTransaction,
+} from "@/lib/card";
 import { addCardLabel, removeCardLabel } from "@/lib/label";
 import { assignMemberToCard, removeMemberFromCard } from "@/lib/card-member";
 import {
@@ -101,11 +104,11 @@ import {
 } from "@/lib/card-history";
 import { resolveRecipient, resolveRemoveScope, CrossWorkspaceTargetError } from "./resolver";
 
-// ─── Helpers ─────────────────────────────────────────────────────────
-
 function makeClient(targetListOverrides?: {
   archivedAt?: Date | null;
   workspaceId?: string;
+  /** Board id of the target list (defaults to the card's board, "board-1"). */
+  boardId?: string;
   /** When true, list.findUnique resolves to null (list not found). */
   notFound?: boolean;
 }): Prisma.TransactionClient {
@@ -131,6 +134,9 @@ function makeClient(targetListOverrides?: {
       }),
       findFirst: vi.fn(),
       update: vi.fn().mockResolvedValue({}),
+      // Same-board invariant (product decision): the executor reads the card's
+      // current list board to reject cross-board automation targets.
+      findUnique: vi.fn().mockResolvedValue({ list: { boardId: "board-1" } }),
     },
     cardMember: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -142,13 +148,20 @@ function makeClient(targetListOverrides?: {
       findUnique: vi.fn().mockResolvedValue(
         target.notFound
           ? null
-          : { archivedAt: target.archivedAt ?? null, board: { workspaceId: target.workspaceId } },
+          : {
+              archivedAt: target.archivedAt ?? null,
+              board: {
+                id: target.boardId ?? "board-1",
+                workspaceId: target.workspaceId ?? "ws-1",
+              },
+            },
       ),
     },
     label: {
       // Decision 0030 label guard: default = a label inside the rule workspace.
       findUnique: vi.fn().mockResolvedValue({ board: { workspaceId: "ws-1" } }),
     },
+    $queryRaw: vi.fn().mockResolvedValue([]),
   } as unknown as Prisma.TransactionClient;
 }
 
@@ -166,14 +179,10 @@ const baseEvent: RuleEventPayload = {
 
 const ACTOR = "00000000-0000-4000-8000-000000000a11";
 
-// ─── Tests ───────────────────────────────────────────────────────────
-
 describe("executeRuleActions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
-
-  // ── Validation ─────────────────────────────────────────────────────
 
   it("throws when event.cardId is missing", async () => {
     const client = makeClient();
@@ -204,8 +213,6 @@ describe("executeRuleActions", () => {
       }),
     ).rejects.toThrow("event.boardId is required");
   });
-
-  // ── Ordered execution ──────────────────────────────────────────────
 
   it("executes steps in order (set-priority then add-label)", async () => {
     const client = makeClient();
@@ -238,7 +245,74 @@ describe("executeRuleActions", () => {
     expect(callOrder).toEqual(["updateCardPriority", "addCardLabel"]);
   });
 
-  // ── First-failing-step aborts ──────────────────────────────────────
+  it("holds the workspace gate before set-priority can race into a move step", async () => {
+    const client = makeClient();
+    const callOrder: string[] = [];
+    let releaseGate: () => void = () => {};
+    let signalGateEntered: () => void = () => {};
+    const gateEntered = new Promise<void>((resolve) => {
+      signalGateEntered = resolve;
+    });
+    const gateRelease = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    const queryRaw = client.$queryRaw as unknown as ReturnType<typeof vi.fn>;
+
+    queryRaw.mockImplementation(async () => {
+      callOrder.push("workspace-gate");
+      signalGateEntered();
+      await gateRelease;
+      return [];
+    });
+    vi.mocked(updateCardPriority).mockImplementation(async () => {
+      callOrder.push("set-priority");
+      return {} as never;
+    });
+    vi.mocked(moveCardInTransaction).mockImplementation(async () => {
+      callOrder.push("move-card-to-list");
+      return {
+        card: {
+          listId: "list-2",
+          position: CARD_POSITION_GAP,
+          moveRevision: 1,
+          estimateHours: null,
+        } as never,
+        fromListId: "list-1",
+        fromBoardId: "board-1",
+        targetBoardId: "board-1",
+      };
+    });
+
+    const running = executeRuleActions({
+      client,
+      rule: {
+        ...baseRule,
+        actions: [
+          { type: "set-priority", priority: "HIGH" },
+          { type: "move-card-to-list", targetListId: "list-2" },
+        ],
+      },
+      event: baseEvent,
+      actorId: ACTOR,
+      triggerType: "card-moved-to-list",
+      chainId: "chain-1",
+      chainDepth: 0,
+    });
+
+    await gateEntered;
+    expect(updateCardPriority).not.toHaveBeenCalled();
+    expect(moveCardInTransaction).not.toHaveBeenCalled();
+
+    releaseGate();
+    await running;
+    expect(callOrder).toEqual(["workspace-gate", "set-priority", "move-card-to-list"]);
+    expect(moveCardInTransaction).toHaveBeenCalledWith(client, {
+      workspaceId: "ws-1",
+      cardId: "card-1",
+      targetListId: "list-2",
+      intent: "end",
+    });
+  });
 
   it("aborts on first failing step and does not run later steps", async () => {
     const client = makeClient();
@@ -266,8 +340,6 @@ describe("executeRuleActions", () => {
     expect(removeSpy).not.toHaveBeenCalled();
   });
 
-  // ── set-priority ───────────────────────────────────────────────────
-
   it("set-priority: emits card-updated, no producedEvent, no history", async () => {
     const client = makeClient();
     const actions: ActionStep[] = [{ type: "set-priority", priority: "URGENT" }];
@@ -288,22 +360,23 @@ describe("executeRuleActions", () => {
     expect(recordCardHistoryEvents).not.toHaveBeenCalled();
   });
 
-  // ── move-card-to-list ──────────────────────────────────────────────
-
   describe("move-card-to-list", () => {
     it("appends to end of target list (last card exists)", async () => {
       const client = makeClient();
-      const cardFindUniqueOrThrow = client.card.findUniqueOrThrow as ReturnType<typeof vi.fn>;
-      const cardFindFirst = client.card.findFirst as ReturnType<typeof vi.fn>;
-      const cardUpdate = client.card.update as ReturnType<typeof vi.fn>;
       const cardMemberFindMany = client.cardMember.findMany as ReturnType<typeof vi.fn>;
 
-      cardFindUniqueOrThrow.mockResolvedValue({
-        listId: "list-1",
-        estimateHours: 5,
-      });
       cardMemberFindMany.mockResolvedValue([{ userId: "user-a" }]);
-      cardFindFirst.mockResolvedValue({ position: 32768 });
+      vi.mocked(moveCardInTransaction).mockResolvedValue({
+        card: {
+          listId: "list-2",
+          position: 32768 + CARD_POSITION_GAP,
+          moveRevision: 1,
+          estimateHours: 5,
+        } as never,
+        fromListId: "list-1",
+        fromBoardId: "board-1",
+        targetBoardId: "board-1",
+      });
 
       const actions: ActionStep[] = [{ type: "move-card-to-list", targetListId: "list-2" }];
 
@@ -317,14 +390,11 @@ describe("executeRuleActions", () => {
         chainDepth: 0,
       });
 
-      expect(cardFindFirst).toHaveBeenCalledWith({
-        where: { listId: "list-2", archivedAt: null, deletedAt: null },
-        orderBy: { position: "desc" },
-        select: { position: true },
-      });
-      expect(cardUpdate).toHaveBeenCalledWith({
-        where: { id: "card-1" },
-        data: { listId: "list-2", position: 32768 + CARD_POSITION_GAP },
+      expect(moveCardInTransaction).toHaveBeenCalledWith(client, {
+        workspaceId: "ws-1",
+        cardId: "card-1",
+        targetListId: "list-2",
+        intent: "end",
       });
       expect(result.effects).toContainEqual({
         kind: "card-moved",
@@ -332,6 +402,7 @@ describe("executeRuleActions", () => {
         cardId: "card-1",
         listId: "list-2",
         position: 32768 + CARD_POSITION_GAP,
+        moveRevision: 1,
       });
       expect(result.producedEvents).toContainEqual({
         triggerType: "card-moved-to-list",
@@ -341,17 +412,20 @@ describe("executeRuleActions", () => {
 
     it("appends with CARD_POSITION_GAP when target list is empty", async () => {
       const client = makeClient();
-      const cardFindUniqueOrThrow = client.card.findUniqueOrThrow as ReturnType<typeof vi.fn>;
-      const cardFindFirst = client.card.findFirst as ReturnType<typeof vi.fn>;
-      const cardUpdate = client.card.update as ReturnType<typeof vi.fn>;
       const cardMemberFindMany = client.cardMember.findMany as ReturnType<typeof vi.fn>;
 
-      cardFindUniqueOrThrow.mockResolvedValue({
-        listId: "list-1",
-        estimateHours: null,
-      });
       cardMemberFindMany.mockResolvedValue([]);
-      cardFindFirst.mockResolvedValue(null);
+      vi.mocked(moveCardInTransaction).mockResolvedValue({
+        card: {
+          listId: "list-empty",
+          position: CARD_POSITION_GAP,
+          moveRevision: 1,
+          estimateHours: null,
+        } as never,
+        fromListId: "list-1",
+        fromBoardId: "board-1",
+        targetBoardId: "board-1",
+      });
 
       const actions: ActionStep[] = [{ type: "move-card-to-list", targetListId: "list-empty" }];
 
@@ -365,27 +439,33 @@ describe("executeRuleActions", () => {
         chainDepth: 0,
       });
 
-      expect(cardUpdate).toHaveBeenCalledWith({
-        where: { id: "card-1" },
-        data: { listId: "list-empty", position: CARD_POSITION_GAP },
+      expect(moveCardInTransaction).toHaveBeenCalledWith(client, {
+        workspaceId: "ws-1",
+        cardId: "card-1",
+        targetListId: "list-empty",
+        intent: "end",
       });
       expect(result.effects).toContainEqual(
-        expect.objectContaining({ position: CARD_POSITION_GAP }),
+        expect.objectContaining({ position: CARD_POSITION_GAP, moveRevision: 1 }),
       );
     });
 
     it("records move history event with ruleId", async () => {
       const client = makeClient();
-      const cardFindUniqueOrThrow = client.card.findUniqueOrThrow as ReturnType<typeof vi.fn>;
-      const cardFindFirst = client.card.findFirst as ReturnType<typeof vi.fn>;
       const cardMemberFindMany = client.cardMember.findMany as ReturnType<typeof vi.fn>;
 
-      cardFindUniqueOrThrow.mockResolvedValue({
-        listId: "list-1",
-        estimateHours: 3,
-      });
       cardMemberFindMany.mockResolvedValue([{ userId: "user-a" }]);
-      cardFindFirst.mockResolvedValue(null);
+      vi.mocked(moveCardInTransaction).mockResolvedValue({
+        card: {
+          listId: "list-2",
+          position: CARD_POSITION_GAP,
+          moveRevision: 1,
+          estimateHours: 3,
+        } as never,
+        fromListId: "list-1",
+        fromBoardId: "board-1",
+        targetBoardId: "board-1",
+      });
 
       const actions: ActionStep[] = [{ type: "move-card-to-list", targetListId: "list-2" }];
 
@@ -415,7 +495,82 @@ describe("executeRuleActions", () => {
       );
     });
 
-    // ── Target-list validation (US-074 Slice B2 + decision 0030) ───
+    it("ISOLATES a target list on a DIFFERENT board of the same workspace: TARGET_LIST_CROSS_BOARD, no move attempted", async () => {
+      // Same-board invariant (product decision): a workspace-wide rule may
+      // reference a list on another board, but at fire time the move must stay
+      // on the card's board. The card sits on board-1; the target list is on
+      // board-2 (same workspace) → structured stale-target failure, isolated
+      // per-step (decision 0030): never a partial move, never an abort.
+      const client = makeClient({ boardId: "board-2" });
+      const cardFindUnique = client.card.findUnique as ReturnType<typeof vi.fn>;
+      cardFindUnique.mockResolvedValue({ list: { boardId: "board-1" } });
+
+      const actions: ActionStep[] = [{ type: "move-card-to-list", targetListId: "list-on-board-2" }];
+
+      const result = await executeRuleActions({
+        client,
+        rule: { ...baseRule, actions },
+        event: baseEvent,
+        actorId: ACTOR,
+        triggerType: "card-moved-to-list",
+        chainId: "",
+        chainDepth: 0,
+      });
+
+      expect(moveCardInTransaction).not.toHaveBeenCalled();
+      expect(result.stepOutcomes[0]).toMatchObject({
+        stepIndex: 0,
+        actionType: "move-card-to-list",
+        status: "failed",
+        code: "TARGET_LIST_CROSS_BOARD",
+        targetId: "list-on-board-2",
+      });
+      expect(result.stepOutcomes[0]).toMatchObject({
+        message: expect.stringContaining("different board"),
+      });
+      // No deferred effect, no produced event, no card mutation.
+      expect(result.effects).toEqual([]);
+      expect(result.producedEvents).toEqual([]);
+      expect((client.card.update as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    });
+
+    it("same-board control: a same-board target passes validation and reaches the shared move helper", async () => {
+      const client = makeClient();
+      vi.mocked(moveCardInTransaction).mockResolvedValue({
+        card: {
+          listId: "list-2",
+          position: CARD_POSITION_GAP,
+          moveRevision: 1,
+          estimateHours: null,
+        } as never,
+        fromListId: "list-1",
+        fromBoardId: "board-1",
+        targetBoardId: "board-1",
+      });
+
+      const result = await executeRuleActions({
+        client,
+        rule: { ...baseRule, actions: [{ type: "move-card-to-list", targetListId: "list-2" }] },
+        event: baseEvent,
+        actorId: ACTOR,
+        triggerType: "card-moved-to-list",
+        chainId: "",
+        chainDepth: 0,
+      });
+
+      expect(moveCardInTransaction).toHaveBeenCalledWith(client, {
+        workspaceId: "ws-1",
+        cardId: "card-1",
+        targetListId: "list-2",
+        intent: "end",
+      });
+      expect(result.stepOutcomes[0]).toMatchObject({ status: "success" });
+      // A same-board move emits exactly ONE card-moved effect (no source echo).
+      expect(result.effects).toHaveLength(1);
+      expect(result.effects[0]).toMatchObject({ kind: "card-moved", boardId: "board-1" });
+    });
+
+    // Target-list validation (US-074 Slice B2 + decision 0030)
 
     it("ISOLATES a missing target list: no throw, failed stepOutcome with TARGET_LIST_NOT_FOUND + target id", async () => {
       const client = makeClient({ notFound: true });
@@ -547,7 +702,7 @@ describe("executeRuleActions", () => {
       expect((client.card.update as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     });
 
-    // ── Audit payload proof (decision 0030) ───────────────────────
+    // Audit payload proof (decision 0030)
 
     it("failed stepOutcome carries the descriptive message (not \"null\") for the audit", async () => {
       // The per-step audit must describe what went wrong, not "null" — the
@@ -581,7 +736,7 @@ describe("executeRuleActions", () => {
       expect((client.card.update as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     });
 
-    // ── Decision 0030: best-effort continuation + two-class taxonomy ──
+    // Decision 0030: best-effort continuation + two-class taxonomy
 
     it("best-effort: a stale middle step does not block independent siblings (steps 1+3 apply, step 2 audited)", async () => {
       const client = makeClient({ notFound: true });
@@ -817,8 +972,6 @@ describe("executeRuleActions", () => {
     });
   });
 
-  // ── add-label ──────────────────────────────────────────────────────
-
   it("add-label changed=false → no emit, no producedEvent", async () => {
     const client = makeClient();
     vi.mocked(addCardLabel).mockResolvedValue({ changed: false });
@@ -862,8 +1015,6 @@ describe("executeRuleActions", () => {
     });
   });
 
-  // ── remove-label ───────────────────────────────────────────────────
-
   it("remove-label changed=true → emit labels-updated, no producedEvent", async () => {
     const client = makeClient();
     vi.mocked(removeCardLabel).mockResolvedValue({ changed: true });
@@ -885,8 +1036,6 @@ describe("executeRuleActions", () => {
     });
     expect(result.producedEvents).toEqual([]);
   });
-
-  // ── assign-member ──────────────────────────────────────────────────
 
   it("assign-member: resolver used, newly-assigned id yields producedEvent + emit", async () => {
     const client = makeClient();
@@ -956,8 +1105,6 @@ describe("executeRuleActions", () => {
     expect(recordCardHistoryEvents).not.toHaveBeenCalled();
   });
 
-  // ── remove-member ──────────────────────────────────────────────────
-
   it("remove-member: resolveRemoveScope used, removeMemberFromCard called per id", async () => {
     const client = makeClient();
     vi.mocked(resolveRemoveScope).mockResolvedValue(["user-a", "user-b"]);
@@ -1005,8 +1152,6 @@ describe("executeRuleActions", () => {
 
     expect(result.effects).toEqual([]);
   });
-
-  // ── set-completion ─────────────────────────────────────────────────
 
   describe("set-completion", () => {
     it("transitioned=true → emit + producedEvent + history", async () => {
@@ -1138,8 +1283,6 @@ describe("executeRuleActions", () => {
       });
     });
   });
-
-  // ── notify-member ──────────────────────────────────────────────────
 
   it("notify-member: no mutation, pushes DeferredNotification per resolved recipient", async () => {
     const client = makeClient();

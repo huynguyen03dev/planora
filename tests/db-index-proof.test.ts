@@ -158,7 +158,6 @@ describe("US-074 DB Index Execution Proof (Ephemeral PostgreSQL Sandbox)", () =>
       await adminClient.query(useSchema);
       await restoreClient.query(useSchema);
 
-      // Create tables
       await adminClient.query(`
         CREATE TABLE "board" (
           "id" TEXT PRIMARY KEY,
@@ -205,15 +204,8 @@ describe("US-074 DB Index Execution Proof (Ephemeral PostgreSQL Sandbox)", () =>
         ["c-1", "l-1", "Card 1", 16384, "u-1"],
       );
 
-      // ═══════════════════════════════════════════════════════════════════
-      // Scenario: Concurrent restore wins
-      // Connection A (admin/purge) reads list as archived.
-      // Connection B (restore) clears archivedAt and commits.
-      // Connection A's conditional DELETE WHERE archivedAt IS NOT NULL
-      // returns count = 0. Connection A rolls back. List SURVIVES.
-      // ═══════════════════════════════════════════════════════════════════
-
-      // Connection A: begin purge transaction, read list
+      // Scenario A: concurrent restore wins — A's conditional DELETE matches
+      // nothing (B cleared archivedAt), A rolls back, list survives.
       await adminClient.query("BEGIN");
       const preCheck = await adminClient.query(
         `SELECT id FROM "list" WHERE id = $1 AND "archivedAt" IS NOT NULL`,
@@ -221,7 +213,6 @@ describe("US-074 DB Index Execution Proof (Ephemeral PostgreSQL Sandbox)", () =>
       );
       expect(preCheck.rows.length).toBe(1);
 
-      // Connection B: concurrently restore the list (separate transaction)
       await restoreClient.query("BEGIN");
       await restoreClient.query(
         `UPDATE "list" SET "archivedAt" = NULL WHERE id = $1`,
@@ -229,18 +220,15 @@ describe("US-074 DB Index Execution Proof (Ephemeral PostgreSQL Sandbox)", () =>
       );
       await restoreClient.query("COMMIT");
 
-      // Connection A: conditional DELETE — no rows match because archivedAt
-      // was cleared by Connection B's committed restore
+      // Conditional DELETE matches nothing: B's committed restore cleared archivedAt
       const deleteResult = await adminClient.query(
         `DELETE FROM "list" WHERE id = $1 AND "archivedAt" IS NOT NULL`,
         ["l-1"],
       );
       expect(deleteResult.rowCount).toBe(0);
 
-      // Connection A: roll back — the whole purge transaction aborts
       await adminClient.query("ROLLBACK");
 
-      // Verify: list survives and is restored (archivedAt null)
       const listCheck = await adminClient.query(
         `SELECT id, "archivedAt" FROM "list" WHERE id = $1`,
         ["l-1"],
@@ -248,19 +236,15 @@ describe("US-074 DB Index Execution Proof (Ephemeral PostgreSQL Sandbox)", () =>
       expect(listCheck.rows.length).toBe(1);
       expect(listCheck.rows[0].archivedAt).toBeNull();
 
-      // Verify card survives (CASCADE didn't fire since list was not deleted)
+      // Card survives: CASCADE never fired because the list wasn't deleted
       const cardCheck = await adminClient.query(
         `SELECT id FROM "card" WHERE id = $1`,
         ["c-1"],
       );
       expect(cardCheck.rows.length).toBe(1);
 
-      // ═══════════════════════════════════════════════════════════════════
-      // Scenario: Purge wins — no concurrent restore, conditional DELETE
-      // returns count > 0, list is removed.
-      // ═══════════════════════════════════════════════════════════════════
+      // Scenario B: purge wins — no concurrent restore, list removed.
 
-      // Re-archive for a clean run
       await adminClient.query(
         `UPDATE "list" SET "archivedAt" = CURRENT_TIMESTAMP WHERE id = $1`,
         ["l-1"],
@@ -278,21 +262,18 @@ describe("US-074 DB Index Execution Proof (Ephemeral PostgreSQL Sandbox)", () =>
       );
       expect(purgeResult.rowCount).toBe(1);
 
-      // List is gone
       const gone = await adminClient.query(
         `SELECT id FROM "list" WHERE id = $1`,
         ["l-1"],
       );
       expect(gone.rows.length).toBe(0);
 
-      // Card is cascade-deleted
       const cardGone = await adminClient.query(
         `SELECT id FROM "card" WHERE id = $1`,
         ["c-1"],
       );
       expect(cardGone.rows.length).toBe(0);
     } finally {
-      // Fail-closed cleanup
       try {
         await adminClient.query("ROLLBACK").catch(() => {});
         await restoreClient.query("ROLLBACK").catch(() => {});
@@ -332,34 +313,25 @@ describe("US-074 DB Index Execution Proof (Ephemeral PostgreSQL Sandbox)", () =>
       await producer.query(`INSERT INTO "list" (id, "boardId", title) VALUES ($1, $2, $3)`, ["l-1", "b-1", "Active List"]);
       await producer.query(`INSERT INTO "card" (id, "listId", title, "createdById") VALUES ($1, $2, $3, $4)`, ["c-1", "l-1", "Card", "u-1"]);
 
-      // ═══════════════════════════════════════════════════════════════════
-      // Scenario: Producer holds FOR UPDATE. Archiver's UPDATE blocks.
-      // Producer commits → archiver proceeds → list archived.
-      // Lock_timeout proves blocking deterministicly.
-      // ═══════════════════════════════════════════════════════════════════
+      // Scenario: producer's FOR UPDATE blocks the archiver; lock_timeout
+      // proves the block deterministically.
 
-      // Set lock_timeout on the archiver connection: the archiver's UPDATE
-      // will fail with a lock timeout if it's blocked for >500ms while the
-      // producer holds the FOR UPDATE lock.
+      // With lock_timeout=500ms, a blocked archiver UPDATE fails deterministically.
       await archiver.query("SET lock_timeout TO '500'");
 
       await producer.query("BEGIN");
 
-      // Producer acquires FOR UPDATE lock
+      // Acquire the FOR UPDATE lock
       await producer.query(`SELECT id, "archivedAt" FROM "list" WHERE id = $1 FOR UPDATE`, ["l-1"]);
 
-      // Archiver tries to archive — this MUST block because producer holds
-      // the lock. With lock_timeout=500ms, the query would fail if it were
-      // not blocked (i.e., if the FOR UPDATE lock wasn't held).
-      // We invert: we expect the archiver to TIMEOUT because it IS blocked.
+      // Inverted proof: the archiver must time out precisely because it IS blocked.
       await expect(
         archiver.query(`UPDATE "list" SET "archivedAt" = CURRENT_TIMESTAMP WHERE id = $1 AND "archivedAt" IS NULL`, ["l-1"]),
       ).rejects.toThrow(/lock timeout/);
 
-      // Producer commits the attachment insert
       await producer.query("COMMIT");
 
-      // Now try archiving again (no lock held) — should succeed
+      // Lock released: archiving succeeds.
       await archiver.query("SET lock_timeout TO DEFAULT");
       await archiver.query(`UPDATE "list" SET "archivedAt" = CURRENT_TIMESTAMP WHERE id = $1 AND "archivedAt" IS NULL`, ["l-1"]);
 
@@ -404,18 +376,13 @@ describe("US-074 DB Index Execution Proof (Ephemeral PostgreSQL Sandbox)", () =>
       await purge.query(`INSERT INTO "board" (id, "workspaceId", title, "createdById") VALUES ($1, $2, $3, $4)`, ["b-1", "ws-1", "B", "u-1"]);
       await purge.query(`INSERT INTO "list" (id, "boardId", title, "archivedAt") VALUES ($1, $2, $3, CURRENT_TIMESTAMP)`, ["l-1", "b-1", "Archived List"]);
 
-      // ═══════════════════════════════════════════════════════════════════
-      // Scenario: Purge holds FOR UPDATE lock on archived list.
-      // Attachment producer concurrently tries to insert into a card in the
-      // same list — lock_timeout proves blocking, then purge completes and
-      // producer sees zero rows (list deleted).
-      // ═══════════════════════════════════════════════════════════════════
+      // Scenario: purge's FOR UPDATE blocks the attachment producer until
+      // commit, after which the producer sees zero rows (list deleted).
 
       await attachmentProducer.query("SET lock_timeout TO '500'");
 
       await purge.query("BEGIN");
 
-      // Purge acquires FOR UPDATE lock on archived list
       const lockResult = await purge.query(
         `SELECT id, "archivedAt" FROM "list" WHERE id = $1 FOR UPDATE`,
         ["l-1"],
@@ -423,19 +390,17 @@ describe("US-074 DB Index Execution Proof (Ephemeral PostgreSQL Sandbox)", () =>
       expect(lockResult.rows.length).toBe(1);
       expect(lockResult.rows[0].archivedAt).not.toBeNull();
 
-      // Producer BLOCKS trying to SELECT FOR UPDATE — lock_timeout proves it
+      // Producer's FOR UPDATE must time out while purge holds the lock
       await expect(
         attachmentProducer.query(`SELECT id, "archivedAt" FROM "list" WHERE id = $1 FOR UPDATE`, ["l-1"]),
       ).rejects.toThrow(/lock timeout/);
 
-      // Purge checks Cloudinary attachments (simulate)
+      // Simulated Cloudinary attachment check keeps the lock held during the wait
       await purge.query(`SELECT id FROM "attachment" WHERE "cloudinaryPublicId" IS NOT NULL`);
 
-      // Purge commits the purge (delete the list)
       await purge.query(`DELETE FROM "list" WHERE id = $1 AND "archivedAt" IS NOT NULL`, ["l-1"]);
       await purge.query("COMMIT");
 
-      // Now producer can retry: lock_timeout removed, list is gone
       await attachmentProducer.query("SET lock_timeout TO DEFAULT");
       const producerResult = await attachmentProducer.query(
         `SELECT id, "archivedAt" FROM "list" WHERE id = $1 FOR UPDATE`,
@@ -480,22 +445,17 @@ describe("US-074 DB Index Execution Proof (Ephemeral PostgreSQL Sandbox)", () =>
       await producer.query(`INSERT INTO "board" (id, "workspaceId", title, "createdById") VALUES ($1, $2, $3, $4)`, ["b-1", "ws-1", "B", "u-1"]);
       await producer.query(`INSERT INTO "list" (id, "boardId", title) VALUES ($1, $2, $3)`, ["l-1", "b-1", "Active List"]);
 
-      // ═══════════════════════════════════════════════════════════════════
-      // Producer holds FOR UPDATE lock on the active list.
-      // Archiver's UPDATE archivedAt BLOCKS until producer commits.
-      // After producer commits, archiver proceeds and list becomes archived.
-      // ═══════════════════════════════════════════════════════════════════
+      // Scenario: archiver's UPDATE blocks on producer's FOR UPDATE until
+      // producer commits, then proceeds.
 
-      // Set lock_timeout on archiver to prove blocking deterministically
+      // lock_timeout proves blocking deterministically
       await archiver.query("SET lock_timeout TO '500'");
 
       await producer.query("BEGIN");
 
-      // Producer acquires FOR UPDATE lock
       await producer.query(`SELECT id FROM "list" WHERE id = $1 FOR UPDATE`, ["l-1"]);
 
-      // Archiver tries to archive — lock_timeout causes it to fail because
-      // the lock is held by producer. This PROVES the archiver blocked.
+      // Archiver must time out — proof that the producer's lock held it blocked
       await expect(
         archiver.query(
           `UPDATE "list" SET "archivedAt" = CURRENT_TIMESTAMP WHERE id = $1 AND "archivedAt" IS NULL`,
@@ -503,17 +463,15 @@ describe("US-074 DB Index Execution Proof (Ephemeral PostgreSQL Sandbox)", () =>
         ),
       ).rejects.toThrow(/lock timeout/);
 
-      // Producer commits the attachment insert
       await producer.query("COMMIT");
 
-      // Now archiver can acquire the lock (restore lock_timeout) and archive
+      // After commit, archiver proceeds
       await archiver.query("SET lock_timeout TO DEFAULT");
       await archiver.query(
         `UPDATE "list" SET "archivedAt" = CURRENT_TIMESTAMP WHERE id = $1 AND "archivedAt" IS NULL`,
         ["l-1"],
       );
 
-      // List is archived
       const check = await producer.query(`SELECT "archivedAt" FROM "list" WHERE id = $1`, ["l-1"]);
       expect(check.rows[0].archivedAt).not.toBeNull();
     } finally {
@@ -537,7 +495,7 @@ describe("US-074 DB Index Execution Proof (Ephemeral PostgreSQL Sandbox)", () =>
     await runWithSandbox(connectionString, "sandbox_us074_fail", async (client, schemaName) => {
       targetSchemaName = schemaName;
 
-      // Execute a deliberately failing migration transaction (invalid SQL inside BEGIN...COMMIT)
+      // Deliberately failing migration: invalid SQL inside BEGIN...COMMIT
       const failingMigrationSql = `
         BEGIN;
         ALTER TABLE "non_existent_table" ADD COLUMN "foo" TEXT;
@@ -546,7 +504,7 @@ describe("US-074 DB Index Execution Proof (Ephemeral PostgreSQL Sandbox)", () =>
       await expect(client.query(failingMigrationSql)).rejects.toThrow();
     });
 
-    // Verify out-of-band on a fresh connection that schemaName was successfully dropped
+    // Verify the schema was dropped via a fresh out-of-band connection
     const verifyClient = new Client({ connectionString });
     await verifyClient.connect();
     try {

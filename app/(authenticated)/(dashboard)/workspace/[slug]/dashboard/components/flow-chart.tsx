@@ -162,7 +162,7 @@ export function FlowChart({ data, createdTotal, completedTotal }: FlowChartProps
                 y={t.y}
                 dy="0.32em"
                 textAnchor="end"
-                className="text-[11px] text-muted-foreground"
+                className="text-xs text-muted-foreground"
                 fill="currentColor"
               >
                 {t.value}
@@ -177,7 +177,7 @@ export function FlowChart({ data, createdTotal, completedTotal }: FlowChartProps
               x={t.x}
               y={geom.plotBottom + 18}
               textAnchor="middle"
-              className="text-[11px] text-muted-foreground"
+              className="text-xs text-muted-foreground"
               fill="currentColor"
             >
               {t.label}

@@ -9,13 +9,14 @@ import { getBoardById, getStarredBoardIds } from "@/lib/board";
 import {
   getBoardPagePermissionsForRole,
   getWorkspaceRole,
+  hasWorkspacePermission,
 } from "@/lib/authorization";
 import { getCardDetailForBoard } from "@/lib/card";
-import { getCommentsByCardId } from "@/lib/comment";
+import { getCommentsByCardId, COMMENT_PAGE_SIZE } from "@/lib/comment";
 import type { CommentRecord } from "@/lib/comment";
 import { getAttachmentsByCardId } from "@/lib/attachment";
 import type { AttachmentRecord } from "@/lib/attachment";
-import { getActivityByCardId } from "@/lib/activity";
+import { getActivityByCardId, ACTIVITY_PAGE_SIZE } from "@/lib/activity";
 import type { ActivityRecord } from "@/lib/activity";
 import { getBoardTheme } from "@/lib/constants";
 import { verifySession } from "@/lib/dal";
@@ -72,6 +73,13 @@ export default async function BoardPage({
     canPermanentDelete,
   } = getBoardPagePermissionsForRole(role);
 
+  // U1: the board header's Share button opens the invite flow. Inviting is
+  // admin-only (invitation:create, mirroring inviteMemberAction's gate), so
+  // gate the button here server-side rather than rendering a dead control.
+  const canInviteMembers = await hasWorkspacePermission(board.workspaceId, {
+    invitation: ["create"],
+  });
+
   const rawCardId = resolvedSearchParams.cardId;
   const selectedCardId =
     typeof rawCardId === "string" && rawCardId.length > 0 && isUuid(rawCardId)
@@ -121,17 +129,19 @@ export default async function BoardPage({
     }
   }
 
-  // Initialize data variables
   let selectedCard = null;
   let comments: CommentRecord[] = [];
   let attachments: AttachmentRecord[] = [];
   let activity: ActivityRecord[] = [];
+  // Whether more comments/activity exist behind the seeded page (drives the
+  // sheet's "Load more" affordance).
+  let commentsHasMore = false;
+  let activityHasMore = false;
   let assignees: CardMemberRecord[] = [];
   let assignableMembers: AssignableWorkspaceMemberRecord[] = [];
   let cardLabels: LabelRecord[] = [];
   let checklists: ChecklistWithItems[] = [];
 
-  // If a card ID is provided, load card details and related data
   if (selectedCardId) {
     selectedCard = await getCardDetailForBoard(boardId, selectedCardId);
     
@@ -150,17 +160,19 @@ export default async function BoardPage({
         cardLabelRecords,
         cardChecklists,
       ] = await Promise.all([
-        getCommentsByCardId(selectedCard.id),
+        getCommentsByCardId(selectedCard.id, { limit: COMMENT_PAGE_SIZE }),
         getAttachmentsByCardId(selectedCard.id),
-        getActivityByCardId(selectedCard.id),
+        getActivityByCardId(selectedCard.id, { limit: ACTIVITY_PAGE_SIZE }),
         getCardMembers(selectedCard.id),
         getCardLabels(selectedCard.id),
         getCardChecklists(selectedCard.id),
       ]);
 
-      comments = cardComments;
+      comments = cardComments.items;
+      commentsHasMore = cardComments.hasMore;
       attachments = cardAttachments;
-      activity = cardActivity;
+      activity = cardActivity.items;
+      activityHasMore = cardActivity.hasMore;
       assignees = cardAssignees;
       cardLabels = cardLabelRecords;
       checklists = cardChecklists;
@@ -179,11 +191,13 @@ export default async function BoardPage({
     title: list.title,
     boardId: list.boardId,
     position: list.position,
+    moveRevision: list.moveRevision,
     cards: list.cards.map((card) => ({
       id: card.id,
       listId: card.listId,
       title: card.title,
       position: card.position,
+      moveRevision: card.moveRevision,
       coverImage: card.coverImage,
       priority: card.priority,
       dueDate: card.dueDate,
@@ -246,6 +260,10 @@ export default async function BoardPage({
           email: m.email,
           image: m.image,
         })),
+        // Seed the open sheet's label set (F4) — patched live by
+        // card:labels-updated so remote label changes reach the sheet without a
+        // reload.
+        labels: cardLabels.map((l) => ({ id: l.id, name: l.name, color: l.color })),
       }
     : null;
 
@@ -269,8 +287,10 @@ export default async function BoardPage({
           reaches both archive seams (card face/detail sheet, list column). */}
       <UndoHost>
         {/* Pin the board to the viewport minus the 56px (3.5rem) app header so the
-            page itself never scrolls; lists scroll their cards internally instead. */}
-        <div className="flex h-[calc(100vh-3.5rem)] min-h-0 flex-col overflow-hidden p-3 sm:p-6">
+            page itself never scrolls; lists scroll their cards internally instead.
+            dvh tracks the mobile URL bar (svh/dvh), so the board fits the visible
+            area on phones; dvh == vh on desktop, so behavior is unchanged there. */}
+        <div className="flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col overflow-hidden p-3 sm:p-6">
         <BoardHeader
           board={{
             id: board.id,
@@ -295,6 +315,8 @@ export default async function BoardPage({
           }))}
           canPermanentDelete={canPermanentDelete}
           starred={isBoardStarred}
+          workspaceId={board.workspaceId}
+          canInviteMembers={canInviteMembers}
         />
 
         <div
@@ -314,11 +336,12 @@ export default async function BoardPage({
         </div>
 
         <CardDetailSheet
-          key={selectedCard?.id ?? "card-detail-sheet-closed"}
           open={Boolean(selectedCard)}
           card={selectedCard}
           comments={comments}
+          commentsHasMore={commentsHasMore}
           activity={activity}
+          activityHasMore={activityHasMore}
           attachments={attachments}
           assignees={assignees}
           assignableMembers={assignableMembers}

@@ -13,8 +13,11 @@ export async function GET(request: Request) {
   const limit = Number.isFinite(rawLimit) && rawLimit > 0
     ? Math.min(rawLimit, MAX_LIMIT)
     : DEFAULT_LIMIT;
+  // Optional cursor for inbox pagination: the id of the last notification of
+  // the previous page. Omitting it returns the newest page (legacy behavior).
+  const cursor = searchParams.get("cursor") ?? undefined;
 
-  const notifications = await getNotificationsForUser(userId, { limit });
+  const notifications = await getNotificationsForUser(userId, { limit, cursor });
 
   return NextResponse.json({ notifications });
 }

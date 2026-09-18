@@ -1,0 +1,893 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "@prisma/config": {
+      "name": "@prisma/config",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "deepmerge-ts"
+      ],
+      "effects": [
+        "prisma"
+      ],
+      "range": "6.13.0-dev.1 - 8.1.0-dev.4",
+      "nodes": [
+        "node_modules/@prisma/config"
+      ],
+      "fixAvailable": {
+        "name": "prisma",
+        "version": "6.19.3",
+        "isSemVerMajor": true
+      }
+    },
+    "@vitest/mocker": {
+      "name": "@vitest/mocker",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1193684,
+          "name": "@vitest/mocker",
+          "dependency": "@vitest/mocker",
+          "title": "Vitest: Path Traversal / Arbitrary File Read via @vitest/mocker Redirect Mock",
+          "url": "https://github.com/advisories/GHSA-82fw-gwwq-j7x9",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-22"
+          ],
+          "cvss": {
+            "score": 5.9,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N"
+          },
+          "range": ">=2.1.0 <4.1.11"
+        },
+        "vite"
+      ],
+      "effects": [
+        "vitest"
+      ],
+      "range": "<=4.1.10",
+      "nodes": [
+        "node_modules/@vitest/mocker"
+      ],
+      "fixAvailable": {
+        "name": "vitest",
+        "version": "5.0.1",
+        "isSemVerMajor": true
+      }
+    },
+    "better-auth": {
+      "name": "better-auth",
+      "severity": "critical",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 1119052,
+          "name": "better-auth",
+          "dependency": "better-auth",
+          "title": "Better Auth: OAuth callback accepts mismatched `state` when cookie-backed state storage is used without PKCE",
+          "url": "https://github.com/advisories/GHSA-wxw3-q3m9-c3jr",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-287",
+            "CWE-345",
+            "CWE-352"
+          ],
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:N/I:H/A:N"
+          },
+          "range": "<1.6.2"
+        },
+        {
+          "source": 1122756,
+          "name": "better-auth",
+          "dependency": "better-auth",
+          "title": "Better Auth: Stale sessions persist after user deletion across admin, anonymous, and SCIM flows",
+          "url": "https://github.com/advisories/GHSA-2vg6-77g8-24mp",
+          "severity": "low",
+          "cwe": [
+            "CWE-459",
+            "CWE-613",
+            "CWE-672"
+          ],
+          "cvss": {
+            "score": 3.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:L/I:L/A:N"
+          },
+          "range": ">=0.3.4 <1.6.11"
+        },
+        {
+          "source": 1122762,
+          "name": "better-auth",
+          "dependency": "better-auth",
+          "title": "Better Auth has insecure cryptographic defaults in oidcProvider: alg=none advertised and plain PKCE accepted by default",
+          "url": "https://github.com/advisories/GHSA-9h47-pqcx-hjr4",
+          "severity": "high",
+          "cwe": [
+            "CWE-327",
+            "CWE-757",
+            "CWE-1188"
+          ],
+          "cvss": {
+            "score": 8.7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:N"
+          },
+          "range": "<1.6.11"
+        },
+        {
+          "source": 1122764,
+          "name": "better-auth",
+          "dependency": "better-auth",
+          "title": "Better Auth has stored XSS in the auth-server origin via javascript: redirect_uri in oidc-provider and mcp",
+          "url": "https://github.com/advisories/GHSA-86j7-9j95-vpqj",
+          "severity": "high",
+          "cwe": [
+            "CWE-79",
+            "CWE-601"
+          ],
+          "cvss": {
+            "score": 7.7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:L/UI:R/S:C/C:H/I:H/A:N"
+          },
+          "range": "<1.6.13"
+        },
+        {
+          "source": 1123887,
+          "name": "better-auth",
+          "dependency": "better-auth",
+          "title": "@better-auth/oauth-provider's OAuth authorization-code grant allows concurrent redemption when two token requests race the find-then-delete primitive",
+          "url": "https://github.com/advisories/GHSA-7w99-5wm4-3g79",
+          "severity": "high",
+          "cwe": [
+            "CWE-294",
+            "CWE-362",
+            "CWE-367"
+          ],
+          "cvss": {
+            "score": 8.1,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:N"
+          },
+          "range": "<1.6.11"
+        },
+        {
+          "source": 1123890,
+          "name": "better-auth",
+          "dependency": "better-auth",
+          "title": "Better Auth: OAuth refresh-token rotation forks the token family on concurrent redemption",
+          "url": "https://github.com/advisories/GHSA-392p-2q2v-4372",
+          "severity": "high",
+          "cwe": [
+            "CWE-294",
+            "CWE-362",
+            "CWE-367",
+            "CWE-613"
+          ],
+          "cvss": {
+            "score": 8.1,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N"
+          },
+          "range": ">=1.4.8-beta.7 <1.6.0"
+        },
+        {
+          "source": 1123892,
+          "name": "better-auth",
+          "dependency": "better-auth",
+          "title": "Better Auth has an account takeover issue via OAuth auto-link to unverified pre-registered email",
+          "url": "https://github.com/advisories/GHSA-g38m-r43w-p2q7",
+          "severity": "high",
+          "cwe": [
+            "CWE-287",
+            "CWE-345"
+          ],
+          "cvss": {
+            "score": 8.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:L"
+          },
+          "range": "<1.6.11"
+        },
+        {
+          "source": 1123893,
+          "name": "better-auth",
+          "dependency": "better-auth",
+          "title": "Better Auth vulnerable to unauthorized invitation acceptance via unverified email match in organization plugin",
+          "url": "https://github.com/advisories/GHSA-fmh4-wcc4-5jm3",
+          "severity": "high",
+          "cwe": [
+            "CWE-287",
+            "CWE-345",
+            "CWE-441",
+            "CWE-862"
+          ],
+          "cvss": {
+            "score": 7.7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:L/UI:R/S:C/C:H/I:H/A:N"
+          },
+          "range": "<1.6.11"
+        },
+        {
+          "source": 1123894,
+          "name": "better-auth",
+          "dependency": "better-auth",
+          "title": "Better Auth: OAuth refresh-token replay via missing client authentication on oidc-provider and mcp plugins",
+          "url": "https://github.com/advisories/GHSA-pw9m-5jxm-xr6h",
+          "severity": "critical",
+          "cwe": [
+            "CWE-287",
+            "CWE-306",
+            "CWE-345",
+            "CWE-863"
+          ],
+          "cvss": {
+            "score": 9.1,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"
+          },
+          "range": "<1.6.11"
+        },
+        {
+          "source": 1124303,
+          "name": "better-auth",
+          "dependency": "better-auth",
+          "title": "Better Auth: Account takeover via pre-account hijacking on magic-link and email-OTP sign-in",
+          "url": "https://github.com/advisories/GHSA-qq9h-g4jm-xgf3",
+          "severity": "high",
+          "cwe": [
+            "CWE-287",
+            "CWE-345"
+          ],
+          "cvss": {
+            "score": 8.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:L"
+          },
+          "range": ">=1.1.3 <1.6.22"
+        }
+      ],
+      "effects": [],
+      "range": "<=1.6.21",
+      "nodes": [
+        "node_modules/better-auth"
+      ],
+      "fixAvailable": {
+        "name": "better-auth",
+        "version": "1.7.5",
+        "isSemVerMajor": false
+      }
+    },
+    "deepmerge-ts": {
+      "name": "deepmerge-ts",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1145093,
+          "name": "deepmerge-ts",
+          "dependency": "deepmerge-ts",
+          "title": "DeepmergeTS has stack exhaustion when merging recursive object graphs",
+          "url": "https://github.com/advisories/GHSA-ggr8-5vv4-36mx",
+          "severity": "high",
+          "cwe": [
+            "CWE-674"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<8.0.0"
+        }
+      ],
+      "effects": [
+        "@prisma/config"
+      ],
+      "range": "<8.0.0",
+      "nodes": [
+        "node_modules/deepmerge-ts"
+      ],
+      "fixAvailable": {
+        "name": "prisma",
+        "version": "6.19.3",
+        "isSemVerMajor": true
+      }
+    },
+    "esbuild": {
+      "name": "esbuild",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1102341,
+          "name": "esbuild",
+          "dependency": "esbuild",
+          "title": "esbuild enables any website to send any requests to the development server and read the response",
+          "url": "https://github.com/advisories/GHSA-67mh-4wv8-2f99",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-346"
+          ],
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:N/A:N"
+          },
+          "range": "<=0.24.2"
+        }
+      ],
+      "effects": [
+        "vite"
+      ],
+      "range": "<=0.24.2",
+      "nodes": [
+        "node_modules/vite/node_modules/esbuild"
+      ],
+      "fixAvailable": {
+        "name": "vitest",
+        "version": "5.0.1",
+        "isSemVerMajor": true
+      }
+    },
+    "mysql2": {
+      "name": "mysql2",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1153173,
+          "name": "mysql2",
+          "dependency": "mysql2",
+          "title": "MySQL2: Auth Plugin Downgrade to mysql_clear_password Leaks Plaintext Credentials",
+          "url": "https://github.com/advisories/GHSA-3f6p-5ww8-9rcr",
+          "severity": "high",
+          "cwe": [
+            "CWE-522"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<3.22.0"
+        },
+        {
+          "source": 1158532,
+          "name": "mysql2",
+          "dependency": "mysql2",
+          "title": "MySQL2: Unbounded zlib inflate in compressed MySQL protocol handler allows decompression-bomb DoS",
+          "url": "https://github.com/advisories/GHSA-rgwj-5xj2-c3m3",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-409"
+          ],
+          "cvss": {
+            "score": 5.9,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": "<=3.23.0"
+        }
+      ],
+      "effects": [
+        "prisma"
+      ],
+      "range": "<=3.23.0",
+      "nodes": [
+        "node_modules/mysql2"
+      ],
+      "fixAvailable": {
+        "name": "prisma",
+        "version": "6.19.3",
+        "isSemVerMajor": true
+      }
+    },
+    "next": {
+      "name": "next",
+      "severity": "critical",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 1124170,
+          "name": "next",
+          "dependency": "next",
+          "title": "Next.js: Middleware / Proxy bypass in App Router applications using Turbopack and single locale",
+          "url": "https://github.com/advisories/GHSA-6gpp-xcg3-4w24",
+          "severity": "high",
+          "cwe": [
+            "CWE-285"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": ">=16.0.0 <16.2.11"
+        },
+        {
+          "source": 1124171,
+          "name": "next",
+          "dependency": "next",
+          "title": "Next.js: Denial of Service in App Router using Server Actions",
+          "url": "https://github.com/advisories/GHSA-m99w-x7hq-7vfj",
+          "severity": "high",
+          "cwe": [
+            "CWE-834"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": ">=16.0.0 <16.2.11"
+        },
+        {
+          "source": 1124184,
+          "name": "next",
+          "dependency": "next",
+          "title": "Next.js: Server-Side Request Forgery in Server Actions on custom servers",
+          "url": "https://github.com/advisories/GHSA-89xv-2m56-2m9x",
+          "severity": "high",
+          "cwe": [
+            "CWE-918"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": ">=16.0.0 <16.2.11"
+        },
+        {
+          "source": 1124186,
+          "name": "next",
+          "dependency": "next",
+          "title": "Next.js: Cache confusion of response bodies for requests with bodies",
+          "url": "https://github.com/advisories/GHSA-68g3-v927-f742",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-524"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": ">=16.0.0 <16.2.11"
+        },
+        {
+          "source": 1124188,
+          "name": "next",
+          "dependency": "next",
+          "title": "Next.js: Cache confusion of response bodies for requests with bodies containing invalid UTF-8 byte sequences",
+          "url": "https://github.com/advisories/GHSA-4633-3j49-mh5q",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-116"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": ">=16.0.0 <16.2.11"
+        },
+        {
+          "source": 1124190,
+          "name": "next",
+          "dependency": "next",
+          "title": "Next.js: Unbounded Server Action payload in Edge runtime",
+          "url": "https://github.com/advisories/GHSA-4c39-4ccg-62r3",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-770"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": ">=16.0.0 <16.2.11"
+        },
+        {
+          "source": 1124192,
+          "name": "next",
+          "dependency": "next",
+          "title": "Next.js: Server-Side Request Forgery in rewrites via attacker-controlled destination hostname",
+          "url": "https://github.com/advisories/GHSA-p9j2-gv94-2wf4",
+          "severity": "high",
+          "cwe": [
+            "CWE-918"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": ">=16.0.0 <16.2.11"
+        },
+        {
+          "source": 1124194,
+          "name": "next",
+          "dependency": "next",
+          "title": "Next.js: Denial of Service in the Image Optimization API using SVGs",
+          "url": "https://github.com/advisories/GHSA-q8wf-6r8g-63ch",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-407"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": ">=16.0.0 <16.2.11"
+        },
+        {
+          "source": 1124196,
+          "name": "next",
+          "dependency": "next",
+          "title": "Next.js: Unauthenticated disclosure of internal Server Function endpoints",
+          "url": "https://github.com/advisories/GHSA-955p-x3mx-jcvp",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-201"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": ">=16.0.0 <16.2.11"
+        },
+        {
+          "source": 1193676,
+          "name": "next",
+          "dependency": "next",
+          "title": "Next.js: Unauthenticated Remote Code Execution on windows-hosted servers",
+          "url": "https://github.com/advisories/GHSA-p293-qw3h-jr36",
+          "severity": "critical",
+          "cwe": [
+            "CWE-22"
+          ],
+          "cvss": {
+            "score": 9,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H"
+          },
+          "range": ">=16.0.0 <16.3.3"
+        },
+        {
+          "source": 1193732,
+          "name": "next",
+          "dependency": "next",
+          "title": "Next.js: Unauthenticated Remote Code Execution in Image Optimization API when AVIF files are used",
+          "url": "https://github.com/advisories/GHSA-2xp9-vwfh-vxw4",
+          "severity": "critical",
+          "cwe": [
+            "CWE-1395"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": ">=16.0.0 <16.3.3"
+        },
+        "postcss",
+        "sharp"
+      ],
+      "effects": [],
+      "range": "9.3.4-canary.0 - 16.3.2",
+      "nodes": [
+        "node_modules/next"
+      ],
+      "fixAvailable": {
+        "name": "next",
+        "version": "16.3.5",
+        "isSemVerMajor": false
+      }
+    },
+    "postcss": {
+      "name": "postcss",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1117015,
+          "name": "postcss",
+          "dependency": "postcss",
+          "title": "PostCSS has XSS via Unescaped </style> in its CSS Stringify Output",
+          "url": "https://github.com/advisories/GHSA-qx2v-qp2m-jg93",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-79"
+          ],
+          "cvss": {
+            "score": 6.1,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"
+          },
+          "range": "<8.5.10"
+        },
+        {
+          "source": 1124252,
+          "name": "postcss",
+          "dependency": "postcss",
+          "title": "PostCSS: Arbitrary file read and information disclosure via attacker-controlled sourceMappingURL in CSS comments",
+          "url": "https://github.com/advisories/GHSA-6g55-p6wh-862q",
+          "severity": "high",
+          "cwe": [
+            "CWE-22",
+            "CWE-200"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+          },
+          "range": "<=8.5.11"
+        },
+        {
+          "source": 1130709,
+          "name": "postcss",
+          "dependency": "postcss",
+          "title": "PostCSS: incomplete fix of GHSA-6g55-p6wh-862q — attacker-controlled sourceMappingURL reads arbitrary .map files when `from` is unset",
+          "url": "https://github.com/advisories/GHSA-fxqj-rqcc-2cmp",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-22",
+            "CWE-200"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<=8.5.22"
+        },
+        {
+          "source": 1139510,
+          "name": "postcss",
+          "dependency": "postcss",
+          "title": "PostCSS: Path Traversal in Previous Source Map Auto-Loading (sourceMappingURL) leads to Arbitrary .map File Disclosure",
+          "url": "https://github.com/advisories/GHSA-r28c-9q8g-f849",
+          "severity": "high",
+          "cwe": [
+            "CWE-22"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+          },
+          "range": "<=8.5.17"
+        }
+      ],
+      "effects": [
+        "next"
+      ],
+      "range": "<=8.5.22",
+      "nodes": [
+        "node_modules/next/node_modules/postcss"
+      ],
+      "fixAvailable": {
+        "name": "next",
+        "version": "16.3.5",
+        "isSemVerMajor": false
+      }
+    },
+    "prisma": {
+      "name": "prisma",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        "@prisma/config",
+        "mysql2"
+      ],
+      "effects": [],
+      "range": "6.13.0-dev.1 - 8.1.0-dev.6",
+      "nodes": [
+        "node_modules/prisma"
+      ],
+      "fixAvailable": {
+        "name": "prisma",
+        "version": "6.19.3",
+        "isSemVerMajor": true
+      }
+    },
+    "sharp": {
+      "name": "sharp",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1124066,
+          "name": "sharp",
+          "dependency": "sharp",
+          "title": "sharp inherited vulnerabilities in libvips: CVE-2026-33327, CVE-2026-33328, CVE-2026-35590, CVE-2026-35591",
+          "url": "https://github.com/advisories/GHSA-f88m-g3jw-g9cj",
+          "severity": "high",
+          "cwe": [
+            "CWE-1395"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<0.35.0"
+        },
+        {
+          "source": 1193725,
+          "name": "sharp",
+          "dependency": "sharp",
+          "title": "sharp: Vulnerabilities in libheif: GHSA-g89c-p67h-r497 and GHSA-2jg2-4ch7-h545",
+          "url": "https://github.com/advisories/GHSA-rgj7-g3m4-5g8c",
+          "severity": "high",
+          "cwe": [
+            "CWE-122"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<0.35.4"
+        }
+      ],
+      "effects": [
+        "next"
+      ],
+      "range": "<=0.35.4-rc.0",
+      "nodes": [
+        "node_modules/sharp"
+      ],
+      "fixAvailable": {
+        "name": "next",
+        "version": "16.3.5",
+        "isSemVerMajor": false
+      }
+    },
+    "vite": {
+      "name": "vite",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1116229,
+          "name": "vite",
+          "dependency": "vite",
+          "title": "Vite Vulnerable to Path Traversal in Optimized Deps `.map` Handling",
+          "url": "https://github.com/advisories/GHSA-4w7w-66w2-5vf9",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-22",
+            "CWE-200"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<=6.4.1"
+        },
+        {
+          "source": 1120784,
+          "name": "vite",
+          "dependency": "vite",
+          "title": "launch-editor: NTLMv2 hash disclosure via UNC path handling on Windows",
+          "url": "https://github.com/advisories/GHSA-v6wh-96g9-6wx3",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-73",
+            "CWE-522"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<=6.4.2"
+        },
+        {
+          "source": 1123525,
+          "name": "vite",
+          "dependency": "vite",
+          "title": "vite: `server.fs.deny` bypass on Windows alternate paths",
+          "url": "https://github.com/advisories/GHSA-fx2h-pf6j-xcff",
+          "severity": "high",
+          "cwe": [
+            "CWE-22",
+            "CWE-200"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+          },
+          "range": "<=6.4.2"
+        },
+        "esbuild"
+      ],
+      "effects": [
+        "@vitest/mocker",
+        "vite-node",
+        "vitest"
+      ],
+      "range": "<=6.4.2",
+      "nodes": [
+        "node_modules/vite"
+      ],
+      "fixAvailable": {
+        "name": "vitest",
+        "version": "5.0.1",
+        "isSemVerMajor": true
+      }
+    },
+    "vite-node": {
+      "name": "vite-node",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "vite"
+      ],
+      "effects": [
+        "vitest"
+      ],
+      "range": "<=2.2.0-beta.2",
+      "nodes": [
+        "node_modules/vite-node"
+      ],
+      "fixAvailable": {
+        "name": "vitest",
+        "version": "5.0.1",
+        "isSemVerMajor": true
+      }
+    },
+    "vitest": {
+      "name": "vitest",
+      "severity": "critical",
+      "isDirect": true,
+      "via": [
+        "@vitest/mocker",
+        {
+          "source": 1139528,
+          "name": "vitest",
+          "dependency": "vitest",
+          "title": "When Vitest UI server is listening, arbitrary file can be read and executed",
+          "url": "https://github.com/advisories/GHSA-5xrq-8626-4rwp",
+          "severity": "critical",
+          "cwe": [
+            "CWE-22",
+            "CWE-862"
+          ],
+          "cvss": {
+            "score": 9.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+          },
+          "range": "<3.2.6"
+        },
+        {
+          "source": 1193683,
+          "name": "vitest",
+          "dependency": "vitest",
+          "title": "Vitest: Path Traversal / Arbitrary File Read via @vitest/mocker Redirect Mock",
+          "url": "https://github.com/advisories/GHSA-82fw-gwwq-j7x9",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-22"
+          ],
+          "cvss": {
+            "score": 5.9,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N"
+          },
+          "range": ">=2.1.0 <4.1.11"
+        },
+        "vite",
+        "vite-node"
+      ],
+      "effects": [],
+      "range": "<=4.1.10",
+      "nodes": [
+        "node_modules/vitest"
+      ],
+      "fixAvailable": {
+        "name": "vitest",
+        "version": "5.0.1",
+        "isSemVerMajor": true
+      }
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 3,
+      "high": 7,
+      "critical": 3,
+      "total": 13
+    },
+    "dependencies": {
+      "prod": 774,
+      "dev": 312,
+      "optional": 185,
+      "peer": 0,
+      "peerOptional": 0,
+      "total": 1209
+    }
+  }
+}

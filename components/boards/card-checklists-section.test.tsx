@@ -270,17 +270,27 @@ describe("CardChecklistsSection", () => {
 
   // ---- actions: delete checklist ----
 
-  it("deletes a checklist via the delete action", async () => {
-    renderSection();
-    await user.click(screen.getByText("Delete"));
+    it("deletes a checklist via the delete action", async () => {
+      renderSection();
+      await user.click(screen.getByText("Delete"));
 
     await waitFor(() =>
       expect(actions.deleteChecklistAction).toHaveBeenCalledTimes(1),
     );
-    const formData =
-      actions.deleteChecklistAction.mock.calls[0][0] as FormData;
-    expect(formData.get("checklistId")).toBe("cl-1");
-  });
+      const formData =
+        actions.deleteChecklistAction.mock.calls[0][0] as FormData;
+      expect(formData.get("checklistId")).toBe("cl-1");
+    });
+
+    it("calls onChecklistDeleted after a successful checklist delete", async () => {
+      const onChecklistDeleted = vi.fn();
+      renderSection({ onChecklistDeleted });
+      await user.click(screen.getByText("Delete"));
+
+      await waitFor(() =>
+        expect(onChecklistDeleted).toHaveBeenCalledWith("cl-1"),
+      );
+    });
 
   // ---- error display ----
 

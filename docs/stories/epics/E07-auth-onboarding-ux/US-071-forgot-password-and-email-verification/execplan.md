@@ -18,7 +18,13 @@ In scope:
 - **Email verification:**
   - Implement the enforce posture (decision 0023): verify-email state +
     `/verify-email` route + resend, reflected in `sign-up-form.tsx`.
-  - Wire `sendVerificationEmail` / `verifyEmail` from the client if enforcing.
+- Wire `sendVerificationEmail` / `verifyEmail` from the client.
+- Extend `/verify-email` into the shared recovery hub (decision 0033), remove
+  the destructive unverified-sign-in presentation, preserve safe callbacks,
+  and make resend outcomes truthful.
+  - **Password confirmation:**
+    - Require a matching confirmation on signup and reset-password without
+      changing Better Auth request payloads.
 
 Out of scope:
 
@@ -59,6 +65,9 @@ Hard gates:
    of request → email → reset → sign-in.
 6. **Harness update** — product doc + decision + TEST_MATRIX + story row; PR into
    `dev`.
+7. **2026-08-10 hardening pass** — RED-first RTL for password confirmation,
+   verification recovery, callback safety, and resend failures; invitation E2E;
+   then focused and full gates.
 
 ## Stop Conditions
 

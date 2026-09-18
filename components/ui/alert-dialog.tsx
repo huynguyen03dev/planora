@@ -56,8 +56,11 @@ function AlertDialogContent({
         // customized: restore shadcn's enter/exit fade+zoom (stripped in this
         // repo's copy). Mirrors dialog.tsx; duration-200 keeps it snappy and the
         // centering translate composes with the zoom keyframes.
+        // customized: 375px gutter — w-full let the dialog touch the viewport
+        // edges on narrow screens; w-[calc(100%-2rem)] reserves a 1rem margin on
+        // each side (mirrors create-board-modal / invite-member-dialog).
         className={cn(
-          "fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-6 shadow-lg",
+          "fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-6 shadow-lg",
           "duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95",
           className,
         )}

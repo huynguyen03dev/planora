@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { signUp, sendVerificationEmail } from "@/lib/auth-client";
+import { useRouter, useSearchParams } from "next/navigation";
+
+import { sendVerificationEmail, signUp } from "@/lib/auth-client";
+import { safeInternalPath } from "@/lib/redirect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,48 +15,96 @@ import {
   CardDescription,
   CardFooter,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 
+type SignUpFieldError = "name" | "confirmPassword" | null;
+
+function subscribeToHydration(): () => void {
+  return () => undefined;
+}
+
+function getClientHydrationSnapshot(): boolean {
+  return true;
+}
+
+function getServerHydrationSnapshot(): boolean {
+  return false;
+}
+
+function verificationHref(
+  email: string,
+  callbackURL: string,
+  delivery: "sent" | "failed",
+): string {
+  const params = new URLSearchParams({ email, callbackURL, delivery });
+  return `/verify-email?${params.toString()}`;
+}
+
 export function SignUpForm() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const invitedEmail = searchParams.get("email") ?? "";
-  // Preserve invite context when bouncing to the sign-in link.
+  const redirectTo = safeInternalPath(searchParams.get("redirect") ?? undefined);
   const signInHref = `/sign-in${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState(invitedEmail);
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
+  const [fieldError, setFieldError] = useState<SignUpFieldError>(null);
   const [loading, setLoading] = useState(false);
-  const [verifyPending, setVerifyPending] = useState(false);
-  const [resendLoading, setResendLoading] = useState(false);
-  const [resendSent, setResendSent] = useState(false);
+  const hydrated = useSyncExternalStore(
+    subscribeToHydration,
+    getClientHydrationSnapshot,
+    getServerHydrationSnapshot,
+  );
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
-    setLoading(true);
+    setFieldError(null);
 
-    // Trim before submit so a whitespace-only name cannot bypass the
-    // `required` HTML attribute (browsers treat it as non-empty). Better
-    // Auth does not enforce a non-empty name, so guard at the client.
     const trimmedName = name.trim();
     if (!trimmedName) {
       setError("Name is required");
-      setLoading(false);
+      setFieldError("name");
       return;
     }
 
+    if (password !== confirmPassword) {
+      setError("Passwords do not match");
+      setFieldError("confirmPassword");
+      return;
+    }
+
+    setLoading(true);
+
     try {
       await signUp.email(
-        { name: trimmedName, email, password },
         {
-          onSuccess() {
-            // With requireEmailVerification enabled (decision 0023),
-            // BA does NOT create a session. Show the verify-pending
-            // state instead of redirecting to /boards.
-            setVerifyPending(true);
+          name: trimmedName,
+          email,
+          password,
+          callbackURL: redirectTo,
+        },
+        {
+          async onSuccess() {
+            try {
+              const result = await sendVerificationEmail({
+                email,
+                callbackURL: redirectTo,
+              });
+              router.push(
+                verificationHref(
+                  email,
+                  redirectTo,
+                  result && !result.error ? "sent" : "failed",
+                ),
+              );
+            } catch {
+              router.push(verificationHref(email, redirectTo, "failed"));
+            }
           },
           onError(ctx) {
             setError(ctx.error.message);
@@ -66,78 +116,25 @@ export function SignUpForm() {
     }
   }
 
-  async function handleResend() {
-    setResendLoading(true);
-    setResendSent(false);
-
-    try {
-      await sendVerificationEmail({ email });
-      setResendSent(true);
-    } catch {
-      // Error is surfaced by BA internally; we stay silent to
-      // avoid leaking user-enumeration info.
-    } finally {
-      setResendLoading(false);
-    }
-  }
-
-  const hasError = Boolean(error);
-
-  // Verify-pending state: shown after successful sign-up instead of
-  // redirecting to /boards, because requireEmailVerification is enabled.
-  if (verifyPending) {
-    return (
-      <div className="flex flex-1 items-center justify-center px-4">
-        <Card className="w-full max-w-sm">
-          <CardHeader>
-            <CardTitle className="text-2xl">Check your email</CardTitle>
-            <CardDescription>
-              We&apos;ve sent a verification link to <strong>{email}</strong>.
-              Click the link to activate your account.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Didn&apos;t receive the email? Check your spam folder, or{" "}
-              <button
-                type="button"
-                className="cursor-pointer text-primary underline-offset-4 hover:underline disabled:opacity-50"
-                onClick={handleResend}
-                disabled={resendLoading}
-              >
-                {resendLoading
-                  ? "Sending..."
-                  : resendSent
-                    ? "Sent!"
-                    : "resend"}
-              </button>
-              .
-            </p>
-          </CardContent>
-          <CardFooter className="flex flex-col gap-4 pt-0">
-            <Button variant="secondary" className="w-full" asChild>
-              <Link href={signInHref}>Sign in instead</Link>
-            </Button>
-          </CardFooter>
-        </Card>
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-1 items-center justify-center px-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-2xl">Create an account</CardTitle>
+          <h1 className="text-2xl leading-normal font-medium">Create an account</h1>
           <CardDescription>
             Enter your details to get started with Planora.
           </CardDescription>
         </CardHeader>
-        <form onSubmit={handleSubmit}>
+        <form
+          onSubmit={handleSubmit}
+          data-auth-hydrated={hydrated ? "true" : "false"}
+        >
           <CardContent className="space-y-4">
-            {error && (
-              <p id="form-error" role="alert" className="text-sm text-destructive">{error}</p>
-            )}
+            {error ? (
+              <p id="form-error" role="alert" className="text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
             <div className="space-y-2">
               <Label htmlFor="name">Name</Label>
               <Input
@@ -145,11 +142,18 @@ export function SignUpForm() {
                 type="text"
                 placeholder="John Doe"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(event) => {
+                  setName(event.target.value);
+                  if (fieldError === "name") {
+                    setError("");
+                    setFieldError(null);
+                  }
+                }}
                 required
                 autoComplete="name"
-                aria-invalid={hasError}
-                aria-describedby={hasError ? "form-error" : undefined}
+                autoFocus
+                aria-invalid={fieldError === "name"}
+                aria-describedby={fieldError === "name" ? "form-error" : undefined}
               />
             </div>
             <div className="space-y-2">
@@ -159,11 +163,10 @@ export function SignUpForm() {
                 type="email"
                 placeholder="you@example.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(event) => setEmail(event.target.value)}
                 required
                 autoComplete="email"
-                aria-invalid={hasError}
-                aria-describedby={hasError ? "form-error" : undefined}
+                aria-invalid={false}
               />
             </div>
             <div className="space-y-2">
@@ -173,18 +176,47 @@ export function SignUpForm() {
                 type="password"
                 placeholder="••••••••"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(event) => setPassword(event.target.value)}
                 required
                 minLength={8}
                 autoComplete="new-password"
-                aria-invalid={hasError}
-                aria-describedby={hasError ? "form-error pw-help" : "pw-help"}
+                aria-invalid={false}
+                aria-describedby="pw-help"
               />
-              <p id="pw-help" className="text-sm text-muted-foreground">Minimum 8 characters</p>
+              <p id="pw-help" className="text-sm text-muted-foreground">
+                Minimum 8 characters
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="confirm-password">Confirm password</Label>
+              <Input
+                id="confirm-password"
+                type="password"
+                placeholder="••••••••"
+                value={confirmPassword}
+                onChange={(event) => {
+                  setConfirmPassword(event.target.value);
+                  if (fieldError === "confirmPassword") {
+                    setError("");
+                    setFieldError(null);
+                  }
+                }}
+                required
+                minLength={8}
+                autoComplete="new-password"
+                aria-invalid={fieldError === "confirmPassword"}
+                aria-describedby={
+                  fieldError === "confirmPassword" ? "form-error" : undefined
+                }
+              />
             </div>
           </CardContent>
           <CardFooter className="flex flex-col gap-4 pt-6">
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={!hydrated || loading}
+            >
               {loading ? "Creating account..." : "Sign Up"}
             </Button>
             <p className="text-sm text-muted-foreground">

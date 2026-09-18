@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { UserAdd01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -28,9 +28,24 @@ import {
 
 type InviteMemberDialogProps = {
   workspaceId: string;
+  // Optional custom trigger (e.g. the board header's Share button). Defaults
+  // to the standard Invite button used on the members page.
+  trigger?: React.ReactNode;
 };
 
 type InvitableRole = "admin" | "editor" | "viewer";
+
+function subscribeToHydration(): () => void {
+  return () => undefined;
+}
+
+function getClientHydrationSnapshot(): boolean {
+  return true;
+}
+
+function getServerHydrationSnapshot(): boolean {
+  return false;
+}
 
 const ROLE_OPTIONS: { value: InvitableRole; label: string; hint: string }[] = [
   { value: "admin", label: "Admin", hint: "Full control, incl. members" },
@@ -38,13 +53,18 @@ const ROLE_OPTIONS: { value: InvitableRole; label: string; hint: string }[] = [
   { value: "viewer", label: "Viewer", hint: "Read-only, can comment" },
 ];
 
-export function InviteMemberDialog({ workspaceId }: InviteMemberDialogProps) {
+export function InviteMemberDialog({ workspaceId, trigger }: InviteMemberDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<InvitableRole>("editor");
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
+  const hydrated = useSyncExternalStore(
+    subscribeToHydration,
+    getClientHydrationSnapshot,
+    getServerHydrationSnapshot,
+  );
 
   function resetState() {
     setEmail("");
@@ -89,10 +109,16 @@ export function InviteMemberDialog({ workspaceId }: InviteMemberDialogProps) {
       }}
     >
       <DialogTrigger asChild>
-        <Button size="sm">
-          <HugeiconsIcon icon={UserAdd01Icon} className="size-4" aria-hidden={true} />
-          Invite
-        </Button>
+        {trigger ?? (
+            <Button
+              size="sm"
+              disabled={!hydrated}
+              data-invite-hydrated={hydrated ? "true" : "false"}
+            >
+            <HugeiconsIcon icon={UserAdd01Icon} className="size-4" aria-hidden={true} />
+            Invite
+          </Button>
+        )}
       </DialogTrigger>
 
       <DialogContent className="w-[calc(100%-2rem)] sm:max-w-md">

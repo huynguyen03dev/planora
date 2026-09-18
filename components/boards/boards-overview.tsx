@@ -1,5 +1,8 @@
 import type { WorkspaceBoard } from "@/lib/workspace";
 
+import { StarIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+
 import { BoardCard } from "./board-card";
 import { WorkspaceSection } from "./workspace-section";
 
@@ -23,8 +26,11 @@ export function BoardsOverview({ workspaces, boards, starredBoardIds }: BoardsOv
 
       {starredBoards.length > 0 ? (
         <section className="space-y-3">
-          <h2 className="text-sm font-medium text-muted-foreground">
-            <span aria-hidden="true">⭐</span> Starred
+          <h2 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+            {/* Starred-state yellow lives on the card/header star toggle; the
+                section label stays neutral muted (DESIGN.md scarce-accent). */}
+            <HugeiconsIcon icon={StarIcon} className="size-3.5" aria-hidden="true" />
+            Starred
           </h2>
           <div className="grid grid-cols-[repeat(auto-fill,minmax(13rem,1fr))] gap-4">
             {starredBoards.map((board) => (

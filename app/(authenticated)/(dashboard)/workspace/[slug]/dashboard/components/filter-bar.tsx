@@ -162,7 +162,7 @@ export function FilterBar({
           type="date"
           value={currentFilters.from ?? ""}
           onChange={(e) => updateFilters({ from: e.target.value || undefined })}
-          className="h-8 py-1 text-sm w-36"
+          className={`h-8 py-1 text-sm w-36 ${currentFilters.from ? "" : "text-muted-foreground"}`}
         />
       </div>
 
@@ -175,7 +175,7 @@ export function FilterBar({
           type="date"
           value={currentFilters.to ?? ""}
           onChange={(e) => updateFilters({ to: e.target.value || undefined })}
-          className="h-8 py-1 text-sm w-36"
+          className={`h-8 py-1 text-sm w-36 ${currentFilters.to ? "" : "text-muted-foreground"}`}
         />
       </div>
     </div>

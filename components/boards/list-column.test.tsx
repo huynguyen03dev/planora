@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DragDropContext, Droppable } from "@hello-pangea/dnd";
 
@@ -10,7 +10,10 @@ import { UndoHost } from "@/components/undo/undo-snackbar";
 
 // ListColumn + its card children reach these Server Actions; stub them all.
 const actions = vi.hoisted(() => ({
-  createCardAction: vi.fn(async () => ({ success: true })),
+  createCardAction: vi.fn(async (): Promise<
+    | { success: true; cardId: string }
+    | { success: false; error: string }
+  > => ({ success: true, cardId: "card-1" })),
   updateListAction: vi.fn(async () => ({ success: true })),
   deleteListAction: vi.fn(async () => ({ success: true })),
   archiveCardAction: vi.fn(async () => ({ success: true })),
@@ -171,5 +174,68 @@ describe("ListColumn — safe list archive (US-074 Slice A)", () => {
     expect(actions.restoreListAction).toHaveBeenCalledTimes(1);
     const fd = actions.restoreListAction.mock.calls[0][0] as FormData;
     expect(fd.get("listId")).toBe("list-1");
+  });
+});
+
+describe("ListColumn — accessible field naming and scoped add-card errors", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useBoardStore.getState().reset();
+  });
+
+  it("names the inline list-rename field 'List title'", async () => {
+    renderList();
+    await user.click(screen.getByRole("button", { name: "Backlog" }));
+    expect(
+      screen.getByRole("textbox", { name: "List title" }),
+    ).toHaveValue("Backlog");
+  });
+
+  it("names the add-card composer field 'Card title'", async () => {
+    renderList();
+    await user.click(screen.getByRole("button", { name: "+ Add a card" }));
+    expect(
+      screen.getByRole("textbox", { name: "Card title" }),
+    ).toBeInTheDocument();
+  });
+
+  it("announces an add-card validation error via role=alert wired to the field", async () => {
+    renderList();
+    await user.click(screen.getByRole("button", { name: "+ Add a card" }));
+    const input = screen.getByRole("textbox", { name: "Card title" });
+
+    // Whitespace-only title fails the client guard (submit is disabled for an
+    // empty value, so drive the form's onSubmit directly).
+    await user.type(input, "   ");
+    fireEvent.submit(input.closest("form")!);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Title is required");
+    expect(alert).toHaveAttribute("id", "add-card-error-list-1");
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAttribute("aria-describedby", "add-card-error-list-1");
+    expect(actions.createCardAction).not.toHaveBeenCalled();
+  });
+
+  it("announces an add-card server error via role=alert and keeps the composer open", async () => {
+    actions.createCardAction.mockResolvedValueOnce({
+      success: false,
+      error: "Board is archived",
+    });
+
+    renderList();
+    await user.click(screen.getByRole("button", { name: "+ Add a card" }));
+    const input = screen.getByRole("textbox", { name: "Card title" });
+    await user.type(input, "New card");
+    await user.click(screen.getByRole("button", { name: "Add card" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Board is archived");
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAttribute("aria-describedby", "add-card-error-list-1");
+    // Composer stays open so the user can retry.
+    expect(
+      screen.getByRole("textbox", { name: "Card title" }),
+    ).toHaveValue("New card");
   });
 });

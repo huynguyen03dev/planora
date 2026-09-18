@@ -115,9 +115,11 @@ describe("ListCardItem — whole-card drag/open (US-069)", () => {
 
   it("clicking the edit (pencil) quick-action opens the card", async () => {
     const { onOpenCard } = renderCard();
-    await user.click(
-      screen.getByRole("button", { name: "Edit card Ship the thing" }),
-    );
+    const editButton = screen.getByRole("button", {
+      name: "Edit card Ship the thing",
+    });
+    expect(editButton).toHaveClass("size-7", "pointer-coarse:size-7");
+    await user.click(editButton);
     expect(onOpenCard).toHaveBeenCalledTimes(1);
     expect(onOpenCard).toHaveBeenCalledWith("card-1");
   });

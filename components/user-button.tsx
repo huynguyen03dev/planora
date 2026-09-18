@@ -14,14 +14,24 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { avatarColorClass } from "@/lib/avatar";
 
+export type WorkspaceRef = {
+  id: string;
+  name: string;
+  slug: string;
+};
+
 type UserButtonProps = {
   onCreateWorkspace?: () => void;
   createWorkspaceHref?: string;
+  /** The user's workspaces (server-fetched once in the authenticated layout) —
+   *  rendered as a quick switcher in the dropdown (U10 round-2). */
+  workspaces?: WorkspaceRef[];
 };
 
 export function UserButton({
   onCreateWorkspace,
   createWorkspaceHref,
+  workspaces = [],
 }: UserButtonProps) {
   const router = useRouter();
   const { data: session, isPending } = useSession();
@@ -61,7 +71,15 @@ export function UserButton({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="rounded-full outline-none ring-offset-background transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+      {/* Stable accessible name: the trigger is an avatar whose name would
+          otherwise fall back to the initials (or nothing while the session
+          loads). The label always names the control and the account. */}
+      <DropdownMenuTrigger
+        aria-label={
+          user ? `Open account menu for ${user.name}` : "Open account menu"
+        }
+        className="rounded-full p-0.5 pointer-coarse:p-1.5 outline-none ring-offset-background transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
         <Avatar className="size-8">
           {user?.image ? (
             <AvatarImage src={user.image} alt={user.name ?? "User"} />
@@ -88,6 +106,24 @@ export function UserButton({
         <DropdownMenuItem onClick={() => router.push("/profile")}>
           Profile
         </DropdownMenuItem>
+        {workspaces.length > 0 ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
+              Workspaces
+            </DropdownMenuLabel>
+            {workspaces.map((workspace) => (
+              <DropdownMenuItem
+                key={workspace.id}
+                onClick={() =>
+                  router.push(`/boards?workspace=${workspace.id}`)
+                }
+              >
+                {workspace.name}
+              </DropdownMenuItem>
+            ))}
+          </>
+        ) : null}
         {onCreateWorkspace || createWorkspaceHref ? (
           <DropdownMenuItem onClick={handleCreateWorkspace}>
             Create workspace

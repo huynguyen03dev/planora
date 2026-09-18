@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { requestPasswordReset } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,6 @@ import {
   CardDescription,
   CardFooter,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 
 export function ForgotPasswordForm() {
@@ -44,12 +43,28 @@ export function ForgotPasswordForm() {
     }
   }
 
+  // Success swaps the whole form for a success card. Move focus to the new
+  // heading (view-swap pattern, tabIndex=-1) so AT announce the changed state;
+  // the user just submitted, so this is not a focus steal.
+  const sentHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  useEffect(() => {
+    if (sent) {
+      sentHeadingRef.current?.focus();
+    }
+  }, [sent]);
+
   if (sent) {
     return (
       <div className="flex flex-1 items-center justify-center px-4">
         <Card className="w-full max-w-sm">
           <CardHeader>
-            <CardTitle className="text-2xl">Check your email</CardTitle>
+            <h1
+              ref={sentHeadingRef}
+              tabIndex={-1}
+              className="text-2xl leading-normal font-medium outline-none"
+            >
+              Check your email
+            </h1>
             <CardDescription>
               If an account exists for that email, we&apos;ve sent a password
               reset link.
@@ -87,7 +102,8 @@ export function ForgotPasswordForm() {
     <div className="flex flex-1 items-center justify-center px-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-2xl">Forgot password?</CardTitle>
+          {/* Real page-level heading (CardTitle is a div). */}
+          <h1 className="text-2xl leading-normal font-medium">Forgot password?</h1>
           <CardDescription>
             Enter your email and we&apos;ll send you a reset link.
           </CardDescription>

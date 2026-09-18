@@ -7,11 +7,7 @@ import "server-only";
  * making them deterministic and unit-testable.
  */
 
-// ─── Milestone types ─────────────────────────────────────────────────────────
-
 export type Milestone = "DUE_SOON" | "OVERDUE";
-
-// ─── Card shape needed for reminder selection ────────────────────────────────
 
 export interface ReminderCard {
   id: string;
@@ -24,8 +20,6 @@ export interface ReminderCard {
   boardId?: string;
   members: { userId: string }[];
 }
-
-// ─── Pure milestone selection ────────────────────────────────────────────────
 
 /**
  * Returns the milestones that are active for a card at the given `now`.
@@ -58,8 +52,6 @@ export function getActiveMilestones(
   return active;
 }
 
-// ─── Recipient resolution ────────────────────────────────────────────────────
-
 /**
  * Returns the set of user IDs that should receive a reminder for this card:
  * card members (from CardMember) + card creator, deduplicated.
@@ -73,8 +65,6 @@ export function resolveRecipients(card: ReminderCard): string[] {
   }
   return Array.from(ids);
 }
-
-// ─── Query builder for the SELECT predicate ──────────────────────────────────
 
 /**
  * Returns the Prisma `where` clause to select candidate cards for a reminder

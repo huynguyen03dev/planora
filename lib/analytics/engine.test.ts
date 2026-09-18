@@ -21,7 +21,7 @@ vi.mock("@/lib/prisma", () => ({
   db: mockDb,
 }));
 
-import { getWorkspaceAnalytics } from "./engine";
+import { getLeadTimeRows, getWorkspaceAnalytics } from "./engine";
 
 type TestHistoryEvent = {
   sequence: bigint;
@@ -424,6 +424,220 @@ describe("getWorkspaceAnalytics", () => {
     // Strictly sorted by completedAt descending.
     const times = analytics.leadTime.rows.map((row) => row.completedAt.getTime());
     expect(times).toEqual([...times].sort((a, b) => b - a));
+  });
+});
+
+describe("lead-time rows pagination (offset/limit/hasMore)", () => {
+  // N cards, completedAt increasing with index, so the completedAt-descending
+  // order is card-(N-1) .. card-0 (mirrors the MJ2 fixture shape).
+  function seedCompletedCards(total: number) {
+    const createdEvents: TestHistoryEvent[] = [];
+    const completedEvents: TestHistoryEvent[] = [];
+    const titles: Record<string, string> = {};
+    const completedBaseMs = Date.parse("2026-02-01T00:00:00.000Z");
+
+    for (let i = 0; i < total; i += 1) {
+      const id = `card-${String(i).padStart(3, "0")}`;
+      titles[id] = `Card ${i}`;
+      createdEvents.push(
+        historyEvent(
+          i + 1,
+          id,
+          $Enums.CardHistoryEventType.CARD_CREATED,
+          "2026-01-01T00:00:00.000Z",
+          {
+            listId: "todo",
+            listIsDone: false,
+            estimateHours: 1,
+            dueDate: null,
+            memberIds: ["user-1"],
+            archivedAt: null,
+            deletedAt: null,
+          },
+        ),
+      );
+      completedEvents.push(
+        historyEvent(
+          total + 1 + i,
+          id,
+          $Enums.CardHistoryEventType.CARD_COMPLETED,
+          new Date(completedBaseMs + i * 3_600_000).toISOString(),
+          {
+            listId: "done",
+            estimateHours: 1,
+            dueDate: null,
+            memberIds: ["user-1"],
+            firstCompletion: true,
+          },
+        ),
+      );
+    }
+
+    setMockCards(titles);
+    setMockHistory([...createdEvents, ...completedEvents]);
+  }
+
+  const RANGE = {
+    from: utcDate("2026-01-01T00:00:00.000Z"),
+    to: utcDate("2026-07-01T00:00:00.000Z"),
+  };
+
+  beforeEach(() => {
+    setMockWorkspace(utcDate("2025-12-01T00:00:00.000Z"));
+    setMockBoards(["board-1"]);
+  });
+
+  it("keeps the historical default: offset 0, limit 100, KPIs from ALL completions (backward compat)", async () => {
+    seedCompletedCards(120);
+
+    const analytics = await getWorkspaceAnalytics({
+      workspaceId: "workspace-1",
+      filters: RANGE,
+    });
+
+    expect(analytics.leadTime.rows).toHaveLength(100);
+    expect(analytics.leadTime.hasMore).toBe(true);
+    expect(analytics.leadTime.totalCompleted).toBe(120);
+    expect(analytics.leadTime.rows[0].cardId).toBe("card-119");
+    expect(analytics.leadTime.rows[99].cardId).toBe("card-020");
+    // The row window must not touch the KPI population: median is computed
+    // over all 120 lead times, not the 100 displayed rows.
+    expect(analytics.leadTime.median.current).toBe(803.5);
+  });
+
+  it("applies an offset/limit window over the completedAt-descending set", async () => {
+    seedCompletedCards(120);
+
+    const analytics = await getWorkspaceAnalytics({
+      workspaceId: "workspace-1",
+      filters: RANGE,
+      leadTimeRows: { offset: 40, limit: 40 },
+    });
+
+    const returnedIds = analytics.leadTime.rows.map((row) => row.cardId);
+    expect(returnedIds).toHaveLength(40);
+    expect(returnedIds[0]).toBe("card-079");
+    expect(returnedIds[39]).toBe("card-040");
+    expect(analytics.leadTime.hasMore).toBe(true);
+    expect(analytics.leadTime.totalCompleted).toBe(120);
+    // KPIs still cover every completion in range, not the window.
+    expect(analytics.leadTime.median.current).toBe(803.5);
+  });
+
+  it("hasMore flips exactly at the window boundary", async () => {
+    seedCompletedCards(120);
+
+    const exactEnd = await getWorkspaceAnalytics({
+      workspaceId: "workspace-1",
+      filters: RANGE,
+      leadTimeRows: { offset: 80, limit: 40 },
+    });
+    expect(exactEnd.leadTime.rows).toHaveLength(40);
+    expect(exactEnd.leadTime.hasMore).toBe(false);
+
+    const oneShort = await getWorkspaceAnalytics({
+      workspaceId: "workspace-1",
+      filters: RANGE,
+      leadTimeRows: { offset: 80, limit: 39 },
+    });
+    expect(oneShort.leadTime.rows).toHaveLength(39);
+    expect(oneShort.leadTime.hasMore).toBe(true);
+    expect(oneShort.leadTime.rows[38].cardId).toBe("card-001");
+  });
+
+  it("window past the end yields an empty page with hasMore false", async () => {
+    seedCompletedCards(50);
+
+    const analytics = await getWorkspaceAnalytics({
+      workspaceId: "workspace-1",
+      filters: RANGE,
+      leadTimeRows: { offset: 100, limit: 100 },
+    });
+
+    expect(analytics.leadTime.rows).toHaveLength(0);
+    expect(analytics.leadTime.hasMore).toBe(false);
+    expect(analytics.leadTime.totalCompleted).toBe(50);
+  });
+
+  it("getLeadTimeRows serves the same window with window-independent totals", async () => {
+    seedCompletedCards(120);
+
+    const page = await getLeadTimeRows(
+      "workspace-1",
+      RANGE,
+      { offset: 100, limit: 100 },
+    );
+
+    const returnedIds = page.rows.map((row) => row.cardId);
+    expect(returnedIds).toHaveLength(20);
+    expect(returnedIds[0]).toBe("card-019");
+    expect(returnedIds[19]).toBe("card-000");
+    expect(page.hasMore).toBe(false);
+    expect(page.totalCompleted).toBe(120);
+    // Rows remain strictly sorted by completedAt descending.
+    const times = page.rows.map((row) => row.completedAt.getTime());
+    expect(times).toEqual([...times].sort((a, b) => b - a));
+  });
+
+  it("getLeadTimeRows honors memberId like the dashboard filters", async () => {
+    // card-000 is completed by user-2 only; every other card by user-1.
+    const createdEvents: TestHistoryEvent[] = [];
+    const completedEvents: TestHistoryEvent[] = [];
+    const titles: Record<string, string> = { "card-000": "A", "card-001": "B" };
+    createdEvents.push(
+      historyEvent(1, "card-000", $Enums.CardHistoryEventType.CARD_CREATED, "2026-01-01T00:00:00.000Z", {
+        listId: "todo",
+        listIsDone: false,
+        estimateHours: 1,
+        dueDate: null,
+        memberIds: ["user-1", "user-2"],
+        archivedAt: null,
+        deletedAt: null,
+      }),
+    );
+    createdEvents.push(
+      historyEvent(2, "card-001", $Enums.CardHistoryEventType.CARD_CREATED, "2026-01-02T00:00:00.000Z", {
+        listId: "todo",
+        listIsDone: false,
+        estimateHours: 1,
+        dueDate: null,
+        memberIds: ["user-1"],
+        archivedAt: null,
+        deletedAt: null,
+      }),
+    );
+    completedEvents.push(
+      historyEvent(
+        3,
+        "card-000",
+        $Enums.CardHistoryEventType.CARD_COMPLETED,
+        "2026-02-01T00:00:00.000Z",
+        { listId: "done", estimateHours: 1, dueDate: null, memberIds: ["user-2"], firstCompletion: true },
+      ),
+    );
+    completedEvents.push(
+      historyEvent(
+        4,
+        "card-001",
+        $Enums.CardHistoryEventType.CARD_COMPLETED,
+        "2026-02-02T00:00:00.000Z",
+        { listId: "done", estimateHours: 1, dueDate: null, memberIds: ["user-1"], firstCompletion: true },
+      ),
+    );
+    setMockCards(titles);
+    setMockHistory([...createdEvents, ...completedEvents]);
+
+    const all = await getLeadTimeRows("workspace-1", RANGE, {});
+    expect(all.totalCompleted).toBe(2);
+    expect(all.rows.map((row) => row.cardId)).toEqual(["card-001", "card-000"]);
+
+    const memberOnly = await getLeadTimeRows(
+      "workspace-1",
+      { ...RANGE, memberId: "user-1" },
+      {},
+    );
+    expect(memberOnly.totalCompleted).toBe(1);
+    expect(memberOnly.rows.map((row) => row.cardId)).toEqual(["card-001"]);
   });
 });
 

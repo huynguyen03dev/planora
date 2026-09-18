@@ -22,7 +22,7 @@ Adopt **Option B (best-effort continuation)** with a **two-class error taxonomy*
 
 2. **Unexpected / systemic errors (non-`RuleExecutionError`) — ABORT (current behavior retained).** These propagate, abort the shared tx, and are logged post-rollback via the existing `logRuleExecutionError` path. Rationale: an unexpected error mid-write may poison the interactive tx (further ops / commit would fail), so catch-and-continue is unsafe; abort is the conservative default for a data-integrity application. These are rare and out of US-075's stale-target scope (AC1).
 
-Structured stale-target codes: `TARGET_LIST_NOT_FOUND`, `TARGET_LIST_ARCHIVED`, `TARGET_LIST_FOREIGN_WORKSPACE`, `MEMBER_NOT_IN_WORKSPACE`, `LABEL_NOT_FOUND`.
+Structured stale-target codes: `TARGET_LIST_NOT_FOUND`, `TARGET_LIST_ARCHIVED`, `TARGET_LIST_FOREIGN_WORKSPACE`, `TARGET_LIST_CROSS_BOARD` (same-board invariant: the target list is in the workspace but on a different board than the card), `MEMBER_NOT_IN_WORKSPACE`, `LABEL_NOT_FOUND`.
 
 ## Why not Option A (strict rule rollback)
 

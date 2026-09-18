@@ -2,9 +2,11 @@
 
 ## Status
 
-**planned — opened 2026-06-30.** Decomposes into child stories US-048–US-055
-(below). Each child re-enters `docs/FEATURE_INTAKE.md` on its own and gets its
-own lane at implementation time.
+**complete — closed 2026-08-04.** Definition of Done met: **US-048–US-052**
+shipped with manual-QA proof recorded in the story packets and
+`docs/TEST_MATRIX.md` (rows 53–57); **US-053–US-055** (cleanup/a11y nits)
+shipped, not deferred (rows 58–60). All eight children closed via PRs
+**#53–#60** (2026-06-30). No children remain.
 
 ## Type
 
@@ -102,16 +104,16 @@ Recorded so the next agent does not re-chase them:
 
 IDs are committed reservations. Each child carries its own lane + intake.
 
-| ID | Story | Lane (est.) | Cluster |
-| --- | --- | --- | --- |
-| US-048 | Depth by surface ladder, not drop shadow — base `card.tsx` `rounded-xl`+shadow → `rounded-lg`+`border-border`; strip resting shadows on card tiles / placeholder / board-card / inputs; drag affordance = soft shadow + slight scale; keep floating-layer shadows | normal | 1 |
-| US-049 | Tokenize chart colors (burndown → `--chart-1`; flow completed → `--success-foreground`, created → `--chart-2`) — **depends on US-050**: the `--chart-*` ramp is monochrome-blue, so completed reuses US-050's deep-green token | tiny | 2 |
-| US-050 | Define `--success` / `--warning` semantic token pairs (both themes, AA-noted) and sweep ad-hoc green/red/amber across KPI / lead-time / data-quality / deltas — **decision 0013** | normal | 2 |
-| US-051 | Tokenize label-chip colors to tint + deeper same-hue text (fixes `text-white` AA failure across 4 sites; 8 `BOARD_COLORS` hues × 2 themes = 32 measured pairs) — **decision 0014** | normal | 2 |
-| US-052 | Card-detail document structure pass — ~720px reading column, de-box sub-sections to hairline-divided stack, 32px padding, 16px / 1.55 body (follow-up to US-043) | normal | 3 |
-| US-053 | Remove decorative gradient + second chromatic accent in chrome (workspace badge `styles.ts`; review the card-cover scrim) | tiny | 2 |
-| US-054 | shadcn primitive conformance — button tonal hover (not opacity); radius-literal cleanup (`rounded-[4px]`/`rounded-[min()]` → tokens); arbitrary-px width sweep where a token fits | tiny | misc |
-| US-055 | Non-color signal for unread-notification state (pair the dot with a count/label) — WCAG 1.4.1 | tiny | a11y |
+| ID | Story | Lane (est.) | Cluster | Status |
+| --- | --- | --- | --- | --- |
+| US-048 | Depth by surface ladder, not drop shadow — base `card.tsx` `rounded-xl`+shadow → `rounded-lg`+`border-border`; strip resting shadows on card tiles / placeholder / board-card / inputs; drag affordance = soft shadow + slight scale; keep floating-layer shadows | normal | 1 | ✅ done — TEST_MATRIX row 53 (PR #53) |
+| US-049 | Tokenize chart colors (burndown → `--chart-1`; flow completed → `--success-foreground`, created → `--chart-2`) — **depends on US-050**: the `--chart-*` ramp is monochrome-blue, so completed reuses US-050's deep-green token | tiny | 2 | ✅ done — TEST_MATRIX row 55 (PR #55) |
+| US-050 | Define `--success` / `--warning` semantic token pairs (both themes, AA-noted) and sweep ad-hoc green/red/amber across KPI / lead-time / data-quality / deltas — **decision 0013** | normal | 2 | ✅ done — TEST_MATRIX row 54 (PR #54) |
+| US-051 | Tokenize label-chip colors to tint + deeper same-hue text (fixes `text-white` AA failure across 4 sites; 8 `BOARD_COLORS` hues × 2 themes = 32 measured pairs) — **decision 0014** | normal | 2 | ✅ done — TEST_MATRIX row 56 (PR #56) |
+| US-052 | Card-detail document structure pass — ~720px reading column, de-box sub-sections to hairline-divided stack, 32px padding, 16px / 1.55 body (follow-up to US-043) | normal | 3 | ✅ done — TEST_MATRIX row 57 (PR #57) |
+| US-053 | Remove decorative gradient + second chromatic accent in chrome (workspace badge `styles.ts`; review the card-cover scrim) | tiny | 2 | ✅ done — TEST_MATRIX row 58 (PR #58) |
+| US-054 | shadcn primitive conformance — button tonal hover (not opacity); radius-literal cleanup (`rounded-[4px]`/`rounded-[min()]` → tokens); arbitrary-px width sweep where a token fits | tiny | misc | ✅ done — TEST_MATRIX row 59 (PR #59) |
+| US-055 | Non-color signal for unread-notification state (pair the dot with a count/label) — WCAG 1.4.1 | tiny | a11y | ✅ done — TEST_MATRIX row 60 (PR #60) |
 
 `tabs.tsx` (spec defines `tab-default`/`tab-selected`, no primitive exists) is
 **backlogged**, not a story — nothing uses tabs yet; add it when a tabbed surface
@@ -177,3 +179,32 @@ needs it.
 Initiative-level proof is the union of its children's proofs. Source review:
 2026-06-30 audit of the codebase against `DESIGN.md` (three parallel
 file-by-file passes, findings verified by grep; false positives recorded above).
+
+## Closure (2026-08-04)
+
+DoD met. All eight children shipped 2026-06-30 with manual-QA proof in the
+story packets and `docs/TEST_MATRIX.md` rows 53–60 (merged via PRs #53–#60):
+
+- **US-048** (cluster 1) — depth by surface ladder + hairline, not drop shadow;
+  resting-surface shadows stripped (base `card.tsx`, tiles, placeholder,
+  board-card, inputs); floating layers keep their shadows.
+- **US-050 → US-049** (cluster 2, strict order) — `--success`/`--warning`
+  semantic token pairs (decision 0013) defined first, then chart series
+  tokenized (`--chart-2`, `--success-foreground`); ad-hoc green/red/amber
+  swept across all six analytics surfaces.
+- **US-051** (cluster 2) — label-chip tint + deeper same-hue text across the 8
+  `BOARD_COLORS` hues × 2 themes (32 measured AA pairs, decision 0014).
+- **US-052** (cluster 3) — card-detail document structure: ~720px reading
+  column, hairline-divided stack, 32px padding, 16px/1.55 body.
+- **US-053** (cluster 2) — chrome gradient/second chromatic accent removed
+  (workspace badge → `bg-secondary`; cover scrim kept with inline rationale).
+- **US-054** (misc) — primitive conformance: tonal hover (`--primary-hover`
+  token), radius-literal and arbitrary-px sweep to tokens.
+- **US-055** (a11y) — non-color unread signal (font-weight + sr-only prefix,
+  WCAG 1.4.1).
+
+**Residual (accepted, not debt):** proof is manual QA only — none of these
+presentational surfaces has automated coverage (the IN-01/IN-02 RTL residual
+stands; `docs/TEST_MATRIX.md` marks these rows closeout-only manual-QA
+records). `tabs.tsx` remains **backlogged** (no tabbed surface needs it yet),
+as noted in Workstreams. No child was cut or deferred.

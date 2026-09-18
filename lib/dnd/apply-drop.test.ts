@@ -4,6 +4,32 @@ import type { ListWithCards } from "@/app/(authenticated)/(dashboard)/boards/[bo
 
 import { translateCardDrop, translateListDrop } from "./apply-drop";
 
+function card(
+  id: string,
+  listId: string,
+  position: number,
+  moveRevision = 0,
+): ListWithCards["cards"][number] {
+  return {
+    id,
+    listId,
+    title: id,
+    position,
+    moveRevision,
+    coverImage: null,
+    priority: null,
+    dueDate: null,
+    completedAt: null,
+    updatedAt: new Date(0),
+    labels: [],
+    members: [],
+    memberCount: 0,
+    checklistDone: 0,
+    checklistTotal: 0,
+    commentCount: 0,
+  };
+}
+
 function makeLists(): ListWithCards[] {
   return [
     {
@@ -11,27 +37,23 @@ function makeLists(): ListWithCards[] {
       title: "To Do",
       boardId: "board-1",
       position: 16384,
-      cards: [
-        { id: "card-A", listId: "list-1", title: "A", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
-        { id: "card-B", listId: "list-1", title: "B", position: 32768, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
-        { id: "card-C", listId: "list-1", title: "C", position: 49152, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
-      ],
+      moveRevision: 0,
+      cards: [card("card-A", "list-1", 16384), card("card-B", "list-1", 32768), card("card-C", "list-1", 49152)],
     },
     {
       id: "list-2",
       title: "Doing",
       boardId: "board-1",
       position: 32768,
-      cards: [
-        { id: "card-D", listId: "list-2", title: "D", position: 16384, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
-        { id: "card-E", listId: "list-2", title: "E", position: 32768, coverImage: null, priority: null, dueDate: null, completedAt: null, updatedAt: new Date(0), labels: [], members: [], memberCount: 0, checklistDone: 0, checklistTotal: 0, commentCount: 0 },
-      ],
+      moveRevision: 0,
+      cards: [card("card-D", "list-2", 16384), card("card-E", "list-2", 32768)],
     },
     {
       id: "list-3",
       title: "Done",
       boardId: "board-1",
       position: 49152,
+      moveRevision: 0,
       cards: [],
     },
   ];
@@ -56,9 +78,16 @@ describe("translateCardDrop — same list", () => {
     expect(cardIds(result.nextLists, "list-1")).toEqual(["card-B", "card-C", "card-A"]);
     expect(result.fields).toEqual({
       cardId: "card-A",
+      intent: "end",
       prevCardId: "card-C",
       nextCardId: null,
+      expectedMoveRevision: 0,
     });
+    // Optimistic OCC bump (decision 0032): the moved card carries revision+1.
+    expect(
+      result.nextLists.find((list) => list.id === "list-1")!.cards.find((c) => c.id === "card-A")!
+        .moveRevision,
+    ).toBe(1);
   });
 
   it("moves a card up within its list", () => {
@@ -75,8 +104,10 @@ describe("translateCardDrop — same list", () => {
     expect(cardIds(result.nextLists, "list-1")).toEqual(["card-C", "card-A", "card-B"]);
     expect(result.fields).toEqual({
       cardId: "card-C",
+      intent: "start",
       prevCardId: null,
       nextCardId: "card-A",
+      expectedMoveRevision: 0,
     });
   });
 
@@ -95,8 +126,10 @@ describe("translateCardDrop — same list", () => {
     expect(cardIds(result.nextLists, "list-1")).toEqual(["card-B", "card-A", "card-C"]);
     expect(result.fields).toEqual({
       cardId: "card-A",
+      intent: "between",
       prevCardId: "card-B",
       nextCardId: "card-C",
+      expectedMoveRevision: 0,
     });
   });
 
@@ -129,12 +162,14 @@ describe("translateCardDrop — cross list", () => {
     expect(result.fields).toEqual({
       cardId: "card-A",
       targetListId: "list-2",
+      intent: "between",
       prevCardId: "card-D",
       nextCardId: "card-E",
+      expectedMoveRevision: 0,
     });
   });
 
-  it("moves a card into an empty list — both neighbors null", () => {
+  it("moves a card into an empty list — both neighbors null, start intent", () => {
     const lists = makeLists();
     const result = translateCardDrop(
       lists,
@@ -149,8 +184,10 @@ describe("translateCardDrop — cross list", () => {
     expect(result.fields).toEqual({
       cardId: "card-D",
       targetListId: "list-3",
+      intent: "start",
       prevCardId: null,
       nextCardId: null,
+      expectedMoveRevision: 0,
     });
     // moved card's listId is rewritten to the destination list
     const moved = result.nextLists
@@ -186,9 +223,13 @@ describe("translateListDrop", () => {
     expect(result.nextLists.map((list) => list.id)).toEqual(["list-2", "list-3", "list-1"]);
     expect(result.fields).toEqual({
       listId: "list-1",
+      intent: "end",
       prevListId: "list-3",
       nextListId: null,
+      expectedMoveRevision: 0,
     });
+    // Optimistic OCC bump (decision 0032): the moved list carries revision+1.
+    expect(result.nextLists.find((list) => list.id === "list-1")!.moveRevision).toBe(1);
   });
 
   it("reorders a list to the front", () => {
@@ -205,8 +246,10 @@ describe("translateListDrop", () => {
     expect(result.nextLists.map((list) => list.id)).toEqual(["list-3", "list-1", "list-2"]);
     expect(result.fields).toEqual({
       listId: "list-3",
+      intent: "start",
       prevListId: null,
       nextListId: "list-1",
+      expectedMoveRevision: 0,
     });
   });
 
@@ -273,10 +316,15 @@ describe("reference preservation", () => {
     // Mutated list: new reference (and a new cards array).
     expect(byId(result.nextLists, "list-1")).not.toBe(byId(lists, "list-1"));
     expect(byId(result.nextLists, "list-1").cards).not.toBe(byId(lists, "list-1").cards);
-    // Same-list move does not rewrite listId, so the moved card keeps its ref.
+    // decision 0032: the moved card is CLONED for the optimistic OCC bump
+    // (revision+1) — it is a new reference, unlike untouched cards.
     const movedBefore = byId(lists, "list-1").cards[0];
     const movedAfter = byId(result.nextLists, "list-1").cards.find((c) => c.id === "card-A")!;
-    expect(movedAfter).toBe(movedBefore);
+    expect(movedAfter).not.toBe(movedBefore);
+    expect(movedAfter.moveRevision).toBe(movedBefore.moveRevision + 1);
+    // The mover's siblings keep their references.
+    const cardBAfter = byId(result.nextLists, "list-1").cards.find((c) => c.id === "card-B")!;
+    expect(cardBAfter).toBe(byId(lists, "list-1").cards[1]);
   });
 
   it("cross-list move: only source and destination are new references", () => {
@@ -301,11 +349,12 @@ describe("reference preservation", () => {
     const cardDBefore = byId(lists, "list-2").cards.find((c) => c.id === "card-D")!;
     const cardDAfter = byId(result.nextLists, "list-2").cards.find((c) => c.id === "card-D")!;
     expect(cardDAfter).toBe(cardDBefore);
-    // The moved card is a new reference (listId rewritten to the destination).
+    // The moved card is a new reference (listId rewritten + OCC bump).
     const movedBefore = byId(lists, "list-1").cards.find((c) => c.id === "card-A")!;
     const movedAfter = byId(result.nextLists, "list-2").cards.find((c) => c.id === "card-A")!;
     expect(movedAfter).not.toBe(movedBefore);
     expect(movedAfter.listId).toBe("list-2");
+    expect(movedAfter.moveRevision).toBe(movedBefore.moveRevision + 1);
   });
 
   it("list reorder: list objects are preserved, only array order changes", () => {
@@ -318,8 +367,12 @@ describe("reference preservation", () => {
     );
     if (result.action !== "reorderList") throw new Error("expected reorderList");
 
-    // Reorder shuffles the array but reuses every list object reference.
-    expect(byId(result.nextLists, "list-1")).toBe(byId(lists, "list-1"));
+    // decision 0032: the moved list is CLONED with the optimistic revision bump;
+    // untouched lists keep their references.
+    expect(byId(result.nextLists, "list-1")).not.toBe(byId(lists, "list-1"));
+    expect(byId(result.nextLists, "list-1").moveRevision).toBe(
+      byId(lists, "list-1").moveRevision + 1,
+    );
     expect(byId(result.nextLists, "list-2")).toBe(byId(lists, "list-2"));
     expect(byId(result.nextLists, "list-3")).toBe(byId(lists, "list-3"));
     // The array itself is a new reference.

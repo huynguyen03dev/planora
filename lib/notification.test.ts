@@ -1,11 +1,11 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
-import { notifyMentioned, notifyDueDate } from "./notification";
+import { getNotificationsForUser, notifyMentioned, notifyDueDate } from "./notification";
 
 // Hoisted mocks — vi.mock factories are hoisted above imports so the data
 // must be created via vi.hoisted() to be available.
 const mockDb = vi.hoisted(() => ({
   workspaceMember: { findMany: vi.fn() },
-  notification: { create: vi.fn() },
+  notification: { create: vi.fn(), findMany: vi.fn() },
   user: { findUnique: vi.fn() },
 }));
 
@@ -342,5 +342,61 @@ describe("notifyDueDate", () => {
     mockDb.user.findUnique.mockResolvedValue(mockUser);
 
     await expect(notifyDueDate(defaultDueData)).rejects.toThrow("DB error");
+  });
+});
+
+describe("getNotificationsForUser (inbox cursor pagination)", () => {
+  beforeEach(() => {
+    mockDb.notification.findMany.mockReset();
+  });
+
+  it("defaults to the newest 50 with no cursor (legacy behavior)", async () => {
+    mockDb.notification.findMany.mockResolvedValue([]);
+
+    await getNotificationsForUser("user-1");
+
+    expect(mockDb.notification.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 50 }),
+    );
+    expect(mockDb.notification.findMany.mock.calls[0][0].cursor).toBeUndefined();
+    expect(mockDb.notification.findMany.mock.calls[0][0].skip).toBeUndefined();
+  });
+
+  it("honors a custom limit", async () => {
+    mockDb.notification.findMany.mockResolvedValue([]);
+
+    await getNotificationsForUser("user-1", { limit: 10 });
+
+    expect(mockDb.notification.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 10 }),
+    );
+  });
+
+  it("passes a cursor through with skip:1 so the cursor row is not repeated (pages are disjoint)", async () => {
+    mockDb.notification.findMany.mockResolvedValue([]);
+
+    await getNotificationsForUser("user-1", { cursor: "n-50", limit: 50 });
+
+    expect(mockDb.notification.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cursor: { id: "n-50" },
+        skip: 1,
+        // createdAt ties break by id so equal timestamps can't shift rows
+        // between pages (no duplicates / no skipped rows).
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      }),
+    );
+  });
+
+  it("returns the rows the query produces (newest first)", async () => {
+    const at = new Date("2026-07-06T00:00:00Z");
+    mockDb.notification.findMany.mockResolvedValue([
+      { id: "n-2", userId: "user-1", type: "ASSIGNED", title: "B", message: "m", linkUrl: null, isRead: false, createdAt: at, readAt: null },
+      { id: "n-1", userId: "user-1", type: "COMMENT", title: "A", message: "m", linkUrl: null, isRead: false, createdAt: at, readAt: null },
+    ]);
+
+    const rows = await getNotificationsForUser("user-1", { limit: 2 });
+
+    expect(rows.map((r) => r.id)).toEqual(["n-2", "n-1"]);
   });
 });

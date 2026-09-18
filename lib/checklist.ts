@@ -1,8 +1,7 @@
 import db from "./prisma";
 
-// Float-gap positioning, consistent with lists/cards (see lib/dnd/apply-drop.ts).
-// Slice 1 only appends (new items land at the end); reorder is a follow-up that
-// will reuse the same neighbour math.
+// Float-gap positioning, consistent with lists/cards (see lib/dnd/apply-drop.ts);
+// new items land at the end.
 const CHECKLIST_POSITION_GAP = 16384;
 
 export type ChecklistItemRecord = {

@@ -1,6 +1,6 @@
 # Overview — US-071 Forgot Password & Email Verification
 
-## Current Behavior
+## Baseline Behavior
 
 The public auth surface has two missing standard flows:
 
@@ -20,6 +20,11 @@ The public auth surface has two missing standard flows:
   page on the reset token → set new password via `resetPassword` → sign in.
 - **Email verification** — (decision 0023: enforce) `signed-up-unverified →
   verify-pending (resend) → verified → app`.
+- **Verification recovery hardening (decision 0033):** `/verify-email` is the
+  shared request/pending/token/success/expired hub; unverified sign-in enters
+  that flow without a destructive error; signup and reset-password require a
+  matching confirmation; resend feedback is truthful; and a safe auth return
+  path survives verification (including invitation onboarding).
 
 ## Affected Users
 
@@ -39,8 +44,9 @@ The public auth surface has two missing standard flows:
 - Structural polish → **US-072**.
 - SSO / OAuth / magic-link / passkeys (not in scope; would be their own story).
 - Changing the email transport/provider identity (US-026 owns sender identity).
+- Adding OAuth, passkeys, magic links, or a second verification mechanism.
 
-## Decision (resolved 2026-07-14)
+## Decision and implementation
 
 **Email verification posture: enforce.** See decision
 [0023](../../../../decisions/0023-enforce-email-verification.md) (supersedes the
@@ -49,5 +55,6 @@ email" state instead of dropping into `/boards`, with a resend affordance and a
 `/verify-email` route. Transport is **configured in this local checkout**
 (`RESEND_API_KEY` present in `.env`); the 0018 lockout risk reappears in any
 target env where the key is missing/invalid — a smoke check is required per
-target env. The remaining work is implementation + the US-009 E2E proof
-(unverified account cannot accept an invite).
+target env. The 2026-08-10 hardening pass implements decision 0033 and proves
+the invitation return path through real signup, Mailpit delivery, token
+verification, and the original invitation landing.

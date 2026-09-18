@@ -2,15 +2,11 @@
 /**
  * Perf-board seeder (local profiling only — NOT a migration, NOT a fixture).
  *
- * Builds one workspace + one board with a controlled list/card count so the
- * DnD INP-vs-board-size curve can be measured (US-027 need-assessment). Card
- * shape mirrors what the board actually renders (title only, no labels/cover/
- * priority) so the DOM weight per card matches the real cheap case — the
- * conservative direction for a "is this fast enough" check.
+ * Builds one workspace + board with a controlled list/card count for the DnD
+ * INP-vs-board-size curve (US-027). Card shape mirrors the real cheap case
+ * (title only) unless --rich, so DOM weight stays conservative.
  *
- * Usage:
- *   npx tsx --env-file=.env scripts/seed-perf-board.ts --email <user> --cards 90 [--lists 5] [--slug perf-90]
- *
+ * Usage: npx tsx --env-file=.env scripts/seed-perf-board.ts --email <user> --cards 90 [--lists 5] [--slug perf-90]
  * Idempotent per slug: re-running deletes and recreates the workspace.
  */
 import { randomUUID } from "node:crypto";

@@ -1,19 +1,6 @@
 /**
  * US-083 W7 — Global Quick Capture, end to end.
  *
- * STATUS: RUN GREEN (final, 2026-08-02). Full spec 5/5 passed on a fresh
- * shared-server run (`npm run test:e2e -- e2e/quick-capture.spec.ts` —
- * Playwright boots its own server on port 3000, single worker; port verified
- * free before/after). Two fixes landed in the spec + component before the
- * green run: (1) the global shortcut now exposes a hydration-readiness
- * marker (`data-shortcuts-ready` on the chrome button, owned by the
- * keydown-listener effect) that `openCapture` waits for before pressing C —
- * a fast navigation can no longer lose the first keydown during hydration;
- * (2) the focus-guard test follows the US-043 two-Escape semantics (the
- * first Escape reverts an unsaved title edit and keeps the sheet open; only
- * the second Escape closes it, releasing the input focus so the C guard
- * lifts). Run logs and RED/GREEN commands: US-083 validation.md W7 section.
- *
  * Coverage intent (maps to the locked contract):
  *  - `/today` invocation via the bare `C` shortcut, with the dialog opening
  *    immediately and defaulting to the deterministic first-creatable board /
@@ -98,8 +85,8 @@ function listSelect(page: Page) {
 
 async function openCapture(page: Page) {
   // The header button is server-rendered before the client shortcut listener
-  // attaches. Wait on the listener-owned readiness marker so a fast navigation
-  // cannot lose the first keydown during hydration.
+  // attaches; wait on the listener-owned readiness marker so a fast
+  // navigation cannot lose the first keydown during hydration.
   await expect(page.getByRole("button", { name: "Quick capture" })).toHaveAttribute(
     "data-shortcuts-ready",
     "true",
@@ -162,8 +149,7 @@ test("C from /today captures to the default board with optional fields and the d
   await expect(page).toHaveURL(new RegExp(`/boards/${boardId}\\?cardId=`));
   await expect(page.locator("#card-detail-title")).toHaveValue("Captured from today");
   // The optional fields persisted: priority in the detail sheet, due date
-  // present on the sheet's due control. (The button's accessible name is the
-  // "Due date" label + the aria-label text, so match the stable suffix.)
+  // on the due control (match the stable suffix of its accessible name).
   await expect(page.getByRole("combobox", { name: "Priority" })).toContainText("Urgent");
   await expect(page.getByRole("button", { name: /Change due date/ })).toBeVisible();
 });
@@ -178,9 +164,8 @@ test("the destination defaults to the last successful capture (saved-destination
   created.push({ workspaceId, emails: [owner.email] });
   const alphaId = await createBoard(page, "Alpha");
   await addList(page, "To Do");
-  // The second board is created from the boards home — the "Create board"
-  // button lives there, not on the board page (W6 today-spec precedent:
-  // navigate back before each board creation).
+  // Second board from the boards home — the "Create board" button lives
+  // there, not on a board page (W6 today-spec precedent).
   await page.goto(`/boards?workspace=${workspaceId}`);
   const betaId = await createBoard(page, "Beta");
   await addList(page, "To Do");
@@ -217,12 +202,10 @@ test("C never opens capture from a focused input; the route board is the default
   const workspaceId = await createWorkspace(page, "Acme");
   created.push({ workspaceId, emails: [owner.email] });
   // NON-VACUOUS route default: Alpha is created FIRST, so it is the
-  // deterministic first-creatable board from /today. The route board
-  // (Roadmap, created second) still wins on its own page — the route rule,
-  // not the first-creatable fallback, is what picks it.
+  // deterministic first-creatable board from /today; the route board
+  // (Roadmap, created second) still wins on its own page.
   await createBoard(page, "Alpha");
   await addList(page, "To Do");
-  // Boards are created from the boards home, never from a board page.
   await page.goto(`/boards?workspace=${workspaceId}`);
   const boardId = await createBoard(page, "Roadmap");
   await addList(page, "To Do");
@@ -230,8 +213,7 @@ test("C never opens capture from a focused input; the route board is the default
   await addCardToList(page, todo, "Guard target");
 
   // Route default: on the board page, C opens capture defaulted to THIS
-  // board — even though Alpha is the first-creatable board, the route rule
-  // is what picks Roadmap.
+  // board — the route rule, not the first-creatable fallback, picks Roadmap.
   await page.goto(`/boards/${boardId}`);
   await openCapture(page);
   await expect(boardSelect(page)).toHaveText("Roadmap");
@@ -246,9 +228,9 @@ test("C never opens capture from a focused input; the route board is the default
   await expect(quickCaptureDialog(page)).toHaveCount(0);
   await expect(titleInput).toHaveValue(/c$/);
 
-  // US-043: the first Escape reverts an unsaved title edit and intentionally
-  // keeps the sheet open. Once the draft is clean, the second Escape closes it;
-  // focus then leaves the input and the global C guard releases.
+  // US-043: the first Escape reverts an unsaved title edit and keeps the
+  // sheet open; the second Escape closes it, releasing input focus so the
+  // global C guard lifts.
   await page.keyboard.press("Escape");
   await expect(titleInput).toHaveValue("Guard target");
   await page.keyboard.press("Escape");
@@ -316,10 +298,10 @@ test("a capture from /today appears live on the observer's board (two-client, W1
   const tripwire = armProofTripwire(bobPage, `/boards/${boardId}`);
 
   // Presence barrier (W1 discipline): BOTH sides see two avatars — Bob's
-  // socket joined the board room BEFORE Alice acts. Alice first joins the
-  // board (so Bob's join is confirmed from the server's own broadcast),
-  // then moves to /today to capture — leaving the room is not a page
-  // lifecycle event on Bob's page (the tripwire stays clean).
+  // socket joined the board room BEFORE Alice acts. Alice joins the board
+  // first (so Bob's join is confirmed by the server's own broadcast), then
+  // moves to /today to capture — leaving the room is not a page lifecycle
+  // event on Bob's page (the tripwire stays clean).
   const resyncSettled = bobPage.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
@@ -343,7 +325,7 @@ test("a capture from /today appears live on the observer's board (two-client, W1
   await submitCapture(alicePage, "Live capture", { priority: "Urgent" });
 
   // Assert: Bob's ALREADY-LOADED board shows the card live — no reload, no
-  // reconnect, no route re-render POST in the window (tripwire clean). The
+  // reconnect, no route re-render POST in the window (tripwire clean); the
   // priority chip proves the W7 dueDate/priority payload fidelity.
   await expect(cardInListById(bobPage, todo, "Live capture")).toBeVisible();
   await expect(bobPage.getByText("Urgent", { exact: true })).toBeVisible();
@@ -358,10 +340,9 @@ test("Cmd/Ctrl+K opens the dialog (browser-chrome reservation caveat)", async ({
 
   await page.goto("/today");
   // Lowercase "k": Playwright's press("Control+K") synthesizes key "K"
-  // (the shifted character, with NO shiftKey flag), which the product
-  // predicate intentionally does not match — a REAL keyboard delivers
-  // key "k" for Ctrl+K (and "K" WITH shiftKey for Shift+Ctrl+K, excluded).
-  // Probe-verified 2026-08-02: Control+K → no dialog, Control+k → opens.
+  // (the shifted character, no shiftKey flag), which the product predicate
+  // intentionally does not match — a REAL keyboard delivers key "k" for
+  // Ctrl+K (and "K" with shiftKey for Shift+Ctrl+K, excluded).
   await page.keyboard.press("Control+k");
   await expect(quickCaptureDialog(page)).toBeVisible();
 });

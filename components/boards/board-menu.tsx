@@ -37,13 +37,13 @@ export function BoardMenu({ board, canEdit, canDelete }: BoardMenuProps) {
           <Button
             variant="outline"
             size="icon-sm"
-            className="rounded-full border-white/40 bg-white/15 text-white hover:bg-white/25"
+            className="border-white/40 bg-white/15 text-white hover:bg-white/25"
             aria-label="Board menu"
           >
             ...
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" sideOffset={8} className="w-72 rounded-xl border-border/80 p-2">
+        <DropdownMenuContent align="end" sideOffset={8} className="w-72 rounded-lg border-border/80 p-2">
           <div className="px-2 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Board Actions
           </div>

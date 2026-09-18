@@ -42,6 +42,62 @@ export type TodaySectionGroup = {
   cards: TodayCard[];
 };
 
+/**
+ * Explicit pagination page size for `/today` (US-083 follow-up). No silent cap:
+ * the initial render + every infinite-scroll batch fetch this many rows with
+ * `hasMore` reported exactly (limit+1 probe), so the whole personal read model
+ * stays reachable. Client-safe (no server-only import) so the RSC seam and the
+ * client boundary share the same value.
+ */
+export const TODAY_PAGE_SIZE = 30;
+
+/**
+ * The client-side cursor for the next `/today` page. The query layer sorts by
+ * `(dueDate asc nulls last, id asc)` and the cursor is the (dueDate, id) of the
+ * last loaded card in THAT order — a null dueDate is a real cursor position
+ * (the no-due "Later" group sorts last) and must not be confused with "no
+ * cursor".
+ */
+export type TodayCursor = { dueDate: string | null; id: string };
+
+/**
+ * Picks the card that sorts last under the server's (dueDate asc nulls last,
+ * id asc) order — the exact cursor position the next page must continue after.
+ * Works over any subset (displayed cards are always a deduped prefix of the
+ * server order, so the max IS the last loaded row). Completed cards are skipped
+ * defensively (the read model never returns them). Null when nothing is loaded.
+ */
+export function getTodayLoadMoreCursor(cards: TodayCard[]): TodayCursor | null {
+  let cursor: TodayCursor | null = null;
+  for (const card of cards) {
+    if (card.completedAt) {
+      continue;
+    }
+    if (cursor === null || todayCardSortsAfter(card, cursor)) {
+      cursor = { dueDate: card.dueDate, id: card.id };
+    }
+  }
+  return cursor;
+}
+
+/** True when `card` sorts after `cursor` in the server's (dueDate, id) order. */
+function todayCardSortsAfter(card: TodayCard, cursor: TodayCursor): boolean {
+  const cardTime = card.dueDate ? new Date(card.dueDate).getTime() : null;
+  const cursorTime = cursor.dueDate ? new Date(cursor.dueDate).getTime() : null;
+  // Nulls sort LAST: a no-due card is after any dated cursor; a dated card is
+  // never after a no-due cursor. Equal times break the tie by id.
+  if (cardTime === null && cursorTime !== null) {
+    return true;
+  }
+  if (cursorTime === null && cardTime !== null) {
+    return false;
+  }
+  if (cardTime !== null && cursorTime !== null && cardTime !== cursorTime) {
+    return cardTime > cursorTime;
+  }
+  return card.id > cursor.id;
+}
+
 const SECTION_TITLES: Record<TodaySectionKey, string> = {
   overdue: "Overdue",
   today: "Due Today",

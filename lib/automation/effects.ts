@@ -31,11 +31,46 @@ export async function fireDeferredEffects(effects: DeferredEffect[]): Promise<vo
     try {
       switch (effect.kind) {
         case "card-moved": {
-          emitCardMoved(effect.boardId, {
-            cardId: effect.cardId,
-            listId: effect.listId,
-            position: effect.position,
+          // decision 0032: re-read the card's COMMITTED state (list, position,
+          // moveRevision) — the rule cascade may have moved it again, and the
+          // echo must carry the canonical revision so receivers' OCC semantics
+          // stay coherent. The effect descriptor is only a trigger hint.
+          const card = await db.card.findUnique({
+            where: { id: effect.cardId },
+            select: {
+              listId: true,
+              position: true,
+              moveRevision: true,
+              title: true,
+              dueDate: true,
+              priority: true,
+              list: { select: { boardId: true } },
+            },
           });
+          if (card) {
+            const canonicalPayload = {
+              cardId: effect.cardId,
+              listId: card.listId,
+              position: card.position,
+              moveRevision: card.moveRevision,
+              ...(card.list?.boardId === effect.boardId
+                ? {
+                    card: {
+                      id: effect.cardId,
+                      listId: card.listId,
+                      title: card.title,
+                      position: card.position,
+                      moveRevision: card.moveRevision,
+                      dueDate: card.dueDate?.toISOString() ?? null,
+                      priority: card.priority,
+                    },
+                  }
+                : {}),
+            };
+            emitCardMoved(effect.boardId, {
+              ...canonicalPayload,
+            });
+          }
           break;
         }
         case "card-updated": {

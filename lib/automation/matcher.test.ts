@@ -5,8 +5,6 @@ import type { TriggerType } from "@/lib/schemas/automation";
 import { matchTrigger, evaluateConditions } from "./matcher";
 import type { RuleEventPayload } from "./types";
 
-// ─── matchTrigger ───────────────────────────────────────────────────
-
 describe("matchTrigger", () => {
   it("returns true for equal trigger types", () => {
     expect(matchTrigger("card-created", "card-created")).toBe(true);
@@ -22,8 +20,6 @@ describe("matchTrigger", () => {
     ).toBe(false);
   });
 });
-
-// ─── evaluateConditions ─────────────────────────────────────────────
 
 describe("evaluateConditions", () => {
   // Helper: a minimal payload with sensible defaults for most tests.
@@ -125,8 +121,6 @@ describe("evaluateConditions", () => {
       evaluateConditions(nonMove, { labelId: "label-1" }, noLabel),
     ).toBe(false);
   });
-
-  // ─── Move-specific: listId → listIdTo ─────────────────────────────
 
   describe("card-moved-to-list trigger", () => {
     const moveTrigger: TriggerType = "card-moved-to-list";

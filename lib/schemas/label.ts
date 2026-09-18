@@ -1,4 +1,3 @@
-// lib/schemas/label.ts
 import { z } from "zod";
 
 import { BOARD_COLORS } from "@/lib/constants";
@@ -21,14 +20,12 @@ const labelColorSchema = z
   .string({ message: "Label color is required" })
   .refine((value) => LABEL_COLOR_VALUES.includes(value), "Invalid label color");
 
-// Create a label on a board.
 export const createLabelSchema = z.object({
   boardId: z.string({ message: "Board ID is required" }).uuid("Invalid board ID"),
   name: labelNameSchema,
   color: labelColorSchema,
 });
 
-// Rename / recolor an existing label.
 export const updateLabelSchema = z.object({
   labelId: z.string({ message: "Label ID is required" }).uuid("Invalid label ID"),
   name: labelNameSchema,
@@ -40,13 +37,11 @@ export const deleteLabelSchema = z.object({
   labelId: z.string({ message: "Label ID is required" }).uuid("Invalid label ID"),
 });
 
-// Attach a label to a card.
 export const addCardLabelSchema = z.object({
   cardId: z.string({ message: "Card ID is required" }).uuid("Invalid card ID"),
   labelId: z.string({ message: "Label ID is required" }).uuid("Invalid label ID"),
 });
 
-// Detach a label from a card.
 export const removeCardLabelSchema = z.object({
   cardId: z.string({ message: "Card ID is required" }).uuid("Invalid card ID"),
   labelId: z.string({ message: "Label ID is required" }).uuid("Invalid label ID"),

@@ -70,6 +70,9 @@ export function AddListButton({ boardId, canCreate }: AddListButtonProps) {
   return (
     <form {...outsideProps} onSubmit={handleSubmit} className="flex w-[80vw] max-w-[20rem] shrink-0 flex-col gap-2 rounded-lg bg-muted p-3 sm:w-80 sm:max-w-none">
       <Input
+        aria-label="List title"
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? "add-list-error" : undefined}
         value={title}
         onChange={(event) => {
           setTitle(event.target.value);
@@ -86,7 +89,11 @@ export function AddListButton({ boardId, canCreate }: AddListButtonProps) {
         }}
       />
 
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {error ? (
+        <p id="add-list-error" role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      ) : null}
 
       <div className="flex gap-2">
         <Button type="submit" size="sm" disabled={isPending || !title.trim()}>

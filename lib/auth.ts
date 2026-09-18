@@ -7,6 +7,7 @@ import { sendEmail } from "@/lib/email";
 import { InviteEmail } from "@/emails/invite-email";
 import { ResetPasswordEmail } from "@/emails/reset-password-email";
 import { VerifyEmailEmail } from "@/emails/verify-email-email";
+import { safeInternalPath } from "@/lib/redirect";
 
 import db from "./prisma";
 import { ac, admin, editor, viewer } from "./permissions";
@@ -52,18 +53,22 @@ export const auth = betterAuth({
     },
   },
 
-  // Email verification config (US-071). `sendOnSignUp` defaults to following
-  // `requireEmailVerification` behavior when not set.
+  // Signup sends explicitly from the client after account creation so it can
+  // inspect the resend result and show truthful delivery feedback.
   emailVerification: {
-    sendVerificationEmail: async ({ user, token }) => {
-      const verifyLink = `${APP_URL}/verify-email?token=${token}`;
+    sendOnSignUp: false,
+    sendVerificationEmail: async ({ user, token, url }) => {
+      const generatedUrl = new URL(url);
+      const callbackURL = safeInternalPath(
+        generatedUrl.searchParams.get("callbackURL") ?? undefined,
+      );
+      const params = new URLSearchParams({ token, callbackURL });
+      const verifyLink = `${APP_URL}/verify-email?${params.toString()}`;
 
       await sendEmail({
         to: user.email,
         subject: "Verify your Planora email",
         react: VerifyEmailEmail({ verifyLink }),
-      }).catch((error) => {
-        console.error("[auth] Failed to send verification email:", error);
       });
     },
     autoSignInAfterVerification: true,

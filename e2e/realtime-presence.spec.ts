@@ -66,16 +66,13 @@ test("both users viewing one board each see two presence avatars, and one drops 
   const tag = `${Date.now()}-presence`;
   const { alicePage, bobPage, boardId } = await setUpTwoUserBoard(browser, tag);
 
-  // Alice opens the board first — she alone is viewing.
   await alicePage.goto(`/boards/${boardId}`);
   await expect(watcherAvatars(alicePage)).toHaveCount(1);
 
-  // Bob (a viewer) opens the same board. Now BOTH sides should show two avatars.
   await bobPage.goto(`/boards/${boardId}`);
   await expect(watcherAvatars(bobPage)).toHaveCount(2);
   await expect(watcherAvatars(alicePage)).toHaveCount(2);
 
-  // Bob leaves; Alice's presence drops back to just herself, live.
   await bobPage.close();
   await expect(watcherAvatars(alicePage)).toHaveCount(1);
 });

@@ -9,7 +9,7 @@ import { NotificationDropdown } from "@/components/notifications/notification-dr
 import { QuickCapture } from "@/components/quick-capture/quick-capture"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { UserButton } from "@/components/user-button"
+import { UserButton, type WorkspaceRef } from "@/components/user-button"
 import { computeInboxBadgeCount } from "@/lib/notifications/inbox"
 import { initSocket } from "@/lib/realtime/client"
 
@@ -18,11 +18,14 @@ import { getInboxBadgeCountsAction } from "@/app/(authenticated)/actions"
 type AuthenticatedHeaderActionsProps = {
   initialUnreadCount: number
   initialInvitationCount: number
+  /** Server-fetched workspace refs for the user-menu switcher (U10 round-2). */
+  initialWorkspaces?: WorkspaceRef[]
 }
 
 export function AuthenticatedHeaderActions({
   initialUnreadCount,
   initialInvitationCount,
+  initialWorkspaces = [],
 }: AuthenticatedHeaderActionsProps) {
   const router = useRouter()
   const pathname = usePathname()
@@ -115,7 +118,7 @@ export function AuthenticatedHeaderActions({
           />
         </PopoverContent>
       </Popover>
-      <UserButton onCreateWorkspace={openCreateWorkspace} />
+      <UserButton onCreateWorkspace={openCreateWorkspace} workspaces={initialWorkspaces} />
       <CreateWorkspaceModal open={searchParams.get("createWorkspace") === "1"} onClose={closeCreateWorkspace} />
     </div>
   )

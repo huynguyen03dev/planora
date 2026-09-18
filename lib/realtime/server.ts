@@ -1,6 +1,6 @@
 import { Server } from "socket.io";
 
-import type { CardLabelSnapshot, CardMemberSnapshot, CardSnapshot, InvitationNewPayload, ListSnapshot, NotificationNewPayload, ServerToClientEvents, ClientToServerEvents, Watcher } from "./types";
+import type { CardLabelSnapshot, CardMemberSnapshot, CardMetaFields, CardSnapshot, InvitationNewPayload, ListSnapshot, NotificationNewPayload, ServerToClientEvents, ClientToServerEvents, Watcher } from "./types";
 import { ROOMS } from "./events";
 
 declare global {
@@ -31,6 +31,8 @@ export function emitCardMoved(boardId: string, payload: {
   cardId: string;
   listId: string;
   position: number;
+  moveRevision?: number;
+  card?: CardSnapshot;
 }) {
   const io = getIO();
   if (!io) {
@@ -51,6 +53,7 @@ export function emitCardMoved(boardId: string, payload: {
 export function emitListMoved(boardId: string, payload: {
   listId: string;
   position: number;
+  moveRevision?: number;
 }) {
   const io = getIO();
   if (!io) {
@@ -268,6 +271,92 @@ export function emitCardMembersUpdated(boardId: string, payload: {
     });
   } catch (error) {
     console.error("[realtime] Failed to emit card:members-updated:", error);
+  }
+}
+
+// In-place / live (not structural): one or more card display fields (due date,
+// priority, estimate, cover) changed. Applied live like card:completion-updated
+// — it never reorders the list array. The payload carries a partial patch
+// ({ cardId, fields }) so receivers apply only what changed; boardId is filled
+// from the server-side post-authz DB result, never from the client.
+export function emitCardMetaUpdated(boardId: string, payload: {
+  cardId: string;
+  fields: CardMetaFields;
+}) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.board(boardId)).emit("card:meta-updated", {
+      boardId,
+      ...payload,
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit card:meta-updated:", error);
+  }
+}
+
+// A board was soft-archived (archivedAt set) while clients were viewing it
+// (F10). Broadcast to the board room so every open client leaves the room and
+// re-renders server-side (the page 404s naturally for an archived board).
+// Signal-only: archivedAt is informational, the DB stays the source of truth.
+export function emitBoardArchived(boardId: string, archivedAt: string) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.board(boardId)).emit("board:archived", {
+      boardId,
+      archivedAt,
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit board:archived:", error);
+  }
+}
+
+// A board was permanently deleted (F10). Broadcast to the board room so every
+// open client leaves the room and redirects to /boards.
+export function emitBoardDeleted(boardId: string) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.to(ROOMS.board(boardId)).emit("board:deleted", {
+      boardId,
+    });
+  } catch (error) {
+    console.error("[realtime] Failed to emit board:deleted:", error);
+  }
+}
+
+// Revocation (F2): force-disconnect every socket of a user whose workspace
+// membership was just removed or whose role was just demoted. The disconnect
+// drops them from every board room + presence entry (reverse-index cleanup in
+// server.ts), so no further board broadcasts reach a user who lost access and
+// no stale role badge survives. socket.io does not auto-reconnect on a
+// server-initiated disconnect; on next load the room-join gates re-run — denied
+// for removed users, re-joined under the new role for demoted ones. No-op
+// without IO.
+export function kickUserSockets(userId: string) {
+  const io = getIO();
+  if (!io) {
+    console.error("[realtime] IO not initialized");
+    return;
+  }
+
+  try {
+    io.in(ROOMS.user(userId)).disconnectSockets(true);
+  } catch (error) {
+    console.error("[realtime] Failed to disconnect sockets for user:", error);
   }
 }
 

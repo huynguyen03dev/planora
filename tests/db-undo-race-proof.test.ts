@@ -200,8 +200,8 @@ describe("US-083 W8 — restore-vs-archive interleaving proof (real Postgres)", 
       const { listId, cardId } = await seedBoard(admin);
 
       // The restore pre-read (getArchivedCardWithListAndBoard) passes here —
-      // the list is still active at that moment. Then the ARCHIVER wins the
-      // race and commits the list archival before the restore transaction runs.
+      // the list is still active at that moment. The ARCHIVER then wins the
+      // race and commits the list archival before the restore transaction.
       await admin.query("BEGIN");
       await admin.query(`UPDATE "list" SET "archivedAt" = CURRENT_TIMESTAMP WHERE id = $1`, [listId]);
       await admin.query("COMMIT");
@@ -210,7 +210,7 @@ describe("US-083 W8 — restore-vs-archive interleaving proof (real Postgres)", 
       try {
         const outcome = await runRestoreTransaction(restore, listId, cardId, WITH_GUARD);
 
-        // The guarded restore must NOT commit: the card stays archived (no
+        // Guarded: the restore must NOT commit — the card stays archived (no
         // invisible live card under an archived list).
         expect(outcome.committed).toBe(false);
         expect(await cardArchivedAt(restore, cardId)).not.toBeNull();
@@ -235,7 +235,7 @@ describe("US-083 W8 — restore-vs-archive interleaving proof (real Postgres)", 
         const outcome = await runRestoreTransaction(restore, listId, cardId, false);
 
         // Unguarded: the restore commits a LIVE card into the ARCHIVED list —
-        // precisely the invisible state the in-transaction guard must prevent.
+        // exactly the invisible state the in-transaction guard must prevent.
         expect(outcome.committed).toBe(true);
         expect(await cardArchivedAt(restore, cardId)).toBeNull();
         expect(await listArchivedAt(restore, listId)).not.toBeNull();
@@ -252,10 +252,10 @@ describe("US-083 W8 — restore-vs-archive interleaving proof (real Postgres)", 
       const restore = await connect();
       const archiver = await connect();
       try {
-        // Restore transaction: with the guard ON, acquire the FOR UPDATE lock
-        // and hold it (the guard-off sabotage removes this acquisition, so the
-        // archiver's UPDATE below succeeds immediately and the lock_timeout
-        // assertion fails — this test turns RED like test 1).
+        // With the guard ON, acquire the FOR UPDATE lock and hold it (the
+        // guard-off sabotage removes this acquisition, so the archiver's
+        // UPDATE succeeds immediately and the lock_timeout assertion fails —
+        // this test turns RED like test 1).
         await restore.query("BEGIN");
         if (WITH_GUARD) {
           const { rows } = await restore.query<{ id: string; archivedAt: Date | null }>(
@@ -266,7 +266,7 @@ describe("US-083 W8 — restore-vs-archive interleaving proof (real Postgres)", 
         }
 
         // Archiver attempts the list archival while the lock is held:
-        // deterministic lock_timeout failure (55P03) proves the lock blocks it.
+        // deterministic lock_timeout (55P03) proves the lock blocks it.
         await archiver.query(`SET lock_timeout = '300ms'`);
         await archiver.query("BEGIN");
         let lockTimeoutSeen = false;
@@ -280,9 +280,9 @@ describe("US-083 W8 — restore-vs-archive interleaving proof (real Postgres)", 
           expect(code).toBe("55P03");
           lockTimeoutSeen = true;
         }
-        // Guard ON: the lock must have blocked the archiver. Guard OFF: no
-        // lock exists, the UPDATE succeeds, and this assertion fails — the
-        // proof of lock presence is real, not call-shaped.
+        // Guard ON: the lock blocked the archiver. Guard OFF: no lock exists,
+        // the UPDATE succeeds, and this assertion fails — lock presence is
+        // proven behaviorally, not by call-shape.
         expect(lockTimeoutSeen).toBe(true);
         await archiver.query("ROLLBACK").catch(() => {});
 
@@ -295,9 +295,8 @@ describe("US-083 W8 — restore-vs-archive interleaving proof (real Postgres)", 
         await restore.query("COMMIT");
         expect(await cardArchivedAt(restore, cardId)).toBeNull();
 
-        // With the lock released (or, guard off, with the archiver already
-        // having archived), the archiver's final archive attempt succeeds —
-        // the archive-after-restore state is created by the ARCHIVE, the
+        // With the lock released, the archiver's final archive attempt
+        // succeeds — archive-after-restore is created by the ARCHIVE, the
         // legitimate path (US-074 Slice A keeps cards live under an archived
         // list; the restore transaction never created that state).
         await archiver.query(`SET lock_timeout = 0`);

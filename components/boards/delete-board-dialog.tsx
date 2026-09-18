@@ -88,7 +88,7 @@ export function DeleteBoardDialog({
             Cancel
           </AlertDialogCancel>
           <AlertDialogAction
-            className={buttonVariants({ variant: "destructive" })}
+            className="bg-destructive text-white hover:bg-destructive/90"
             onClick={(event) => {
               event.preventDefault();
               handleDelete();
@@ -101,7 +101,11 @@ export function DeleteBoardDialog({
       </AlertDialogContent>
 
       {toastMessage ? (
-        <div className="fixed right-4 top-4 z-[60] rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive shadow-md">
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="fixed right-4 bottom-4 z-[60] rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive shadow-lg"
+        >
           {toastMessage}
         </div>
       ) : null}
