@@ -210,6 +210,25 @@ export async function isWorkspaceMember(
   return rows.length > 0;
 }
 
+export async function getWorkspaceMemberRole(
+  organizationId: string,
+  userId: string,
+): Promise<string | null> {
+  const { rows } = await pool().query<{ role: string }>(
+    `SELECT role FROM "workspaceMember" WHERE "organizationId" = $1 AND "userId" = $2 LIMIT 1`,
+    [organizationId, userId],
+  );
+  return rows[0]?.role ?? null;
+}
+
+export async function getAttachmentPublicIds(cardId: string): Promise<string[]> {
+  const { rows } = await pool().query<{ cloudinaryPublicId: string | null }>(
+    `SELECT "cloudinaryPublicId" FROM "attachment" WHERE "cardId" = $1`,
+    [cardId],
+  );
+  return rows.flatMap((row) => (row.cloudinaryPublicId ? [row.cloudinaryPublicId] : []));
+}
+
 /**
  * The stored email of a user. Records Better Auth's actual email-casing/
  * storage behavior for the W2 invitee-resolution contract (verified at

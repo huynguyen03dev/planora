@@ -7,6 +7,12 @@ import { initIO, emitBoardPresence } from "@/lib/realtime/server";
 import { authenticateSocket, canUserJoinWorkspace, getBoardMembershipRole, getUserProfile } from "@/lib/realtime/auth";
 import { ROOMS } from "@/lib/realtime/events";
 import { presenceRegistry } from "@/lib/realtime/presence";
+import {
+  claimDistributedWindow,
+  closeRealtimeScaleClients,
+  configureRealtimeAdapter,
+  sharedPresenceStore,
+} from "@/lib/realtime/scale";
 import type { UserProfile, Watcher } from "@/lib/realtime/types";
 
 type SocketData = { userId: string; profile?: UserProfile | null };
@@ -18,7 +24,7 @@ const port = parseInt(process.env.PORT || "3000", 10);
 const app = next({ dev, hostname, port, dir: process.cwd() });
 const handle = app.getRequestHandler();
 
-app.prepare().then(() => {
+app.prepare().then(async () => {
   const server = createServer(async (req, res) => {
     try {
       const parsedUrl = parse(req.url!, true);
@@ -31,6 +37,10 @@ app.prepare().then(() => {
   });
 
   const io = initIO(server);
+  const scaledRealtime = await configureRealtimeAdapter(io);
+  if (scaledRealtime) {
+    console.log("[realtime] Redis adapter + shared presence enabled");
+  }
 
   io.use(async (socket, next) => {
     const userId = await authenticateSocket({
@@ -97,17 +107,32 @@ app.prepare().then(() => {
 
       // Broadcast only on the user's first socket on the board; the joiner is
       // in the room the broadcast targets, so they receive the full list too.
-      if (presenceRegistry.add(boardId, socket.id, watcher)) {
+      if (scaledRealtime) {
+        await sharedPresenceStore.add(boardId, socket.id, watcher);
+
+        // The leave handler can run while the Redis write above is in flight.
+        // Re-check the synchronous intent marker after the await so a late
+        // join cannot recreate a ghost watcher after the leave completed.
+        if (!socket.connected || !wantedBoards.has(boardId)) {
+          await sharedPresenceStore.remove(boardId, socket.id);
+          return;
+        }
+
+        emitBoardPresence(boardId, await sharedPresenceStore.watchers(boardId));
+      } else if (presenceRegistry.add(boardId, socket.id, watcher)) {
         emitBoardPresence(boardId, presenceRegistry.watchers(boardId));
       }
     });
 
-    socket.on("board:leave", (payload) => {
+    socket.on("board:leave", async (payload) => {
       const { boardId } = payload;
       wantedBoards.delete(boardId);
       socket.leave(ROOMS.board(boardId));
 
-      if (presenceRegistry.remove(boardId, socket.id, userId)) {
+      if (scaledRealtime) {
+        await sharedPresenceStore.remove(boardId, socket.id);
+        emitBoardPresence(boardId, await sharedPresenceStore.watchers(boardId));
+      } else if (presenceRegistry.remove(boardId, socket.id, userId)) {
         emitBoardPresence(boardId, presenceRegistry.watchers(boardId));
       }
     });
@@ -141,10 +166,16 @@ app.prepare().then(() => {
       socket.leave(ROOMS.workspace(workspaceId));
     });
 
-    socket.on("disconnect", () => {
+    socket.on("disconnect", async () => {
       // Drop the socket from every board it viewed and refresh presence only
       // where the user actually left (last tab gone); uses the registry's
       // reverse index since `socket.rooms` is already cleared.
+      if (scaledRealtime) {
+        for (const boardId of await sharedPresenceStore.removeSocket(socket.id)) {
+          emitBoardPresence(boardId, await sharedPresenceStore.watchers(boardId));
+        }
+        return;
+      }
       for (const boardId of presenceRegistry.removeSocket(socket.id)) {
         emitBoardPresence(boardId, presenceRegistry.watchers(boardId));
       }
@@ -167,6 +198,10 @@ app.prepare().then(() => {
     const appUrl = process.env.CRON_SELF_URL ?? `http://127.0.0.1:${port}`;
 
     reminderInterval = setInterval(async () => {
+      if (!(await claimDistributedWindow("due-date-reminders", CRON_INTERVAL_MS - 5_000))) {
+        return;
+      }
+
       try {
         const response = await fetch(`${appUrl}/api/cron/due-date-reminders`, {
           method: "POST",
@@ -189,12 +224,13 @@ app.prepare().then(() => {
   }
 
   // Graceful shutdown (MEDIUM-2).
-  const shutdown = () => {
+  const shutdown = async () => {
     console.log("[server] Shutting down...");
     if (reminderInterval) {
       clearInterval(reminderInterval);
       reminderInterval = null;
     }
+    await closeRealtimeScaleClients();
     io.close();
     server.close(() => process.exit(0));
   };

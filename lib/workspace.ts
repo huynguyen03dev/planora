@@ -91,12 +91,19 @@ export async function listWorkspaceMembershipsByUserId(
     },
   });
 
-  memberships.sort(
+  // Be defensive about legacy/orphaned membership rows. The relation is
+  // required in the schema, but an interrupted organization delete or a
+  // pre-cascade database can still return a null related workspace at runtime.
+  const liveMemberships = memberships.filter(
+    (membership) => membership.workspace != null,
+  );
+
+  liveMemberships.sort(
     (a, b) =>
       a.workspace.createdAt.getTime() - b.workspace.createdAt.getTime(),
   );
 
-  return memberships.map((membership) => ({
+  return liveMemberships.map((membership) => ({
     workspaceId: membership.organizationId,
     role: membership.role,
     workspace: {
